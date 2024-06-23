@@ -6,13 +6,14 @@ chmod a+x ~/.yadm.tmp && \
 ~/.yadm.tmp clone --no-bootstrap https://github.com/no-simpler/reliquary.git && \
 ~/.yadm.tmp restore --staged $HOME && \
 ~/.yadm.tmp checkout -- $HOME && \
+~/.yadm.tmp bootstrap && \
 rm -f ~/.yadm.tmp
 ```
 
 ## Next steps
 
 - Restart shell.
-- Run `yadm decrypt`, then `yadm bootstrap`.
+- Run `yadm decrypt`, then `yadm bootstrap` again.
 - Look through `pb` output.
 
 ## Update
