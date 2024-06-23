@@ -1,5 +1,6 @@
 .config/arc/benefactor.md
 .config/brew/Brewfile@benefactor
+.config/brew/Brewfile@benefactor-light
 .config/brew/Brewfile@home
 .config/bt/*
 .config/git/config
