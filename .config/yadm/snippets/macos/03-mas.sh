@@ -17,6 +17,14 @@ if command -v mas &>/dev/null; then
     else
         echo "Intermission app is already installed."
     fi
+
+    # Install  'Ulysses' app from Mac App Store.
+    if ! [[ -d "/Applications/Ulysses.app" ]]; then
+        echo "Installing Ulysses app..."
+        mas install 1225570693
+    else
+        echo "Ulysses app is already installed."
+    fi
 else
     echo "Cannot install Mac App Store apps: mas command not found."
 fi
