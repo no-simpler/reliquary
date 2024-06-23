@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# Path to the actual yadm executable
+YADM_BIN=$(type -p yadm)
+
+# SSH URL of dotfiles repository
+REPO_URL_SSH=git@github.com:no-simpler/reliquary.git
+REPO_URL_HTTPS=https://github.com/no-simpler/reliquary.git
+
+# Function to get the sha256 of the yadm archive file and store it in a file
+store_sha256() {
+    ARCHIVE_FILE="$HOME/.local/share/yadm/archive"
+    SHA256_FILE="$HOME/.last_yadm_decrypted"
+
+    if [[ -f $ARCHIVE_FILE ]]; then
+        shasum -a 256 "$ARCHIVE_FILE" | awk '{print $1}' > "$SHA256_FILE"
+        echo "SHA256 of the yadm archive stored in $SHA256_FILE"
+    else
+        echo "Archive file not found. Skipping SHA256 storage."
+    fi
+}
+
+# Function to check YADM encrypted files
+check_yadm_encrypted_files() {
+    local BOLD="\033[1m"
+    local NORMAL="\033[0m"
+    local YELLOW="\033[33m"
+    local RED="\033[31m"
+    local last_decrypted_file="$HOME/.last_yadm_decrypted"
+    local yadm_archive="$HOME/.local/share/yadm/archive"
+
+    # Check if the .last_yadm_decrypted file exists
+    if [[ ! -f "$last_decrypted_file" ]]; then
+        echo -e "${BOLD}==>${NORMAL} ${BOLD}${YELLOW}File ${last_decrypted_file} not found. Consider running yadm decrypt or yadm encrypt.${NORMAL}"
+        return
+    fi
+
+    # Read the first line of the .last_yadm_decrypted file
+    local last_decrypted_sha
+    last_decrypted_sha=$(head -n 1 "$last_decrypted_file")
+
+    # Check if the first line looks like a SHA256 hash
+    if [[ ! "$last_decrypted_sha" =~ ^[a-fA-F0-9]{64}$ ]]; then
+        echo -e "${BOLD}==>${NORMAL} ${BOLD}${RED}Invalid SHA256 hash in ${last_decrypted_file}. Consider running yadm decrypt or yadm encrypt.${NORMAL}"
+        return
+    fi
+
+    # Check if the yadm archive file exists
+    if [[ ! -f "$yadm_archive" ]]; then
+        echo -e "${BOLD}==>${NORMAL} ${BOLD}${RED}File ${yadm_archive} not found. Consider running yadm decrypt or yadm encrypt.${NORMAL}"
+        return
+    fi
+
+    # Calculate the SHA256 of the yadm archive file using shasum
+    local current_archive_sha
+    current_archive_sha=$(shasum -a 256 "$yadm_archive" | awk '{ print $1 }')
+
+    # Compare the SHA256 hashes
+    if [[ "$last_decrypted_sha" != "$current_archive_sha" ]]; then
+        echo -e "${BOLD}==>${NORMAL} ${BOLD}${YELLOW}The SHA256 hash of ${yadm_archive} does not match the recorded SHA256 hash. Consider running yadm decrypt or yadm encrypt.${NORMAL}"
+    fi
+}
+
+# Function to set the yadm repo URL
+set_yadm_repo_url() {
+    local url="$1"
+    echo "Setting the yadm repo origin URL to: $url"
+    $YADM_BIN remote set-url origin "$url"
+}
+
+# Function to handle encrypt/decrypt operations
+handle_encrypt_decrypt() {
+    local command="$1"
+    $YADM_BIN "$command"
+    if [[ $? -eq 0 ]]; then
+        store_sha256
+    else
+        echo "Command ${command} failed. SHA256 not stored."
+    fi
+}
+
+# Function to update yadm repository
+update_yadm_repo() {
+    $YADM_BIN pull --ff-only
+    check_yadm_encrypted_files
+}
+
+# Main script logic
+case $1 in
+    own)
+        set_yadm_repo_url "$REPO_URL_SSH"
+        ;;
+    disown)
+        set_yadm_repo_url "$REPO_URL_HTTPS"
+        ;;
+    decrypt)
+        if [[ ! " ${@:2} " =~ " -l " ]]; then
+            handle_encrypt_decrypt "$1"
+        else
+            $YADM_BIN "$@"
+        fi
+        ;;
+    encrypt)
+        handle_encrypt_decrypt "$1"
+        ;;
+    check)
+        check_yadm_encrypted_files
+        ;;
+    update)
+        update_yadm_repo
+        ;;
+    *)
+        $YADM_BIN "$@"
+        check_yadm_encrypted_files
+        ;;
+esac

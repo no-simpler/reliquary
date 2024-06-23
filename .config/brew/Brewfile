@@ -1,0 +1,54 @@
+# Homebrew taps
+tap "homebrew/bundle"
+
+# Essential packages
+brew "git"
+brew "git-lfs"
+brew "yadm"
+brew "wget"
+brew "curl"
+brew "htop"
+brew "tree"
+brew "jq"
+brew "tmux"
+brew "zsh"
+brew "gpg"
+brew "vim"
+brew "mas"
+
+# Essential casks, in order of configuration
+cask "1password"
+cask "iterm2"
+cask "alfred"
+cask "bartender"
+cask "visual-studio-code"
+cask "sizeup"
+cask "soundsource"
+
+# Browsers & browsing-related
+cask "choosy"
+cask "raindropio"
+cask "arc"
+cask "brave-browser"
+cask "firefox"
+cask "google-chrome"
+cask "tor-browser"
+
+# Development
+cask "jetbrains-toolbox"
+cask "docker"
+cask "google-cloud-sdk"
+cask "postman"
+
+# Essential AI
+cask "chatgpt"
+
+# Fonts
+cask "font-fira-code"
+cask "font-iosevka"
+
+# Video
+cask "stolendata-mpv"
+
+# Drivers
+cask "logi-options-plus"

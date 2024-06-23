@@ -1,0 +1,98 @@
+#!/bin/bash
+
+# Check if the script is running on macOS
+if [[ "$(uname)" != "Darwin" ]]; then
+    echo "This script is designed to run on macOS. Exiting."
+    exit 1
+fi
+
+# Check if Homebrew is installed
+if ! command -v brew &>/dev/null; then
+    echo "Homebrew is not installed. Please install Homebrew first. Exiting."
+    exit 1
+fi
+
+# Function to display help
+show_help() {
+    echo "Usage: bbs [OPTIONS]"
+    echo
+    echo "A script to apply specialized Homebrew Brewfiles based on different scopes."
+    echo
+    echo "Options:"
+    echo "  -h, --help    Show this help message and exit"
+    exit 0
+}
+
+# Check for help flag
+if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    show_help
+fi
+
+# Define the directory containing the Brewfiles
+BREWFILES_DIR="$HOME/.config/brew"
+
+# ANSI escape codes for formatting
+BOLD="\033[1m"
+GREEN="\033[0;32m"
+RESET="\033[0m"
+
+# Function to list available scopes
+list_scopes() {
+    if [[ $1 == "repeated" ]]; then
+        echo
+    fi
+    echo -e "${BOLD}Available Brewfile scopes:${RESET}"
+    for i in "${!scopes[@]}"; do
+        echo -e "  $((i + 1)). ${GREEN}${scopes[i]}${RESET}"
+    done
+    echo "  q. Quit"
+}
+
+# Find Brewfile@* files and extract scopes that match the desired pattern
+scopes=()
+while IFS= read -r -d '' file; do
+    scope=$(basename "$file" | sed 's/Brewfile@//')
+    if [[ "$scope" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+        scopes+=("$scope")
+    fi
+done < <(find "$BREWFILES_DIR" -name 'Brewfile@*' -print0)
+
+# Check if there are any scopes found
+if [ ${#scopes[@]} -eq 0 ]; then
+    echo "No specialized Brewfiles found in $BREWFILES_DIR."
+    exit 1
+fi
+
+# Initial list of available scopes
+list_scopes
+
+while true; do
+    # Prompt user to select a scope
+    echo -n "Select a Brewfile scope to apply (1-${#scopes[@]} or q to quit): "
+    read -r choice
+
+    # Check if the user wants to quit
+    if [[ "$choice" == "q" ]]; then
+        echo
+        echo "Exiting."
+        exit 0
+    fi
+
+    # Validate user input
+    if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt ${#scopes[@]} ]; then
+        echo "Invalid choice. Please try again."
+        list_scopes "repeated"
+    else
+        # Get the selected scope
+        selected_scope="${scopes[choice - 1]}"
+
+        # Apply the selected Brewfile
+        selected_brewfile="$BREWFILES_DIR/Brewfile@$selected_scope"
+        echo
+        echo "Applying Brewfile@$selected_scope..."
+        brew bundle --file="$selected_brewfile"
+
+        # List available scopes again after applying the Brewfile
+        list_scopes "repeated"
+    fi
+done
