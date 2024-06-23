@@ -1,0 +1,109 @@
+#!/bin/bash
+
+# Define the array of personal bin directories
+BIN_DIRS=("$HOME/.pbin" "$HOME/.bin" "$HOME/bin")
+
+# Color definitions
+BOLD="\033[1m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+GRAY="\033[90m"
+NORMAL="\033[0m"
+
+# Initialize arrays to hold executables and non-executables
+executables=()
+non_executables=()
+
+# Get the path of this script
+this_script="$(realpath "$0")"
+
+# Check if yadm is available
+yadm_available=false
+yadm_files=()
+if command -v yadm &> /dev/null; then
+    yadm_available=true
+    yadm_files=$(yadm list)
+
+    encrypt_file="$HOME/.config/yadm/encrypt"
+    if [[ -f "$encrypt_file" ]]; then
+        yadm_files+=" $(cat "$encrypt_file")"
+    fi
+fi
+
+# Track if any notice or warning was printed before main output
+pre_output_printed=false
+
+# Loop through each directory
+for dir in "${BIN_DIRS[@]}"; do
+    if [[ ! -d "$dir" ]]; then
+        echo -e "${NORMAL}Notice: Directory $dir does not exist. Skipping.${NORMAL}"
+        pre_output_printed=true
+        continue
+    fi
+
+    # Check if directory is in $PATH
+    if [[ ":$PATH:" != *":$dir:"* ]]; then
+        echo -e "${YELLOW}Warning: Directory $dir is not in \$PATH.${NORMAL}"
+        pre_output_printed=true
+    fi
+
+    # Loop through each file in the directory
+    for file in "$dir"/*; do
+        # Handle case where there are no files in the directory
+        [[ -e "$file" ]] || continue
+
+        # Ignore the script itself
+        if [[ "$(realpath "$file")" == "$this_script" ]]; then
+            continue
+        fi
+        if [[ -f "$file" ]]; then
+            if [[ -x "$file" ]]; then
+                executables+=("$file")
+            else
+                non_executables+=("$file")
+            fi
+        fi
+    done
+done
+
+# Check if any files were found
+if [[ ${#executables[@]} -eq 0 && ${#non_executables[@]} -eq 0 ]]; then
+    echo -e "${YELLOW}Warning: No files found across all specified directories.${NORMAL}"
+    exit 1
+fi
+
+# Print warnings for non-executable files
+for non_executable in "${non_executables[@]}"; do
+    echo -e "${YELLOW}Warning: File $(basename "$non_executable") in directory $(dirname "$non_executable") is not executable.${NORMAL}"
+    pre_output_printed=true
+done
+
+# Print an empty line if any notice or warning was printed before the main output
+if $pre_output_printed; then
+    echo
+fi
+
+# Print the header if executables were found
+if [[ ${#executables[@]} -gt 0 ]]; then
+    echo -e "${BOLD}Found the following executables in personal bin(s):${NORMAL}"
+
+    # Enumerate and print each executable
+    for i in "${!executables[@]}"; do
+        filename=$(basename "${executables[$i]}")
+        filepath="${executables[$i]}"
+        relative_path="${filepath#$HOME/}"
+        if $yadm_available && echo "$yadm_files" | grep -q -E "(^|\s)$relative_path($|\s)"; then
+            echo -e "  $((i + 1)). ${GREEN}${BOLD}$filename${NORMAL}"
+        else
+            echo -e "  $((i + 1)). ${GRAY}$filename${NORMAL}"
+        fi
+    done
+
+    # Print the legend if any executables were printed
+    echo
+    echo -e "Legend:"
+    echo -e "  ${GREEN}${BOLD}xx${NORMAL} = managed by YADM"
+    echo -e "  ${GRAY}xx${NORMAL} = not managed by YADM"
+else
+    echo -e "${YELLOW}Warning: No executable files found in personal bin(s).${NORMAL}"
+fi

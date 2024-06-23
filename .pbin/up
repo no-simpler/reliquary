@@ -1,0 +1,128 @@
+#!/bin/bash
+
+# Define colors using escape sequences
+BOLD="\033[1m"
+GREEN="\033[32m"
+RESET="\033[0m"
+
+# Function to print bold green messages with a bold arrow
+print_msg() {
+    echo -e "${BOLD}==>${RESET} ${BOLD}${GREEN}$1${RESET}"
+}
+
+# Function to update Homebrew on macOS
+update_brew() {
+    print_msg "Updating Homebrew..."
+    brew update
+    brew upgrade
+    brew upgrade --cask
+    brew cleanup
+    brew doctor
+}
+
+# Function to update packages on Debian-based systems
+update_debian() {
+    print_msg "Updating Debian-based system..."
+    sudo apt update
+    sudo apt upgrade -y
+    sudo apt dist-upgrade -y
+    sudo apt autoremove -y
+}
+
+# Function to update packages on Red Hat-based systems
+update_redhat() {
+    print_msg "Updating Red Hat-based system..."
+    sudo dnf update -y
+    sudo dnf upgrade -y
+    sudo dnf autoremove -y
+}
+
+# Function to update packages on Arch-based systems
+update_arch() {
+    print_msg "Updating Arch-based system..."
+    sudo pacman -Syu --noconfirm
+    sudo pacman -Sc --noconfirm
+}
+
+# Function to update packages on SUSE-based systems
+update_suse() {
+    print_msg "Updating SUSE-based system..."
+    sudo zypper refresh
+    sudo zypper update -y
+    sudo zypper dist-upgrade -y
+    sudo zypper clean --all
+}
+
+# Function to update zinit and its plugins (if installed)
+update_zinit() {
+    if [[ $(command -v zsh) ]]; then
+        print_msg "Updating zinit and plugins..."
+
+        ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
+
+        if [[ -d "$ZINIT_HOME" ]]; then
+            zsh -c "source '$ZINIT_HOME/zinit.zsh'; zinit self-update; zinit update --all"
+        else
+            echo "zinit is not installed. Skipping zinit update."
+        fi
+    fi
+}
+
+# Function to update vim-plug plugins (if installed)
+update_vimplug() {
+    if [[ $(command -v vim) ]]; then
+        print_msg "Updating vim-plug plugins..."
+
+        if [[ -f "$HOME/.vim/autoload/plug.vim" ]]; then
+            $(command -v vim) +PlugUpdate +qall
+        else
+            echo "vim-plug is not installed. Skipping vim-plug update."
+        fi
+    fi
+}
+
+# Function to update gcloud components if gcloud is installed, initialized, and authenticated
+update_gcloud() {
+    if command -v gcloud &> /dev/null; then
+        if gcloud info --format='value(config.account)' &> /dev/null; then
+            print_msg "Updating gcloud components..."
+            gcloud components update --quiet
+        else
+            echo "gcloud is not authenticated. Skipping gcloud update."
+        fi
+    else
+        echo "gcloud is not installed. Skipping gcloud update."
+    fi
+}
+
+print_msg "Updating system..."
+
+# Detect the operating system and call the appropriate update function
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    update_brew
+elif [[ -f /etc/debian_version ]]; then
+    update_debian
+elif [[ -f /etc/redhat-release ]]; then
+    update_redhat
+elif [[ -f /etc/arch-release ]]; then
+    update_arch
+elif [[ -f /etc/SuSe-release ]]; then
+    update_suse
+else
+    echo "Unsupported OS. Exiting."
+    exit 1
+fi
+
+# Update zinit if it is installed and zsh is available
+update_zinit
+
+# Update vim-plug plugins if vim is installed and vim-plug is present
+update_vimplug
+
+# Check and update gcloud components if gcloud is installed, initialized, and authenticated
+update_gcloud
+
+# Update the timestamp in ~/.last_upped_at
+date +%s > ~/.last_upped_at
+
+print_msg "System update completed."

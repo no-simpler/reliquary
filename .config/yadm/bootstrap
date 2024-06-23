@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Function to source snippet files in sorted order
+source_snippets() {
+    local dir_name="$1"
+    local snippet_dir="$HOME/.config/yadm/snippets/$dir_name"
+
+    # Check if the directory exists
+    if [ -d "$snippet_dir" ]; then
+        # Loop through and source each .sh file in the directory in sorted order
+        for file in $(ls "$snippet_dir"/*.sh | sort); do
+            # Check if there are any .sh files
+            if [ -e "$file" ]; then
+                source "$file"
+            fi
+        done
+    fi
+}
+
+# Detect the operating system
+OS=$(uname -s)
+
+# Source utility snippets
+source_snippets util
+
+# Check the operating system and call the respective function
+case "$OS" in
+Darwin)
+    source_snippets macos
+    ;;
+Linux)
+    source_snippets linux
+    ;;
+*)
+    echo "Unsupported operating system: $OS"
+    exit 1
+    ;;
+esac
+
+source_snippets shared
+
+echo "Bootstrap script completed."

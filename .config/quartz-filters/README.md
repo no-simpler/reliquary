@@ -1,0 +1,1 @@
+Put the `*.qfilter` files into `/Library/PDF Services`.
