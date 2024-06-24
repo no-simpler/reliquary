@@ -27,12 +27,12 @@ cask "soundsource"
 
 # Browsers & browsing-related
 cask "choosy"
-cask "raindropio"
 cask "arc"
 cask "brave-browser"
 cask "firefox"
 cask "google-chrome"
 cask "tor-browser"
+cask "raindropio"
 
 # Development
 cask "jetbrains-toolbox"
