@@ -14,15 +14,9 @@ is_defaults_key_set_to_value() {
     [[ "$current_value" == "$value" ]]
 }
 
-# Function to print bold yellow text
-print_bold_yellow() {
-    local text=$1
-    echo -e "\033[1;33m$text\033[0m"
-}
-
 # Check if iTerm2 is installed
 if [ -d "$ITERM2_PATH" ]; then
-    echo "iTerm2 is installed."
+    print_bold -ad "Configuring iTerm2 app..."
 
     # Check if the plist file exists in the preferences directory
     if [ -f "$PLIST_FILE" ]; then
@@ -44,8 +38,8 @@ if [ -d "$ITERM2_PATH" ]; then
             defaults write com.googlecode.iterm2 LoadPrefsFromCustomFolder -bool true
         fi
     else
-        print_bold_yellow "Configuration file $PLIST_FILE not found. Skipping iTerm2 configuration."
+        print_warning -ad "Configuration file $PLIST_FILE not found. Skipping iTerm2 configuration."
     fi
 else
-    echo "iTerm2 app is not installed. Skipping iTerm2 configuration."
+    print_warning -ad "iTerm2 app is not installed. Skipping iTerm2 configuration."
 fi

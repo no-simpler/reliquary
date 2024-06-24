@@ -1,14 +1,16 @@
 #!/bin/bash
 
+print_bold -ad "Configuring quartz filters"
+
 SOURCE_DIR="$HOME/.config/quartz-filters"
 TARGET_DIR="/Library/PDF Services"
 
 # Ensure the target directory exists
 if [ ! -d "$TARGET_DIR" ]; then
-    echo "Target directory $TARGET_DIR does not exist. Creating it..."
+    print_bold "Target directory $TARGET_DIR does not exist. Creating it..."
     sudo mkdir -p "$TARGET_DIR"
     if [ $? -ne 0 ]; then
-        echo "Failed to create $TARGET_DIR"
+        print_error -ad "Failed to create $TARGET_DIR"
         exit 1
     fi
 fi
@@ -32,7 +34,7 @@ for FILE in "$SOURCE_DIR"/*.qfilter; do
             echo "$FILENAME already exists in $TARGET_DIR. Skipping."
         fi
     else
-        echo "No .qfilter files found in $SOURCE_DIR"
+        print_error -ad "No .qfilter files found in $SOURCE_DIR"
         exit 1
     fi
 done

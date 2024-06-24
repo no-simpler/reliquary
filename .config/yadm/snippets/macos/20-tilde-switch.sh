@@ -1,5 +1,7 @@
 #!/bin/bash
 
+print_bold -ad "Applying tilde-switch"
+
 # Create ~/.tilde-switch script if it does not already exist
 if [ ! -f "$HOME/.tilde-switch" ]; then
     echo "Creating $HOME/.tilde-switch script..."
