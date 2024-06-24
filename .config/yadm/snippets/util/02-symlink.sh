@@ -3,8 +3,6 @@
 create_symlink() {
     local source_file=$1
     local target_file=$2
-    local YELLOW='\033[1;33m'
-    local NC='\033[0m' # No Color
 
     # Check if the source file exists
     if [[ -f "$source_file" ]]; then
@@ -25,7 +23,7 @@ create_symlink() {
                 return 0
             fi
 
-            echo "Target file already exists: $target_file"
+            print_warning "Target file already exists: $target_file"
 
             # Prompt the user to overwrite the existing file
             read -p "Do you want to overwrite the existing file? (y/n) " -n 1 -r
@@ -35,7 +33,7 @@ create_symlink() {
                 ln -sf "$source_file" "$target_file"
                 echo "Linked $source_file to $target_file"
             else
-                echo "Skipped linking $source_file to $target_file"
+                print_warning "Skipped linking $source_file to $target_file"
             fi
         else
             # Create the symlink if the target file does not exist
@@ -43,6 +41,6 @@ create_symlink() {
             echo "Linked $source_file to $target_file"
         fi
     else
-        echo -e "${YELLOW}Source file $source_file does not exist. No action taken.${NC}"
+        print_warning "Source file $source_file does not exist. No action taken."
     fi
 }

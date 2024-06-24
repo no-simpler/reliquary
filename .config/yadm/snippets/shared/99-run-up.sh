@@ -1,5 +1,7 @@
 #!/bin/bash
 
+print_bold -ad "Running up"
+
 # Store location of up script
 UP_PATH="$HOME/.pbin/up"
 

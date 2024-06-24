@@ -3,8 +3,6 @@
 copy_file_if_different() {
     local source="$1"
     local target="$2"
-    local YELLOW='\033[1;33m'
-    local NC='\033[0m' # No Color
 
     # Check if source file exists
     if [ -e "$source" ]; then
@@ -18,7 +16,7 @@ copy_file_if_different() {
                     cp -f "$source" "$target"
                     echo "Copied $source to $target."
                 else
-                    echo "Skipped copying $source to $target."
+                    print_warning "Skipped copying $source to $target."
                 fi
             else
                 cp -f "$source" "$target"
@@ -28,6 +26,6 @@ copy_file_if_different() {
             echo "Target $target is already up-to-date."
         fi
     else
-        echo -e "${YELLOW}Source file $source does not exist. No action taken.${NC}"
+        print_warning "Source file $source does not exist. No action taken."
     fi
 }

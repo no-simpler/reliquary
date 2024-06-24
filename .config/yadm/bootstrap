@@ -20,23 +20,27 @@ source_snippets() {
 # Detect the operating system
 OS=$(uname -s)
 
-# Source utility snippets
+# Source lib and utility snippets
+source_snippets lib
 source_snippets util
 
 # Check the operating system and call the respective function
 case "$OS" in
 Darwin)
+    print_bold -ad "Configuring macOS"
     source_snippets macos
     ;;
 Linux)
+    print_bold -ad "Configuring Linux"
     source_snippets linux
     ;;
 *)
-    echo "Unsupported operating system: $OS"
+    print_error -ad "Unsupported operating system: $OS"
     exit 1
     ;;
 esac
 
+print_bold -ad "Applying shared configuration"
 source_snippets shared
 
-echo "Bootstrap script completed."
+print_info -ad "Bootstrap script completed."
