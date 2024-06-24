@@ -1,0 +1,203 @@
+#!/bin/bash
+
+# Constants
+BOLD="\033[1m"
+RESET="\033[0m"
+COLOR_PLAIN=""
+COLOR_NOTICE="\033[90m"
+COLOR_INFO="\033[36m"
+COLOR_SUCCESS="\033[32m"
+COLOR_WARNING="\033[33m"
+COLOR_ERROR="\033[31m"
+COLOR_FESTIVE="\033[95m"
+
+# Help function
+show_help() {
+    echo "Usage: pm [options] message"
+    echo "Options:"
+    echo -e "  -a, --animate   Display an animation before the message."
+    echo -e "  -d, --delay     Pause briefly after displaying the message."
+    echo "  -p, --plain     Display the message in plain formatting."
+    echo -e "  -n, --notice    Display the message as a ${COLOR_NOTICE}notice${RESET} type."
+    echo -e "  -i, --info      Display the message as an ${COLOR_INFO}info${RESET} type."
+    echo -e "  -s, --success   Display the message as a ${COLOR_SUCCESS}success${RESET} type."
+    echo -e "  -w, --warning   Display the message as a ${COLOR_WARNING}warning${RESET} type."
+    echo -e "  -e, --error     Display the message as an ${COLOR_ERROR}error${RESET} type."
+    echo -e "  -f, --festive   Display the message as a ${COLOR_FESTIVE}festive${RESET} type."
+    echo -e "  -b, --bold      Display the message in ${BOLD}bold${RESET}."
+    echo "  -h, --help      Display this help and exit."
+    echo
+    echo "Display a formatted message with optional animation."
+}
+
+# Variables for options
+delay=false
+animate=false
+bold=false
+type="plain"
+symbols1=("⠄" "⠔" "⠜" "⢜" "⢝" "⢟" "⢿" "⣿" "⡿" "⡾" "⠾" "⠶")
+symbols2=("⠈" "⡈" "⡊" "⡚" "⡺" "⡾" "⣾" "⣿" "⣾" "⢾" "⠾" "⠶")
+symbols3=("⠁" "⠅" "⢅" "⣅" "⣇" "⣗" "⣟" "⣿" "⣿" "⣷" "⣷" "⡷")
+animation_step=0.06
+freeze_delay=0.5
+
+# Parse command-line options
+while (( "$#" )); do
+    case "$1" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -a|--animate)
+            animate=true
+            shift
+            ;;
+        -d|--delay)
+            delay=true
+            shift
+            ;;
+        -p|--plain)
+            type="plain"
+            shift
+            ;;
+        -n|--notice)
+            type="notice"
+            shift
+            ;;
+        -i|--info)
+            type="info"
+            shift
+            ;;
+        -s|--success)
+            type="success"
+            shift
+            ;;
+        -w|--warning)
+            type="warning"
+            shift
+            ;;
+        -e|--error)
+            type="error"
+            shift
+            ;;
+        -f|--festive)
+            type="festive"
+            shift
+            ;;
+        -b|--bold)
+            bold=true
+            shift
+            ;;
+        -*)
+            # Process combined single-dash options
+            for (( i=1; i<${#1}; i++ )); do
+                opt="${1:i:1}"
+                case "$opt" in
+                    a)
+                        animate=true
+                        ;;
+                    d)
+                        delay=true
+                        ;;
+                    p)
+                        type="plain"
+                        ;;
+                    n)
+                        type="notice"
+                        ;;
+                    i)
+                        type="info"
+                        ;;
+                    s)
+                        type="success"
+                        ;;
+                    w)
+                        type="warning"
+                        ;;
+                    e)
+                        type="error"
+                        ;;
+                    f)
+                        type="festive"
+                        ;;
+                    b)
+                        bold=true
+                        ;;
+                    *)
+                        echo "Unknown option: -$opt"
+                        show_help
+                        exit 1
+                        ;;
+                esac
+            done
+            shift
+            ;;
+        *)
+            message="$*"
+            break
+            ;;
+    esac
+done
+
+# Display help if no message is provided
+if [ -z "$message" ]; then
+    show_help
+    exit 1
+fi
+
+# Display the message with the chosen options
+print_message() {
+    local color_code
+    case "$type" in
+        info)
+            color_code="$COLOR_INFO"
+            ;;
+        success)
+            color_code="$COLOR_SUCCESS"
+            ;;
+        warning)
+            color_code="$COLOR_WARNING"
+            ;;
+        error)
+            color_code="$COLOR_ERROR"
+            ;;
+        notice)
+            color_code="$COLOR_NOTICE"
+            ;;
+        festive)
+            color_code="$COLOR_FESTIVE"
+            ;;
+        plain)
+            color_code=""
+            ;;
+        *)
+            color_code="$COLOR_PLAIN"
+            ;;
+    esac
+
+    if $bold; then
+        color_code="${BOLD}${color_code}"
+    fi
+
+    if $animate; then
+        for ((j=11; j>=0; j--)); do
+            printf "\r${color_code}%s%s%s %s${RESET}" "${symbols1[j]}" "${symbols2[j]}" "${symbols3[j]}" "$message"
+            sleep "$animation_step"
+        done
+
+        for ((j=0; j<12; j++)); do
+            printf "\r${color_code}%s%s%s %s${RESET}" "${symbols1[j]}" "${symbols2[j]}" "${symbols3[j]}" "$message"
+            sleep "$animation_step"
+        done
+    fi
+
+    printf "\r${color_code}%s%s%s %s${RESET}" "${symbols1[11]}" "${symbols2[11]}" "${symbols3[11]}" "$message"
+
+    if $delay; then
+        sleep "$freeze_delay"
+    fi
+
+    printf "\n"
+}
+
+print_message
