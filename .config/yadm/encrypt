@@ -7,6 +7,7 @@
 .config/git/config@benefactor
 .config/iterm2/preferences/*
 .config/mm/env/.env.local@*
+.config/mm/vpn/*.ovpn
 .config/mpv/input.conf
 .config/phpstorm/*.xml
 .config/shell/50-benefactor.sh
