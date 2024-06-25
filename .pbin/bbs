@@ -57,6 +57,11 @@ while IFS= read -r -d '' file; do
     fi
 done < <(find "$BREWFILES_DIR" -name 'Brewfile@*' -print0)
 
+# Sort scopes alphanumerically
+IFS=$'\n' sorted_scopes=($(sort <<<"${scopes[*]}"))
+unset IFS
+scopes=("${sorted_scopes[@]}")
+
 # Check if there are any scopes found
 if [ ${#scopes[@]} -eq 0 ]; then
     echo "No specialized Brewfiles found in $BREWFILES_DIR."
