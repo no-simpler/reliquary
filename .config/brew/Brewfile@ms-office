@@ -1,0 +1,6 @@
+cask "microsoft-auto-update"
+cask "microsoft-outlook"
+cask "microsoft-teams"
+cask "microsoft-word"
+cask "microsoft-excel"
+cask "microsoft-powerpoint"
