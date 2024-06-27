@@ -8,6 +8,12 @@
 [[ -o interactive ]] || return
 
 ##
+## Disable keyboard input while runcoms are loaded
+##
+
+stty -icanon -echo
+
+##
 ## Set and export the name of the current shell
 ##
 
@@ -49,6 +55,12 @@ unset restore_nullglob
 
 [ -f ~/.post.zsh -a -r ~/.post.zsh ] && source ~/.post.zsh
 [ -f ~/.post.sh -a -r ~/.post.sh ] && source ~/.post.sh
+
+##
+## Re-enable keyboard input
+##
+
+stty icanon echo
 
 ##
 ## Graceful exit

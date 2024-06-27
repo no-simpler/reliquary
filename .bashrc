@@ -8,6 +8,12 @@
 [ -n "$PS1" ] || return
 
 ##
+## Disable keyboard input while runcoms are loaded
+##
+
+stty -icanon -echo
+
+##
 ## Set and export the name of the current shell
 ##
 
@@ -49,6 +55,12 @@ unset cmd restore_opts
 
 [ -f ~/.post.bash -a -r ~/.post.bash ] && source ~/.post.bash
 [ -f ~/.post.sh -a -r ~/.post.sh ] && source ~/.post.sh
+
+##
+## Re-enable keyboard input
+##
+
+stty icanon echo
 
 ##
 ## Graceful exit
