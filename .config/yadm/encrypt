@@ -13,4 +13,5 @@
 .config/shell/50-benefactor.sh
 .config/yadm/hooks/pre_commit
 .config/yadm/snippets/macos/10-bt.sh
+.pbin/dbee
 .pbin/mm
