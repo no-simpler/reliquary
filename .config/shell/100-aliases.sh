@@ -219,3 +219,9 @@ alias ywlf="yadm --no-pager log --format='%w(0,0,7)%C(auto)%h%Creset %<|(116,tru
 if [[ $D__SHELL == zsh ]]; then
     alias rzc='rm -f ~/.zcompdump* && source ~/.zshrc'
 fi
+
+##
+## tmux
+##
+
+alias tt='tca'
