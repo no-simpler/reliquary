@@ -10,16 +10,16 @@ source "${ZINIT_HOME}/zinit.zsh"
 
 if command -v zinit &>/dev/null; then
     # Add plugins
-    zinit light zsh-users/zsh-completions
     zinit light zsh-users/zsh-syntax-highlighting
+    zinit light zsh-users/zsh-completions
     zinit light zsh-users/zsh-autosuggestions
+    zinit light Aloxaf/fzf-tab
 
     # Load oh-my-zsh library scripts
     zinit snippet OMZL::clipboard.zsh
     zinit snippet OMZL::completion.zsh
     zinit snippet OMZL::directories.zsh
     zinit snippet OMZL::functions.zsh
-    zinit snippet OMZL::history.zsh
     zinit snippet OMZL::key-bindings.zsh
     zinit snippet OMZL::misc.zsh
     zinit snippet OMZL::spectrum.zsh

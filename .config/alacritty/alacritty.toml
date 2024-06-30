@@ -1,0 +1,22 @@
+[window]
+# dimensions = { columns = 120, lines = 40 }
+startup_mode = "maximized"
+decorations = "buttonless"
+padding = { x = 10, y = 30 }
+opacity = 0.85
+option_as_alt = "OnlyLeft"
+
+[font]
+normal = { family = "Iosevka Nerd Font", style = "Regular" }
+bold = { family = "Iosevka Nerd Font", style = "Bold" }
+italic = { family = "Iosevka Nerd Font", style = "Italic" }
+size = 17.0
+
+[keyboard]
+bindings = [
+    { key = "Left", mods = "Alt", chars = "\u001bB" },
+    { key = "Right", mods = "Alt", chars = "\u001bF" },
+    { key = "Left", mods = "Command", chars = "\u001bOH" },
+    { key = "Right", mods = "Command", chars = "\u001bOF" },
+    { key = "Back", mods = "Command", chars = "\u0015" },
+]
