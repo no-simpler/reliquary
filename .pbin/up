@@ -95,23 +95,15 @@ update_gcloud() {
     fi
 }
 
-# Update Starship prompt
-update_starship() {
-    if [[ -x ~/.pbin/starship ]]; then
-        print_msg "Starship prompt found, updating..."
-        curl -sS https://starship.rs/install.sh | sh -s -- --bin-dir ~/.pbin --yes
-    else
-        echo "Starship prompt not found. Skipping update."
-    fi
-}
+# Update tmux plugin manager (TPM)
+update_tpm() {
+    local tpm_path="$HOME/.tmux/plugins/tpm"
 
-# Update Oh-My-Posh prompt
-update_oh_my_posh() {
-    if [[ -x ~/.pbin/oh-my-posh ]]; then
-        print_msg "Oh-My-Posh prompt found, updating..."
-        curl -s https://ohmyposh.dev/install.sh | bash -s -- -d ~/.pbin
+    if [ -d "$tpm_path" ]; then
+        print_msg "Updating TPM..."
+        cd "$tpm_path" && git pull
     else
-        echo "Oh-My-Posh prompt not found. Skipping update."
+        echo "TPM is not installed. Skipping TPM update."
     fi
 }
 
@@ -142,9 +134,8 @@ update_vimplug
 # Update gcloud CLI tools
 update_gcloud
 
-# Update prompts
-update_starship
-update_oh_my_posh
+# Update tmux plugin manager (TPM)
+update_tpm
 
 # Update the timestamp in ~/.last_upped_at
 date +%s > ~/.last_upped_at

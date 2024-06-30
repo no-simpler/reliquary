@@ -11,6 +11,7 @@ brew "htop"
 brew "tree"
 brew "jq"
 brew "tmux"
+brew "fzf"
 brew "zsh"
 brew "gpg"
 brew "vim"
@@ -18,12 +19,17 @@ brew "mas"
 
 # Essential casks, in order of configuration
 cask "1password"
+cask "alacritty"
 cask "iterm2"
 cask "alfred"
 cask "bartender"
 cask "visual-studio-code"
 cask "sizeup"
 cask "soundsource"
+
+# Shell prompts
+brew "oh-my-posh"
+brew "starship"
 
 # Browsers & browsing-related
 cask "choosy"
