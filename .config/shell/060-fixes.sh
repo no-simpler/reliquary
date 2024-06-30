@@ -1,5 +1,3 @@
-# Universal shell bug fixes. Must use compatible syntax.
-
 ##
 ## Locale fix
 ##

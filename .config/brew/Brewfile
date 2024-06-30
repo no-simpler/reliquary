@@ -45,7 +45,9 @@ cask "chatgpt"
 
 # Fonts
 cask "font-fira-code"
+cask "font-fira-code-nerd-font"
 cask "font-iosevka"
+cask "font-iosevka-nerd-font"
 
 # Video
 cask "stolendata-mpv"

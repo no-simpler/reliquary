@@ -1,5 +1,3 @@
-# Universal shell utility functions. Must use compatible syntax.
-
 ##
 ## General purpose helper functions
 ##
