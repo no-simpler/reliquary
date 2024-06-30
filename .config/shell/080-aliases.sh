@@ -1,5 +1,3 @@
-# Universal shell utility aliases. Must use compatible syntax.
-
 ##
 ## Directories
 ##

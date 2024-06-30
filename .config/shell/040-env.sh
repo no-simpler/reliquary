@@ -1,5 +1,3 @@
-# Universal shell environment variables. Must use compatible syntax.
-
 ##
 ## $PATH: /usr/local/sbin
 ##

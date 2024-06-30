@@ -1,14 +1,7 @@
-# Bash shell configuration
-
 ##
-## General configuration
+## Prompt
 ##
 
-# Disable mail checks:
-shopt -u mailwarn
-unset MAILCHECK
-
-# Prompt
 set_prompt() {
     local last_command_status=$?
     local dir_name="${PWD##*/}"

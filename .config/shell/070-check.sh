@@ -1,5 +1,3 @@
-# Checks to run on every shell startup. Must use compatible syntax.
-
 ##
 ## Last upped at
 ##

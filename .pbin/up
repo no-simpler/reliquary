@@ -53,7 +53,7 @@ update_suse() {
     sudo zypper clean --all
 }
 
-# Function to update zinit and its plugins (if installed)
+# Update zinit & its plugins
 update_zinit() {
     if [[ $(command -v zsh) ]]; then
         print_msg "Updating zinit and plugins..."
@@ -68,7 +68,7 @@ update_zinit() {
     fi
 }
 
-# Function to update vim-plug plugins (if installed)
+# Update vim-plug plugins
 update_vimplug() {
     if [[ $(command -v vim) ]]; then
         print_msg "Updating vim-plug plugins..."
@@ -81,7 +81,7 @@ update_vimplug() {
     fi
 }
 
-# Function to update gcloud components if gcloud is installed, initialized, and authenticated
+# Update gcloud CLI tools
 update_gcloud() {
     if command -v gcloud &> /dev/null; then
         if gcloud info --format='value(config.account)' &> /dev/null; then
@@ -92,6 +92,26 @@ update_gcloud() {
         fi
     else
         echo "gcloud is not installed. Skipping gcloud update."
+    fi
+}
+
+# Update Starship prompt
+update_starship() {
+    if [[ -x ~/.pbin/starship ]]; then
+        print_msg "Starship prompt found, updating..."
+        curl -sS https://starship.rs/install.sh | sh -s -- --bin-dir ~/.pbin --yes
+    else
+        echo "Starship prompt not found. Skipping update."
+    fi
+}
+
+# Update Oh-My-Posh prompt
+update_oh_my_posh() {
+    if [[ -x ~/.pbin/oh-my-posh ]]; then
+        print_msg "Oh-My-Posh prompt found, updating..."
+        curl -s https://ohmyposh.dev/install.sh | bash -s -- -d ~/.pbin
+    else
+        echo "Oh-My-Posh prompt not found. Skipping update."
     fi
 }
 
@@ -113,14 +133,18 @@ else
     exit 1
 fi
 
-# Update zinit if it is installed and zsh is available
+# Update zinit & its plugins
 update_zinit
 
-# Update vim-plug plugins if vim is installed and vim-plug is present
+# Update vim-plug plugins
 update_vimplug
 
-# Check and update gcloud components if gcloud is installed, initialized, and authenticated
+# Update gcloud CLI tools
 update_gcloud
+
+# Update prompts
+update_starship
+update_oh_my_posh
 
 # Update the timestamp in ~/.last_upped_at
 date +%s > ~/.last_upped_at

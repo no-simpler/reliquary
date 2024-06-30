@@ -1,5 +1,3 @@
-# Defines color variables. Must use compatible syntax.
-
 ##
 ## Colors
 ##
