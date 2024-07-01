@@ -14,10 +14,7 @@ console_title_template = '{{ .Shell }} in {{ .Folder }}'
     style = 'plain'
     background = 'transparent'
     foreground = 'blue'
-    template = '{{ .Path }}'
-
-    [blocks.segments.properties]
-      style = 'full'
+    template = '<b>{{ if eq (.Env.PWD) (.Env.HOME) }}~{{ else }}{{ .Folder }}{{ end }}</b>'
 
   [[blocks.segments]]
     type = 'git'
@@ -30,6 +27,7 @@ console_title_template = '{{ .Shell }} in {{ .Folder }}'
       branch_icon = ''
       commit_icon = '@'
       fetch_status = true
+      ignore_submodules = { "*" = "all" }
 
 [[blocks]]
   type = 'rprompt'
