@@ -225,3 +225,9 @@ fi
 ##
 
 alias tt='tca'
+
+##
+## Test Vim
+##
+
+alias tvim='vim -u NONE -N'
