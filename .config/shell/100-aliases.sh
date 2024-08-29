@@ -193,7 +193,10 @@ alias df='df -kh'
 ##
 
 alias dcu='docker compose up -d'
+alias dcb='docker compose up -d --build --no-deps'
 alias dce='docker compose exec'
+alias dcd='docker compose down'
+alias dcl='docker compose logs -f'
 
 ##
 ## yadm
