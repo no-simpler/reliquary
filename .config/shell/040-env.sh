@@ -150,3 +150,11 @@ if [ -d "/opt/homebrew/anaconda3" ]; then
         unset __conda_setup
     fi
 fi
+
+##
+## rustup
+##
+
+if [ -d "/opt/homebrew/opt/rustup/bin" ]; then
+    export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
+fi
