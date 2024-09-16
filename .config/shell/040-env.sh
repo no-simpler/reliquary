@@ -158,3 +158,11 @@ fi
 if [ -d "/opt/homebrew/opt/rustup/bin" ]; then
     export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 fi
+
+##
+## Go
+##
+
+if [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+fi
