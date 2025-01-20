@@ -20,7 +20,8 @@ brew "mas"
 # Essential casks, in order of configuration
 cask "1password"
 cask "alacritty"
-cask "iterm2"
+cask "ghostty"
+#cask "iterm2" # superceded by Ghostty
 cask "alfred"
 cask "bartender"
 cask "visual-studio-code"
