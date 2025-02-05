@@ -106,6 +106,11 @@ alias gpt='git push --tags'
 alias gff='git merge --ff-only @{u}'
 alias glg='git log --all --decorate=full --show-signature'
 
+gbp() {
+    local branch="${1:-main}"
+    git branch --merged "$branch" | grep -v '^\*' | grep -v "^$branch$" | xargs -r git branch -d
+}
+
 # git-log (80-character-wide semi-oneliners)
 alias glfr="git --no-pager log --format='%w(0,0,7)%C(auto)%h%Creset %<|(56,trunc)%s %C(yellow)(%as)%Creset %C(blue)%<(10,trunc)%al%C(auto)%+d%Creset' --all --graph --abbrev=7 --decorate-refs-exclude='refs/tags/publish-*' --color=always"
 alias glr="glfr -10"
