@@ -7,3 +7,11 @@ background-opacity = 0.85
 
 # Handy “delete all” binding (works in zsh)
 keybind = cmd+backspace=esc:w
+
+# Start maximized
+maximize = true
+window-height = 1024
+window-width = 2048
+
+# Quick terminal
+keybind = global:cmd+grave_accent=toggle_quick_terminal
