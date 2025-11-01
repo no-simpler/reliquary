@@ -35,7 +35,8 @@ setopt hist_expire_dups_first   # delete duplicates first when HISTFILE size exc
 setopt hist_verify              # show command with history expansion to user before running it
 
 # Load completions
-autoload -U compinit && compinit
+FPATH="$HOME/.config/zsh/completion:$FPATH"
+autoload -Uz compinit && compinit
 
 # Replace tab completion with fzf
 zstyle ':completion:*' menu no

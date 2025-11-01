@@ -1,24 +1,41 @@
 # Homebrew taps
 tap "homebrew/bundle"
 
-# Essential packages
+# Version control
 brew "git"
 brew "git-lfs"
+brew "git-cliff"
+brew "gh"
 brew "yadm"
-brew "wget"
-brew "curl"
-brew "htop"
-brew "tree"
-brew "jq"
+
+# Shell
+brew "bash-completion"
+brew "zsh"
 brew "tmux"
 brew "fzf"
-brew "zsh"
-brew "gpg"
+
+# System
+brew "gnupg"
+brew "htop"
+brew "tree"
+
+# Network
+brew "wget"
+brew "curl"
+
+# Development
 brew "vim"
+brew "jq"
+brew "yq"
+brew "bat"
+brew "just"
+
+# macOS
 brew "mas"
 
 # Essential casks, in order of configuration
 cask "1password"
+cask "1password-cli"
 cask "ghostty"
 cask "raycast"
 cask "bartender"
@@ -28,7 +45,6 @@ cask "soundsource"
 
 # Shell prompts
 brew "oh-my-posh"
-brew "starship"
 
 # Browsers & browsing-related
 cask "choosy"
@@ -43,7 +59,7 @@ cask "raindropio"
 cask "jetbrains-toolbox"
 cask "docker"
 cask "google-cloud-sdk"
-cask "postman"
+cask "gcloud-cli"
 
 # Essential AI
 cask "chatgpt"
@@ -55,7 +71,7 @@ cask "font-iosevka"
 cask "font-iosevka-nerd-font"
 
 # Video
-cask "stolendata-mpv"
+cask "elmedia-player"
 
 # Drivers
 cask "logi-options-plus"
