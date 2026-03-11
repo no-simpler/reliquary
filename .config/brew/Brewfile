@@ -57,7 +57,6 @@ cask "raindropio"
 
 # Development
 cask "gcloud-cli"
-cask "google-cloud-sdk"
 cask "jetbrains-toolbox"
 cask "orbstack"
 
@@ -74,4 +73,4 @@ cask "font-iosevka-nerd-font"
 cask "elmedia-player"
 
 # Drivers
-cask "logi-options-plus"
+cask "logi-options+"
