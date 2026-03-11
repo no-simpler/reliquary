@@ -101,7 +101,7 @@ alias grc='git rm --cached -rf .'
 alias gs='git status'
 alias gu='git rm --cached -rf . &>/dev/null; git add --all; git status'
 alias gc='git commit'
-alias gp='git push'
+alias gp='git push origin -u HEAD'
 alias gpt='git push --tags'
 alias gff='git merge --ff-only @{u}'
 alias glg='git log --all --decorate=full --show-signature'
@@ -203,6 +203,13 @@ alias dce='docker compose exec'
 alias dcd='docker compose down'
 alias dcdd='docker compose down --volumes --rmi all --remove-orphans'
 alias dcl='docker compose logs -f'
+
+dcex() {
+    docker compose exec \
+        --env XDEBUG_TRIGGER=1 \
+        --env PHP_IDE_CONFIG="serverName=$(basename "$PWD")" \
+        "$@"
+}
 
 ##
 ## yadm
