@@ -56,10 +56,10 @@ cask "tor-browser"
 cask "raindropio"
 
 # Development
-cask "jetbrains-toolbox"
-cask "docker"
-cask "google-cloud-sdk"
 cask "gcloud-cli"
+cask "google-cloud-sdk"
+cask "jetbrains-toolbox"
+cask "orbstack"
 
 # Essential AI
 cask "chatgpt"
