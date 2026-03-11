@@ -1,5 +1,5 @@
 console_title_template = '{{ .Shell }} in {{ .Folder }}'
-version = 3
+version = 4
 final_space = true
 
 [secondary_prompt]
@@ -24,24 +24,12 @@ final_space = true
     type = 'path'
     style = 'plain'
 
-    [blocks.segments.properties]
-      cache_duration = 'none'
-
   [[blocks.segments]]
     template = ' {{ .HEAD }}{{ if or (.Working.Changed) (.Staging.Changed) }}*{{ end }} <cyan>{{ if gt .Behind 0 }}⇣{{ end }}{{ if gt .Ahead 0 }}⇡{{ end }}</>'
     foreground = 'p:grey'
     background = 'transparent'
     type = 'git'
     style = 'plain'
-
-    [blocks.segments.properties]
-      branch_icon = ''
-      cache_duration = 'none'
-      commit_icon = '@'
-      fetch_status = true
-
-      [blocks.segments.properties.ignore_submodules]
-        '*' = 'all'
 
 [[blocks]]
   type = 'rprompt'
@@ -54,10 +42,6 @@ final_space = true
     type = 'executiontime'
     style = 'plain'
 
-    [blocks.segments.properties]
-      cache_duration = 'none'
-      threshold = 5000
-
 [[blocks]]
   type = 'prompt'
   alignment = 'left'
@@ -69,6 +53,3 @@ final_space = true
     type = 'text'
     style = 'plain'
     foreground_templates = ['{{if gt .Code 0}}red{{end}}', '{{if eq .Code 0}}green{{end}}']
-
-    [blocks.segments.properties]
-      cache_duration = 'none'

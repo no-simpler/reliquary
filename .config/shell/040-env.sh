@@ -161,3 +161,17 @@ fi
 if [ -f "$HOME/.cargo/env" ]; then
     . "$HOME/.cargo/env"
 fi
+
+##
+## OrbStack
+##
+
+if [ -n "$D__SHELL" ]; then
+    ORBSTACK_INIT="$HOME/.orbstack/shell/init.$D__SHELL"
+
+    if [ -r "$ORBSTACK_INIT" ]; then
+        . "$ORBSTACK_INIT" 2>/dev/null
+    fi
+
+    unset ORBSTACK_INIT
+fi
