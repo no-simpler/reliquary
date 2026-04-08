@@ -93,8 +93,8 @@ esac
 ## $PATH aliases
 ##
 
-alias path='printf "%b\n" "${PATH//:/\\n}\n"'
-alias manpath='printf "%b\n" "${MANPATH//:/\\n}\n"'
+alias lpath='printf "%b\n" "${PATH//:/\\n}\n"'
+alias lmanpath='printf "%b\n" "${MANPATH//:/\\n}\n"'
 alias libpath='printf "%b\n" "${LD_LIBRARY_PATH//:/\\n}\n"'
 
 ##
