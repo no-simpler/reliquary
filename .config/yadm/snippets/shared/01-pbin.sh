@@ -1,5 +1,7 @@
 #!/bin/bash
 
-# Initialize personal bin directories
+# Initialize personal bin and XDG state directories
 mkdir -p ~/.local/bin
-mkdir -p ~/.pbin
+mkdir -p ~/.config/bin
+mkdir -p ~/.local/state/up
+mkdir -p ~/.local/state/yadm

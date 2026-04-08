@@ -154,7 +154,8 @@ update_gcloud
 # Update tmux plugin manager (TPM)
 update_tpm
 
-# Update the timestamp in ~/.last_upped_at
-date +%s > ~/.last_upped_at
+# Update the timestamp
+mkdir -p ~/.local/state/up
+date +%s > ~/.local/state/up/last_upped_at
 
 print_msg "System update completed."

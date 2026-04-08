@@ -8,7 +8,7 @@
 ## $PATH: user-specific bin directories
 ##
 
-for DIR in .bin bin .pbin .local/bin; do if [ -d "$HOME/$DIR" ]; then
+for DIR in .config/bin .local/bin; do if [ -d "$HOME/$DIR" ]; then
     [[ :$PATH: = *":$HOME/$DIR:"* ]] || export PATH="$PATH:$HOME/$DIR"
 fi; done
 unset DIR
