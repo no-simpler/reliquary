@@ -16,7 +16,7 @@ Only explicitly `yadm add`-ed files are tracked; everything else is ignored.
 
 Sensitive files are GPG-encrypted into `~/.local/share/yadm/archive` and tracked in the public repo.
 Patterns are listed in `~/.config/yadm/encrypt`.
-The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.last_yadm_decrypted` to detect encrypt/decrypt drift.
+The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/yadm/last_decrypted` to detect encrypt/decrypt drift.
 
 **Convention:** Encryption patterns in `encrypt` are intentionally obfuscated — they should not reveal what they protect. When adding new patterns, use opaque names that don't hint at content. Do not describe or document the contents of encrypted files in any tracked file (including this one). Future sessions can read encrypted file contents locally after decryption.
 
@@ -33,7 +33,7 @@ Numbering controls load order:
 ```
 010-colors    020-plugins   030-config    040-env
 050-prompt    060-fzf       070-fixes     080-check
-090-funcs     100-aliases
+090-funcs     100-aliases   100-aliases-{git,docker,yadm}
 ```
 Additional encrypted shell files may exist (see `~/.config/yadm/encrypt`).
 
@@ -41,16 +41,16 @@ Shell var `$D__SHELL` is set to `zsh` or `bash` in the respective rc file and us
 
 Pre/post hooks: `~/.pre.{zsh,sh}` and `~/.post.{zsh,sh}` are sourced if present (not tracked; machine-local overrides).
 
-### Personal bin (`~/.pbin/`)
+### Personal bin (`~/.config/bin/`)
 
 Executable scripts on `$PATH` (added via `040-env.sh`):
 - `bbs` - interactive Brewfile scope selector (applies `Brewfile@<scope>` files)
 - `pb` - lists personal bin executables, shows which are yadm-managed
-- `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm); writes timestamp to `~/.last_upped_at`
+- `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm); writes timestamp to `~/.local/state/up/last_upped_at`
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below)
 - Additional encrypted scripts may exist (see `~/.config/yadm/encrypt`)
 
-### yadm wrapper (`~/.pbin/yadm-wrapper`)
+### yadm wrapper (`~/.config/bin/yadm-wrapper`)
 
 Aliased as `yadm` in shell. Adds custom commands:
 - `yadm own` / `yadm disown` - switch remote between SSH and HTTPS
@@ -77,9 +77,9 @@ Util snippets: print helpers, copy helpers, symlink helpers.
 ### Other tracked configs
 
 - `alacritty`, `ghostty` - terminal emulator configs
-- `alfred` - Alfred.app preferences and workflows
 - `choosy` - browser chooser
-- `git/attributes` - `* text=auto`
+- `git/attributes` - `* text=auto`, binary markers for `*.png`/`*.plist`
+- `vim/vimrc` - Vim configuration (Vim 9.2+ native XDG support)
 - `mpv` - media player config
 - `oh-my-posh` - shell prompt theme
 - `quartz-filters` - macOS PDF compression filters
@@ -90,7 +90,7 @@ Util snippets: print helpers, copy helpers, symlink helpers.
 
 Encrypted hooks may exist (see `~/.config/yadm/encrypt`).
 
-## yadm aliases (from `100-aliases.sh`)
+## yadm aliases (from `100-aliases-yadm.sh`)
 
 ```
 ya='yadm add'          yf='yadm fetch ...'    yrs='yadm restore --staged'
