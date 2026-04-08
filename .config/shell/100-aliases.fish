@@ -58,8 +58,8 @@ alias zsh '/usr/bin/env zsh'
 ## $PATH aliases
 ##
 
-alias path 'string join \n $PATH'
-alias manpath 'string join \n $MANPATH'
+alias lpath 'string join \n $PATH'
+alias lmanpath 'string join \n $MANPATH'
 
 ##
 ## Colorful tree

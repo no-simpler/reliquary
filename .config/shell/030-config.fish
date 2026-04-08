@@ -14,3 +14,7 @@ set -g fish_greeting
 
 ## History: ignore commands that start with a space (fish 4.x+)
 set -g fish_history_ignore_regex '^ '
+
+## Keybindings
+## Alt+Backspace → delete word (matches zsh emacs-mode default)
+bind \e\x7f backward-kill-word
