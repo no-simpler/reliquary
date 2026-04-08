@@ -9,14 +9,14 @@
 " https://github.com/junegunn/vim-plug
 
 " Ensure vim-plug is installed. If not, install it.
-if empty(glob('~/.vim/autoload/plug.vim'))
-  silent !curl -fLo ~/.vim/autoload/plug.vim --create-dirs
+if empty(glob('~/.config/vim/autoload/plug.vim'))
+  silent !curl -fLo ~/.config/vim/autoload/plug.vim --create-dirs
         \ https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
   autocmd VimEnter * PlugInstall --sync | source $MYVIMRC
 endif
 
 " Initialize plugin system
-call plug#begin('~/.vim/plugged')
+call plug#begin('~/.config/vim/plugged')
 
 " Essential sanity settings: https://github.com/tpope/vim-sensible
 Plug 'tpope/vim-sensible'

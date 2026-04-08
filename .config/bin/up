@@ -77,6 +77,12 @@ update_zinit() {
         if [[ -d "$ZINIT_HOME" ]]; then
             print_msg "Updating zinit and plugins..."
             zsh -c "source '$ZINIT_HOME/zinit.zsh'; zinit self-update; zinit update --all"
+
+            # Clean up broken completion symlinks left by removed upstream completions
+            local completions_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/completions"
+            if [[ -d "$completions_dir" ]]; then
+                find "$completions_dir" -type l ! -exec test -e {} \; -delete
+            fi
         else
             echo "zinit is not installed. Skipping zinit update."
         fi
@@ -86,7 +92,7 @@ update_zinit() {
 # Update vim-plug plugins
 update_vimplug() {
     if command -v vim &> /dev/null; then
-        if [[ -f "$HOME/.vim/autoload/plug.vim" ]]; then
+        if [[ -f "$HOME/.config/vim/autoload/plug.vim" ]]; then
             print_msg "Updating vim-plug plugins..."
             vim +PlugUpdate +qall
         else
