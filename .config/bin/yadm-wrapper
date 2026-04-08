@@ -62,6 +62,77 @@ check_yadm_encrypted_files() {
     fi
 }
 
+# Function to verify encrypted archive contents against disk
+verify_encrypted() {
+    local archive="$HOME/.local/share/yadm/archive"
+    local encrypt_file="$HOME/.config/yadm/encrypt"
+
+    if [[ ! -f "$archive" ]]; then
+        echo "Archive not found: $archive"
+        return 1
+    fi
+
+    if [[ ! -f "$encrypt_file" ]]; then
+        echo "Encrypt pattern file not found: $encrypt_file"
+        return 1
+    fi
+
+    # Create temp dir with automatic cleanup
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap "rm -rf '$tmpdir'" RETURN
+
+    # Decrypt archive to temp dir
+    if ! gpg -d "$archive" 2>/dev/null | tar xf - -C "$tmpdir"; then
+        echo "Failed to decrypt archive."
+        return 1
+    fi
+
+    local has_diff=false
+
+    # Check each file in the archive against disk
+    while IFS= read -r -d '' archived_file; do
+        local rel_path="${archived_file#$tmpdir/}"
+        local disk_path="$HOME/$rel_path"
+
+        if [[ ! -e "$disk_path" ]]; then
+            echo "MISSING on disk: ~/$rel_path (exists in archive)"
+            has_diff=true
+        elif ! diff -q "$archived_file" "$disk_path" &>/dev/null; then
+            echo "DIFFERS: ~/$rel_path"
+            diff --color=auto -- "$archived_file" "$disk_path" | sed 's|^--- .*|--- archive|;s|^+++ .*|+++ disk|'
+            echo
+            has_diff=true
+        fi
+    done < <(find "$tmpdir" -type f -print0 | sort -z)
+
+    # Check encrypt patterns for files on disk not in archive
+    while IFS= read -r pattern; do
+        [[ -z "$pattern" || "$pattern" == \#* ]] && continue
+        local matches
+        matches=$(cd "$HOME" && echo $pattern)
+        for match in $matches; do
+            [[ -e "$HOME/$match" ]] || continue
+            [[ -f "$HOME/$match" ]] || continue
+            if [[ ! -e "$tmpdir/$match" ]]; then
+                echo "MISSING in archive: ~/$match (exists on disk, matched by encrypt pattern)"
+                has_diff=true
+            fi
+        done
+    done < "$encrypt_file"
+
+    # Cleanup happens via trap, confirm it
+    rm -rf "$tmpdir"
+    trap - RETURN
+    echo "Temporary decrypted files removed."
+
+    if $has_diff; then
+        return 1
+    else
+        echo "All encrypted files are in sync."
+    fi
+}
+
 # Function to set the yadm repo URL
 set_yadm_repo_url() {
     local url="$1"
@@ -106,6 +177,9 @@ case $1 in
         ;;
     check)
         check_yadm_encrypted_files
+        ;;
+    verify)
+        verify_encrypted
         ;;
     update)
         update_yadm_repo
