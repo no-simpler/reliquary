@@ -8,7 +8,7 @@
 ## $PATH: user-specific bin directories
 ##
 
-for DIR in .bin bin .pbin; do if [ -d "$HOME/$DIR" ]; then
+for DIR in .bin bin .pbin .local/bin; do if [ -d "$HOME/$DIR" ]; then
     [[ :$PATH: = *":$HOME/$DIR:"* ]] || export PATH="$PATH:$HOME/$DIR"
 fi; done
 unset DIR
@@ -56,14 +56,6 @@ if command -v pyenv &>/dev/null; then
     if [[ $PYENV_SHELL != $D__SHELL && $D__SHELL == zsh ]]; then
         eval "$(pyenv init -)"
     fi
-fi
-
-##
-## pip user-space
-##
-if [ -d "$HOME/.local/bin" ]; then
-    [[ :$PATH: = *":$HOME/.local/bin:"* ]] ||
-        export PATH="$HOME/.local/bin:$PATH"
 fi
 
 ##
