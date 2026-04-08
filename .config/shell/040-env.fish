@@ -53,8 +53,12 @@ end
 ## The plugin handles SDKMAN initialization for fish.
 ##
 
-if not set -q SDKMAN_DIR
+if test -d "$HOME/.sdkman"
     set -gx SDKMAN_DIR "$HOME/.sdkman"
+else
+    # Erase any inherited SDKMAN_DIR (e.g. from parent zsh) to prevent
+    # sdkman-for-fish plugin from warning about a missing installation
+    set -e SDKMAN_DIR
 end
 
 ##
