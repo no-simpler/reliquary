@@ -1,4 +1,5 @@
 #!/bin/bash
 
-# Initialize personal bin directory
+# Initialize personal bin directories
+mkdir -p ~/.local/bin
 mkdir -p ~/.pbin

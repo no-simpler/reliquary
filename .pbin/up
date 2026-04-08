@@ -17,7 +17,7 @@ update_brew() {
     brew upgrade
     brew upgrade --cask
     brew cleanup
-    brew doctor
+    brew doctor || true
 }
 
 # Function to update packages on Debian-based systems
@@ -32,7 +32,6 @@ update_debian() {
 # Function to update packages on Red Hat-based systems
 update_redhat() {
     print_msg "Updating Red Hat-based system..."
-    sudo dnf update -y
     sudo dnf upgrade -y
     sudo dnf autoremove -y
 }
@@ -53,14 +52,30 @@ update_suse() {
     sudo zypper clean --all
 }
 
+# Update Rust toolchains and cargo-installed binaries
+update_rust() {
+    if command -v rustup &> /dev/null; then
+        print_msg "Updating Rust toolchains..."
+        rustup update
+
+        if command -v cargo-install-update &> /dev/null; then
+            print_msg "Updating cargo-installed binaries..."
+            cargo install-update -a
+        else
+            echo "cargo-update is not installed. Skipping cargo binary updates."
+        fi
+    else
+        echo "rustup is not installed. Skipping Rust update."
+    fi
+}
+
 # Update zinit & its plugins
 update_zinit() {
-    if [[ $(command -v zsh) ]]; then
-        print_msg "Updating zinit and plugins..."
-
-        ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
+    if command -v zsh &> /dev/null; then
+        local ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
 
         if [[ -d "$ZINIT_HOME" ]]; then
+            print_msg "Updating zinit and plugins..."
             zsh -c "source '$ZINIT_HOME/zinit.zsh'; zinit self-update; zinit update --all"
         else
             echo "zinit is not installed. Skipping zinit update."
@@ -70,11 +85,10 @@ update_zinit() {
 
 # Update vim-plug plugins
 update_vimplug() {
-    if [[ $(command -v vim) ]]; then
-        print_msg "Updating vim-plug plugins..."
-
+    if command -v vim &> /dev/null; then
         if [[ -f "$HOME/.vim/autoload/plug.vim" ]]; then
-            $(command -v vim) +PlugUpdate +qall
+            print_msg "Updating vim-plug plugins..."
+            vim +PlugUpdate +qall
         else
             echo "vim-plug is not installed. Skipping vim-plug update."
         fi
@@ -101,7 +115,7 @@ update_tpm() {
 
     if [ -d "$tpm_path" ]; then
         print_msg "Updating TPM..."
-        cd "$tpm_path" && git pull
+        git -C "$tpm_path" pull
     else
         echo "TPM is not installed. Skipping TPM update."
     fi
@@ -118,12 +132,15 @@ elif [[ -f /etc/redhat-release ]]; then
     update_redhat
 elif [[ -f /etc/arch-release ]]; then
     update_arch
-elif [[ -f /etc/SuSe-release ]]; then
+elif [[ -f /etc/SuSE-release ]]; then
     update_suse
 else
     echo "Unsupported OS. Exiting."
     exit 1
 fi
+
+# Update Rust toolchains and cargo-installed binaries
+update_rust
 
 # Update zinit & its plugins
 update_zinit
