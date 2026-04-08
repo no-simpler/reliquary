@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define the array of personal bin directories
-BIN_DIRS=("$HOME/.pbin" "$HOME/.bin" "$HOME/bin")
+BIN_DIRS=("$HOME/.config/bin" "$HOME/.local/bin")
 
 # Color definitions
 BOLD="\033[1m"

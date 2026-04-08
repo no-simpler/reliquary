@@ -4,7 +4,7 @@
 
 # Define the function to check the last update timestamp
 check_last_upped() {
-    local last_upped_file="$HOME/.last_upped_at"
+    local last_upped_file="$HOME/.local/state/up/last_upped_at"
     local current_time
     local last_upped_time
     local time_diff
@@ -47,7 +47,7 @@ check_last_upped
 
 # Function to check YADM encrypted files
 function check_yadm_wrapper() {
-    local file_path="$HOME/.pbin/yadm-wrapper"
+    local file_path="$HOME/.config/bin/yadm-wrapper"
 
     if [[ -x "$file_path" ]]; then
         "$file_path" check
