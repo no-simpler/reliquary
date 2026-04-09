@@ -3,12 +3,12 @@ version = 4
 final_space = true
 
 [secondary_prompt]
-  template = '❯❯ '
+  template = '{{if eq .Shell "fish"}}⋗⋗ {{else}}❯❯ {{end}}'
   foreground = 'green'
   background = 'transparent'
 
 [transient_prompt]
-  template = '❯ '
+  template = '{{if eq .Shell "fish"}}⋗ {{else}}❯ {{end}}'
   background = 'transparent'
   foreground_templates = ['{{if gt .Code 0}}red{{end}}', '{{if eq .Code 0}}green{{end}}']
 
@@ -48,7 +48,7 @@ final_space = true
   newline = true
 
   [[blocks.segments]]
-    template = '❯'
+    template = '{{if eq .Shell "fish"}}⋗{{else}}❯{{end}}'
     background = 'transparent'
     type = 'text'
     style = 'plain'
