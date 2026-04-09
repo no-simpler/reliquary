@@ -13,7 +13,7 @@ else
         else
             set_color red
         end
-        echo -n (prompt_pwd)' % '
+        echo -n (prompt_pwd)' ⋗ '
         set_color normal
     end
 end
