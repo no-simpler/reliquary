@@ -10,7 +10,7 @@
 .config/mm/vpn/*.ovpn
 .config/mpv/input.conf
 .config/phpstorm/*.xml
-.config/shell/150-benefactor.sh
+.config/shell/150-benefactor.*
 .config/yadm/hooks/pre_commit
 .config/yadm/snippets/macos/10-bt.sh
 .config/bin/dbee

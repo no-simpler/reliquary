@@ -25,7 +25,8 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 ### Shell configuration (`~/.config/shell/`)
 
 Files are sourced alphanumerically by `~/.zshrc` (and `~/.bashrc`). Convention:
-- `NNN-name.sh` = shared (bash + zsh)
+- `NNN-name.sh` = shared (bash + zsh only — fish cannot parse POSIX syntax)
+- `NNN-name.fish` = fish-only
 - `NNN-name.zsh` = zsh-only
 - `NNN-name.bash` = bash-only
 
