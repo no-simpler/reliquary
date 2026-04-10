@@ -60,7 +60,8 @@ update_rust() {
 
         if command -v cargo-install-update &> /dev/null; then
             print_msg "Updating cargo-installed binaries..."
-            cargo install-update -a
+            cargo install-update -a -l
+            cargo install-update -a -q
         else
             echo "cargo-update is not installed. Skipping cargo binary updates."
         fi
@@ -127,6 +128,16 @@ update_tpm() {
     fi
 }
 
+# Update globally installed npm packages
+update_npm() {
+    if command -v npm &> /dev/null; then
+        print_msg "Updating global npm packages..."
+        npm update -g
+    else
+        echo "npm is not installed. Skipping npm update."
+    fi
+}
+
 print_msg "Updating system..."
 
 # Detect the operating system and call the appropriate update function
@@ -144,6 +155,9 @@ else
     echo "Unsupported OS. Exiting."
     exit 1
 fi
+
+# Update globally installed npm packages
+update_npm
 
 # Update Rust toolchains and cargo-installed binaries
 update_rust
