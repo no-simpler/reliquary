@@ -82,8 +82,12 @@ verify_encrypted() {
     tmpdir=$(mktemp -d)
     trap "rm -rf '$tmpdir'" RETURN
 
-    # Decrypt archive to temp dir
-    if ! gpg -d "$archive" 2>/dev/null | tar xf - -C "$tmpdir"; then
+    # Decrypt archive to temp dir (use yadm's configured gpg-program if set)
+    local gpg_prog
+    gpg_prog="$($YADM_BIN config yadm.gpg-program)"
+    gpg_prog="${gpg_prog:-gpg}"
+
+    if ! "$gpg_prog" -d "$archive" 2>/dev/null | tar xf - -C "$tmpdir"; then
         echo "Failed to decrypt archive."
         return 1
     fi

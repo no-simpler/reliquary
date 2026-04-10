@@ -15,4 +15,5 @@
 .config/yadm/hooks/pre_commit
 .config/yadm/snippets/macos/10-bt.sh
 .config/bin/dbee
+.config/bin/gpg-yadm-op
 .config/bin/mm
