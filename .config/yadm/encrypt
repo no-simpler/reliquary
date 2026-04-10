@@ -3,6 +3,7 @@
 .config/brew/Brewfile@benefactor-light
 .config/brew/Brewfile@home
 .config/bt/*
+.config/git/allowed_signers
 .config/git/config
 .config/git/config@benefactor
 .config/iterm2/preferences/*
