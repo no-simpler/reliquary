@@ -8,6 +8,9 @@ background-opacity = 0.85
 # Handy “delete all” binding (works in zsh)
 keybind = cmd+backspace=esc:w
 
+# Start in home directory (macOS GUI apps default to /)
+working-directory = home
+
 # Start maximized
 maximize = true
 window-height = 1024
