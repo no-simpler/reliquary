@@ -9,8 +9,7 @@ Only explicitly `yadm add`-ed files are tracked; everything else is ignored.
 
 ## Critical: GPG constraints
 
-- **Commits are GPG-signed.** `git commit` (and `yadm commit`) triggers a full-screen GPG passphrase prompt that breaks Claude Code. **Never run commit/merge/rebase automatically.** Hand off to the user with exact instructions.
-- **yadm encrypt/decrypt also invoke GPG.** Same constraint applies. Never run `yadm encrypt` or `yadm decrypt` automatically.
+- **`yadm encrypt` / `yadm decrypt` invoke GPG directly** (full-screen passphrase prompt that breaks Claude Code). Never run these automatically — hand off to the user with exact instructions.
 
 ## Encryption
 
