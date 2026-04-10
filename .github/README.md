@@ -21,13 +21,16 @@ rm -f ~/.yadm.tmp
 ## Next steps
 
 - Restart shell.
-- Run `yadm decrypt`, then `yadm bootstrap` again.
+- Run `yadm decrypt` (GPG passphrase prompt), then `yadm bootstrap` again.
 - Look through `pb` output.
+
+The second bootstrap run picks up decrypted content (encrypted scripts,
+hooks, configs) and completes setup that depends on it.
 
 ## Update
 
 ```shell
 yadm update
-# or equavalently
+# or equivalently
 yadm pull --ff-only
 ```

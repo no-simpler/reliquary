@@ -7,14 +7,11 @@ yadm is a thin git wrapper whose work tree is `$HOME` and git dir is `~/.local/s
 All standard git commands work via `yadm <cmd>`.
 Only explicitly `yadm add`-ed files are tracked; everything else is ignored.
 
-## Critical: yadm encryption constraints
-
-- **`yadm encrypt` / `yadm decrypt` invoke GPG directly** (full-screen passphrase prompt that breaks Claude Code). Never run these automatically — hand off to the user with exact instructions.
-
 ## Encryption
 
 Sensitive files are GPG-encrypted into `~/.local/share/yadm/archive` and tracked in the public repo.
 Patterns are listed in `~/.config/yadm/encrypt`.
+The password for `yadm encrypt`, `yadm decrypt`, and `yadm verify` is fetched from 1Password implicitly (Touch ID prompt).
 The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/yadm/last_decrypted` to detect encrypt/decrypt drift.
 
 **Convention:** Encryption patterns in `encrypt` are intentionally obfuscated — they should not reveal what they protect. When adding new patterns, use opaque names that don't hint at content. Do not describe or document the contents of encrypted files in any tracked file (including this one). Future sessions can read encrypted file contents locally after decryption.
@@ -47,17 +44,21 @@ Executable scripts on `$PATH` (added via `040-env.sh`):
 - `bbs` - interactive Brewfile scope selector (applies `Brewfile@<scope>` files)
 - `pb` - lists personal bin executables, shows which are yadm-managed
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm); writes timestamp to `~/.local/state/up/last_upped_at`
+- `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below)
 - Additional encrypted scripts may exist (see `~/.config/yadm/encrypt`)
 
 ### yadm wrapper (`~/.config/bin/yadm-wrapper`)
 
-Aliased as `yadm` in shell. Adds custom commands:
+Aliased as `yadm` in interactive shells. Adds custom commands:
 - `yadm own` / `yadm disown` - switch remote between SSH and HTTPS
 - `yadm encrypt` / `yadm decrypt` - delegates to yadm + records archive SHA256
 - `yadm check` - compares archive SHA256 to detect drift
+- `yadm verify` - decrypts archive to tmpdir and diffs against disk
 - `yadm update` - `pull --ff-only` + check encrypted files
 - All other commands pass through to real yadm, followed by an encrypted-files check
+
+**Note:** The alias does not apply in non-interactive shells (including Claude Code's Bash tool). Wrapper-only commands (`verify`, `check`, `own`, `disown`, `update`) must be invoked as `~/.config/bin/yadm-wrapper <cmd>`. Standard yadm commands (`encrypt`, `decrypt`, `add`, `commit`, etc.) work via `/opt/homebrew/bin/yadm` directly.
 
 ### Bootstrap (`~/.config/yadm/bootstrap`)
 
@@ -86,6 +87,13 @@ Util snippets: print helpers, copy helpers, symlink helpers.
 - `tmux` - tmux configuration
 - `zsh/completion/docker` - docker completions for zsh
 
+### Repository documentation (`~/.github/`)
+
+- `README.md` - install/usage instructions, rendered on the GitHub repo page
+- `LICENSE.md` - MIT license
+
+These live in `~/.github/` (not `~/.config/`) because GitHub only renders READMEs from the repo root or `.github/` directory.
+
 ### Hooks
 
 Encrypted hooks may exist (see `~/.config/yadm/encrypt`).
@@ -106,7 +114,7 @@ ylf / ywlf = yadm log (80/140 char wide)
 1. Edit the file
 2. `ya <file>` (or `yadm add <file>`)
 3. `ys` to verify
-4. `yc` to commit (triggers GPG prompt)
+4. `yc` to commit
 5. `yp` to push
 
 **New machine setup:** see `~/.github/README.md` - curl yadm, clone, bootstrap, then decrypt + bootstrap again.
