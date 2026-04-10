@@ -185,15 +185,7 @@ case $1 in
         update_yadm_repo
         ;;
     *)
-        if [ "$CLAUDECODE" = "1" ]; then
-            case "$1" in
-                commit|merge|rebase|cherry-pick|revert|am|tag)
-                    $YADM_BIN -c commit.gpgsign=false -c tag.gpgsign=false "$@" ;;
-                *) $YADM_BIN "$@" ;;
-            esac
-        else
-            $YADM_BIN "$@"
-        fi
+        $YADM_BIN "$@"
         check_yadm_encrypted_files
         ;;
 esac

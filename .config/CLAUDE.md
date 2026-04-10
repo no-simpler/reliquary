@@ -7,7 +7,7 @@ yadm is a thin git wrapper whose work tree is `$HOME` and git dir is `~/.local/s
 All standard git commands work via `yadm <cmd>`.
 Only explicitly `yadm add`-ed files are tracked; everything else is ignored.
 
-## Critical: GPG constraints
+## Critical: yadm encryption constraints
 
 - **`yadm encrypt` / `yadm decrypt` invoke GPG directly** (full-screen passphrase prompt that breaks Claude Code). Never run these automatically — hand off to the user with exact instructions.
 
