@@ -16,5 +16,8 @@ set -g fish_greeting
 set -g fish_history_ignore_regex '^ '
 
 ## Keybindings
-## Alt+Backspace → delete word (matches zsh emacs-mode default)
-bind \e\x7f backward-kill-word
+## Alt+Backspace → delete word (matches zsh emacs-mode default).
+## Use the fish 4.x key-name syntax — the legacy `\e\x7f` form is normalized
+## to `alt-delete` (forward-delete key), which never matches what terminals
+## actually send for opt+backspace.
+bind alt-backspace backward-kill-word

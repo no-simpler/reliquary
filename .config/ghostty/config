@@ -8,6 +8,17 @@ background-opacity = 0.85
 # Handy “delete all” binding (works in zsh)
 keybind = cmd+backspace=esc:w
 
+# opt+backspace → ESC+DEL (standard alt+backspace), so shells bind it to
+# backward-kill-word. Targeted keybind keeps opt usable for special chars
+# (©, é, “”, etc.) elsewhere. NB: ghostty's text: action uses Zig string
+# escapes (no \e — must use \x1b for ESC); a malformed escape is silently
+# logged and the keypress is swallowed.
+keybind = opt+backspace=text:\x1b\x7f
+
+# Silence every bell reaction: no system alert sound, no custom audio, no dock
+# bounce / attention request, no 🔔 in tab title, no border flash.
+bell-features = no-system,no-audio,no-attention,no-title,no-border
+
 # Start in home directory (macOS GUI apps default to /)
 working-directory = home
 
