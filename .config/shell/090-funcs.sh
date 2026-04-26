@@ -10,6 +10,13 @@ mcd() {
     mkdir -p -- "$1" && cd -- "$1"
 }
 
+# Strip default file-completion from mcd/mmd so zsh doesn't try to complete
+# them as plain commands. See: https://github.com/ohmyzsh/ohmyzsh/issues/1895
+if typeset -f compdef &>/dev/null; then
+    compdef -d mmd
+    compdef -d mcd
+fi
+
 #>  tca
 #
 ## Tmux: create or attach to session
