@@ -100,8 +100,6 @@ end
 ##
 
 test -d /opt/homebrew/opt/rustup/bin; and fish_add_path /opt/homebrew/opt/rustup/bin
-test -f "$HOME/.cargo/env.fish"; and source "$HOME/.cargo/env.fish"
-# Fallback: cargo bin dir directly
 test -d "$HOME/.cargo/bin"; and fish_add_path "$HOME/.cargo/bin"
 
 ##

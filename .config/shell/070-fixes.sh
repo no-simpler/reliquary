@@ -18,13 +18,3 @@ export LANG=en_US.UTF-8
 if gpg --version &>/dev/null || gnupg --version &>/dev/null; then
     export GPG_TTY=$(tty)
 fi
-
-##
-## zsh-completions bug that messes with 'mmd' and 'mcd' commands
-## https://github.com/ohmyzsh/ohmyzsh/issues/1895#issuecomment-34887821
-##
-
-if typeset -f compdef &>/dev/null; then
-    compdef -d mmd
-    compdef -d mcd
-fi

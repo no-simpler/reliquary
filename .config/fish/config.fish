@@ -1,6 +1,8 @@
 ##
 ## Fish shell configuration
-## Mirrors the sourcing pattern from .zshrc — loads *.fish from ~/.config/shell/
+## Per-feature files live in ~/.config/fish/conf.d/ (auto-sourced by fish in
+## alphanumeric order). This file only handles entry-shell concerns: D__SHELL,
+## interactive guard, and machine-local pre/post hooks.
 ##
 
 ## Fail-safe against non-interactive shells
@@ -9,23 +11,12 @@ status is-interactive; or return
 ## Set and export the name of the current shell
 set -gx D__SHELL fish
 
-## Source the box-specific '.pre.*' files
-for f in ~/.pre.fish
-    test -f $f; and test -r $f; and source $f
-end
+## Source the box-specific '.pre.fish' file (machine-local, not tracked)
+test -r ~/.pre.fish; and source ~/.pre.fish
 
-## Source all *.fish files in ~/.config/shell/, sorted alphanumerically
-for script_path in ~/.config/shell/*.fish
-    source $script_path
-end
+## conf.d/*.fish are auto-sourced by fish — nothing to do here.
 
-## Source the box-specific '.post.*' files
-for f in ~/.post.fish
-    test -f $f; and test -r $f; and source $f
-end
+## Source the box-specific '.post.fish' file (machine-local, not tracked)
+test -r ~/.post.fish; and source ~/.post.fish
 
-## Graceful exit
-true
-
-# Added by OrbStack: command-line tools and integration
-# Init is sourced from ~/.config/shell/040-env.fish — do not re-inject.
+# OrbStack init is sourced from ~/.config/fish/conf.d/040-env.fish — do not re-inject.
