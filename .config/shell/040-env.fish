@@ -108,5 +108,5 @@ test -d "$HOME/.cargo/bin"; and fish_add_path "$HOME/.cargo/bin"
 ## OrbStack
 ##
 
-set -l orbstack_init "$HOME/.orbstack/shell/init.fish"
+set -l orbstack_init "$HOME/.orbstack/shell/init2.fish"
 test -r $orbstack_init; and source $orbstack_init 2>/dev/null

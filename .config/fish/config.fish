@@ -10,7 +10,7 @@ status is-interactive; or return
 set -gx D__SHELL fish
 
 ## Source the box-specific '.pre.*' files
-for f in ~/.pre.fish ~/.pre.sh
+for f in ~/.pre.fish
     test -f $f; and test -r $f; and source $f
 end
 
@@ -26,3 +26,6 @@ end
 
 ## Graceful exit
 true
+
+# Added by OrbStack: command-line tools and integration
+# Init is sourced from ~/.config/shell/040-env.fish — do not re-inject.
