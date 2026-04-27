@@ -20,7 +20,11 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 
 ### Shell configuration (`~/.config/shell/`)
 
-Files are sourced alphanumerically by `~/.zshrc` (and `~/.bashrc`). Convention:
+Two-tier layout — the directory name *is* the contract:
+- `~/.config/shell/env.d/` = **always-on** (PATH, tool init, locale, auth env). Sourced by `~/.zshenv` (every zsh) and `~/.bash_env` (every non-interactive bash via `$BASH_ENV`; also from `~/.bash_profile` for login bash). Idempotent — re-sourcing is safe.
+- `~/.config/shell/interactive.d/` = **interactive only** (plugins, prompt, completions, aliases, update checks). Sourced by `~/.zshrc` / `~/.bashrc` behind their interactive gates.
+
+Filename suffix selects shell:
 - `NNN-name.sh` = shared (bash + zsh only — fish cannot parse POSIX syntax)
 - `NNN-name.fish` = fish-only
 - `NNN-name.zsh` = zsh-only
@@ -28,13 +32,22 @@ Files are sourced alphanumerically by `~/.zshrc` (and `~/.bashrc`). Convention:
 
 Numbering controls load order:
 ```
-010-colors    020-plugins   030-config    040-env
-050-prompt    060-fzf       070-fixes     080-check
-090-funcs     100-aliases   100-aliases-{git,docker,yadm}
+env.d/         : 040-env  070-fixes  150-benefactor
+interactive.d/ : 010-colors  020-plugins  030-config  050-prompt
+                 060-fzf  080-check  090-funcs  100-aliases{,-git,-docker,-yadm}
 ```
 Additional encrypted shell files may exist (see `~/.config/yadm/encrypt`).
 
-Shell var `$D__SHELL` is set to `zsh` or `bash` in the respective rc file and used throughout for shell-specific branching.
+When adding a new file, ask: does it set env / PATH that agents need (→ `env.d/`), or does it configure interactive UX (→ `interactive.d/`)? Side-effecting files (anything that prints to stdout, runs `tty`, or spawns subprocesses) belong in `interactive.d/` unless they can be made silent and idempotent.
+
+Shell var `$D__SHELL` is set to `zsh` / `bash` / `fish` in the respective entry-point file (always, including non-interactively) and used throughout for shell-specific branching.
+
+**Fish**: `~/.config/fish/conf.d/*.fish` is auto-loaded by fish regardless of interactivity (fish convention; no `env.d/` split). Interactive-only fish files self-gate at the top with `status is-interactive; or return`. Env-pure fish files (`040-env`, `070-fixes`, `150-benefactor`, `00-sdkman-guard`, `sdk`) intentionally have no gate.
+
+Non-interactive entry points:
+- zsh → `~/.zshenv` globs `env.d/*.sh`
+- bash → `$BASH_ENV` (set to `~/.bash_env` by `~/.zshenv`) globs `env.d/*.sh`; `~/.bash_profile` also sources `~/.bash_env` for login bash
+- fish → conf.d auto-load (env-pure files run unconditionally)
 
 Pre/post hooks: `~/.pre.{zsh,sh}` and `~/.post.{zsh,sh}` are sourced if present (not tracked; machine-local overrides).
 

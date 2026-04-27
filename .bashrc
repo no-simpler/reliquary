@@ -27,8 +27,9 @@ export D__SHELL=bash
 [ -f ~/.pre.sh -a -r ~/.pre.sh ] && source ~/.pre.sh
 
 ##
-## Source all *.bash and *.sh files in ~/.runcoms dir, sorted
-#. alphanumerically
+## Source all *.bash and *.sh files in ~/.config/shell/interactive.d, sorted
+#. alphanumerically. Env-pure files in ~/.config/shell/env.d are loaded
+#. unconditionally by ~/.bash_env and intentionally skipped here.
 ##
 
 # Save current state of 'dotglob' and 'nullglob' options
@@ -40,7 +41,7 @@ shopt -s dotglob nullglob
 ## Globbing sorts entries alphanumerically; so the files are sourced in the
 #. order of their names.
 #
-for script_path in ~/.config/shell/*; do case $script_path in
+for script_path in ~/.config/shell/interactive.d/*; do case $script_path in
   *.bash | *.sh) source "$script_path" ;;
   esac done
 unset script_path

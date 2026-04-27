@@ -7,6 +7,12 @@
 # ... login shell commands go here ...
 
 ##
+## Source ~/.bash_env (always-on env; mirrors what $BASH_ENV gives non-interactive bash)
+##
+
+[ -r ~/.bash_env ] && source ~/.bash_env
+
+##
 ## Source ~/.bashrc (Bash doesn't do this for login shells)
 ##
 

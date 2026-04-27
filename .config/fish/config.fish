@@ -5,11 +5,11 @@
 ## interactive guard, and machine-local pre/post hooks.
 ##
 
+## Set and export the name of the current shell (always — also visible non-interactively)
+set -gx D__SHELL fish
+
 ## Fail-safe against non-interactive shells
 status is-interactive; or return
-
-## Set and export the name of the current shell
-set -gx D__SHELL fish
 
 ## Source the box-specific '.pre.fish' file (machine-local, not tracked)
 test -r ~/.pre.fish; and source ~/.pre.fish
