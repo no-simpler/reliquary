@@ -106,6 +106,26 @@ Bash gets no fzf key bindings; fish has its own setup in `~/.config/fish/conf.d/
 
 `~/.config/oh-my-posh/dreamsofautonomy.toml` is the only theme. If you want machine-portable themes outside the home dir, this is fine as-is. If you want oh-my-posh to discover it via `POSH_THEMES_PATH`, update `040-env.*` accordingly.
 
+## 13. Cross-shell env var parity
+
+A spot audit (script: `/tmp/compare-shell-env.sh`) compared exported env-var **names** (not values, for safety) across freshly spawned interactive `fish`/`zsh`/`bash`. After filtering shell-internal noise, 44 vars are common; the residue points to two real cross-shell behavior gaps and several deliberate or cosmetic ones.
+
+**Real gaps worth closing**
+
+- `CONDA_DEFAULT_ENV`, `CONDA_PREFIX`, `CONDA_PYTHON_EXE`, `CONDA_SHLVL` exported in bash+zsh but not fish. The conda init blocks in `040-env.{sh,fish}` both run, but only bash+zsh end up with the `base` env activated. Either (a) fish's `conda shell.fish hook | eval` isn't doing auto-activate, or (b) a different `auto_activate_base` setting applies. Investigate; either fix the fish init or document fish as deliberately unactivated.
+- `PAGER`, `LESS`, `LSCOLORS`, `LS_COLORS` exported in zsh only (set by zinit/oh-my-zsh plugins). These leak into subprocesses, so `less` and `ls` behave differently depending on which shell launched them. Promote to `040-env.sh` / `040-env.fish` so all three shells behave identically in pipelines.
+
+**Deliberate-or-cosmetic gaps to leave alone (or just document)**
+
+- `BLACK`/`RED`/`BOLD`/`BG_*`/etc. (~30 vars from `010-colors.sh`) are bash+zsh only because fish doesn't source `.sh`. Fish has `set_color`; promoting these would just pollute fish's namespace. Leave as-is — but if any cross-shell script relies on them as inherited env, document the constraint.
+- `POSH_*` and `POWERLINE_COMMAND` are fish+zsh only because bash uses a static prompt. See item #9.
+- `FPATH`, `ZPFX`, `PMSPEC`, `ZLE_RPROMPT_INDENT`, `*_DISABLE_PROMPT` are zsh-internal or zinit-managed. Not portable concepts.
+- `GSETTINGS_SCHEMA_DIR` is set by some homebrew GTK lib at brew shellenv time; harmless that fish doesn't pick it up (fish gets its own `brew shellenv | source` in `040-env.fish`, so if a tool needs it the env will be there at the right time).
+
+**Tooling note**
+
+The comparison script (`/tmp/compare-shell-env.sh` in this audit, but currently unmanaged) is a useful primitive for the `yadm doctor` from item #10. Worth promoting into `~/.config/bin/` and wiring into `up` or a periodic check. It captures `env -0` (null-separated, multi-line-safe) from each shell, name-only, and reports set differences with a tunable noise filter.
+
 ---
 
 ## Audit residue: confirmed correct exclusions
