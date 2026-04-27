@@ -16,5 +16,6 @@ export LANG=en_US.UTF-8
 ##
 
 if gpg --version &>/dev/null || gnupg --version &>/dev/null; then
-    export GPG_TTY=$(tty)
+    GPG_TTY=$(tty 2>/dev/null) || GPG_TTY=
+    export GPG_TTY
 fi

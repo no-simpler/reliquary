@@ -1,3 +1,6 @@
+## Interactive only
+status is-interactive; or return
+
 ##
 ## Prompt: oh-my-posh
 ##

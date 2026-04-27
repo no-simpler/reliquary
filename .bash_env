@@ -1,0 +1,10 @@
+# Sourced by non-interactive bash via $BASH_ENV, and by ~/.bash_profile for
+# login bash. Interactive .bashrc re-globs ~/.config/shell/interactive.d/
+# behind its gate; env.d files are idempotent so extra re-sourcing is a no-op.
+
+export D__SHELL=bash
+
+shopt -s nullglob
+for f in "$HOME"/.config/shell/env.d/*.sh; do source "$f"; done
+unset f
+shopt -u nullglob

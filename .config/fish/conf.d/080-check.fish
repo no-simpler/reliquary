@@ -1,3 +1,6 @@
+## Interactive only
+status is-interactive; or return
+
 ##
 ## Last upped at
 ##

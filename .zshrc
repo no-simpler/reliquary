@@ -27,8 +27,9 @@ export D__SHELL=zsh
 [ -f ~/.pre.sh -a -r ~/.pre.sh ] && source ~/.pre.sh
 
 ##
-## Source all *.zsh and *.sh files in ~/.runcoms dir, sorted
-#. alphanumerically
+## Source all *.zsh and *.sh files in ~/.config/shell/interactive.d, sorted
+#. alphanumerically. Env-pure files in ~/.config/shell/env.d are loaded
+#. unconditionally by ~/.zshenv and intentionally skipped here.
 ##
 
 # If 'nullglob' option is unset, set it and remember to restore it after
@@ -40,7 +41,7 @@ export D__SHELL=zsh
 ## Globbing sorts entries alphanumerically; so the files are sourced in the
 #. order of their names.
 #
-for script_path in ~/.config/shell/*(D); do case $script_path in
+for script_path in ~/.config/shell/interactive.d/*(D); do case $script_path in
   *.zsh | *.sh) source "$script_path" ;;
   esac done
 unset script_path
