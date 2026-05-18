@@ -17,5 +17,10 @@
 .config/yadm/hooks/pre_commit
 .config/yadm/snippets/macos/10-bt.sh
 .config/bin/dbee
+.config/bin/gpg-nexus-op
 .config/bin/gpg-yadm-op
 .config/bin/mm
+.config/bin/nexus-clone
+.config/bin/nexus-install-hook
+.config/bin/nexus-push
+.config/bin/nexus-status
