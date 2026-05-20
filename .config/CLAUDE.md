@@ -35,9 +35,10 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 
 ### Shell configuration (`~/.config/shell/`)
 
-Two-tier layout — the directory name *is* the contract:
+Three-tier layout — the directory name *is* the contract:
 - `~/.config/shell/env.d/` = **always-on** (PATH, tool init, locale, auth env). Sourced by `~/.zshenv` (every zsh) and `~/.bash_env` (every non-interactive bash via `$BASH_ENV`; also from `~/.bash_profile` for login bash). Idempotent — re-sourcing is safe.
 - `~/.config/shell/interactive.d/` = **interactive only** (plugins, prompt, completions, aliases, update checks). Sourced by `~/.zshrc` / `~/.bashrc` behind their interactive gates.
+- `~/.config/shell/lib/` = **explicit-source-only** (libraries that downstream callers `source` on demand; never auto-loaded). Used to centralize logic shared across meta-projects so it lives in exactly one place. Seed entry: `install-on-path.sh` (see "Externally-managed PATH lane" below).
 
 Filename suffix selects shell:
 - `NNN-name.sh` = shared (bash + zsh only — fish cannot parse POSIX syntax)
@@ -85,6 +86,8 @@ Canonical lane for executables managed by external meta-projects (halo, bb).
 - Do not `yadm add` anything from `~/.local/bin/`, including the registry files.
 - Do not hand-edit registry files; they are written by each meta-project's publish helper.
 - The binaries are regenerable: re-run the owning meta-project's publish flow. See that meta-project's `CLAUDE.md` for the protocol.
+
+The publish helper lives here: `~/.config/shell/lib/install-on-path.sh` (yadm-tracked, sourced on demand by each meta-project's publish scripts). Callers invoke it as `META_NAME=<name> source "$HOME/.config/shell/lib/install-on-path.sh"`; the helper enforces the registry contract above. One canonical implementation across all meta-projects — do not duplicate into individual meta-repos.
 
 Sanctioned sidesteps: a meta-project may bypass the helper for advanced cases (template substitution, self-update, embedded provenance). The `bb` CLI is the canonical example. Those callers stay responsible for not stomping on YADM-tracked files.
 
