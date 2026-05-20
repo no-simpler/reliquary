@@ -76,6 +76,18 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below)
 - Additional encrypted scripts may exist (see `~/.config/yadm/encrypt`)
 
+### Externally-managed PATH lane (`~/.local/bin/`)
+
+On `$PATH` via `env.d/040-env.sh` (the same loop that adds `~/.config/bin/`), but **not** YADM-tracked.
+Canonical lane for executables managed by external meta-projects (halo, bb).
+
+- Each meta-project maintains a registry file in `~/.local/bin/` listing the filenames it owns: `.halo-managed`, `.bb-managed`.
+- Do not `yadm add` anything from `~/.local/bin/`, including the registry files.
+- Do not hand-edit registry files; they are written by each meta-project's publish helper.
+- The binaries are regenerable: re-run the owning meta-project's publish flow. See that meta-project's `CLAUDE.md` for the protocol.
+
+Sanctioned sidesteps: a meta-project may bypass the helper for advanced cases (template substitution, self-update, embedded provenance). The `bb` CLI is the canonical example. Those callers stay responsible for not stomping on YADM-tracked files.
+
 ### yadm wrapper (`~/.config/bin/yadm-wrapper`)
 
 Aliased as `yadm` in interactive shells. Adds custom commands:

@@ -6,6 +6,8 @@
 
 ##
 ## $PATH: user-specific bin directories
+##   ~/.config/bin  — YADM-tracked personal scripts
+##   ~/.local/bin   — externally-managed (meta-projects: halo, bb); see ~/.config/CLAUDE.md
 ##
 
 for DIR in .config/bin .local/bin; do if [ -d "$HOME/$DIR" ]; then
