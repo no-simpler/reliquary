@@ -128,6 +128,36 @@ update_tpm() {
     fi
 }
 
+# Update in-house relics (~/.config/relics + ~/.config/attic).
+# Opt out with UP_SKIP_RELICS=1 up  or  up --no-relics.
+# Contract on each relic's scripts/update.sh: non-interactive, time-bounded.
+update_relics() {
+    if [[ -n "${UP_SKIP_RELICS:-}" ]]; then
+        echo "Skipping relic update (UP_SKIP_RELICS set)."
+        return 0
+    fi
+    if [[ " $* " == *" --no-relics "* ]]; then
+        echo "Skipping relic update (--no-relics)."
+        return 0
+    fi
+
+    local lib="$HOME/.config/reliquary/lib/relic.sh"
+    [[ -f "$lib" ]] || return 0
+
+    print_msg "Updating in-house relics..."
+    # shellcheck disable=SC1090
+    source "$lib"
+
+    local lane r
+    for lane in "$HOME/.config/relics" "$HOME/.config/attic"; do
+        [ -d "$lane" ] || continue
+        for r in "$lane"/*/; do
+            [ -f "${r}relic.sh" ] || continue
+            ( cd "$r" && relic::update "$r" ) || echo "  update failed: $r"
+        done
+    done
+}
+
 # Update globally installed npm packages
 update_npm() {
     if command -v npm &> /dev/null; then
@@ -173,6 +203,9 @@ update_gcloud
 
 # Update tmux plugin manager (TPM)
 update_tpm
+
+# Update in-house relics
+update_relics "$@"
 
 # Update the timestamp
 mkdir -p ~/.local/state/up

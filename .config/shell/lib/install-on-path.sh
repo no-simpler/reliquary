@@ -2,6 +2,17 @@
 #
 # install-on-path: install an executable into ~/.local/bin/ under a chosen name.
 #
+# Public API: install_on_path + META_NAME registry contract.
+# Stable — do not break without coordinated republish of all callers:
+#   - ~/.config/reliquary/lib/relic.sh    (Reliquary in-house relics)
+#   - all known external relics — currently bb and halo
+#     (see ~/.config/reliquary/GRADUATION.md "Known external relics")
+#
+# This file's location (~/.config/shell/lib/) is grandfathered. The deferred
+# `relic` CLI work plans to hoist it to ~/.config/reliquary/lib/ alongside
+# the rest of relic infrastructure — see
+# ~/.config/reliquary/design/relic-cli.md.
+#
 # Usage (source from a meta-repo or aspect publish.sh):
 #
 #   META_NAME=halo source "$HOME/.config/shell/lib/install-on-path.sh"

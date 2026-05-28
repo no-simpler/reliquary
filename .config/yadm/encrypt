@@ -25,3 +25,5 @@
 .config/bin/nexus-install-hook
 .config/bin/nexus-push
 .config/bin/nexus-status
+.config/attic/**
+.config/reliquary/AUX.md
