@@ -91,6 +91,24 @@ The publish helper lives here: `~/.config/shell/lib/install-on-path.sh` (yadm-tr
 
 Sanctioned sidesteps: a meta-project may bypass the helper for advanced cases (template substitution, self-update, embedded provenance). The `bb` CLI is the canonical example. Those callers stay responsible for not stomping on YADM-tracked files.
 
+### Relic graduation (`~/.config/relics/`, `~/.config/reliquary/`, `~/.config/attic/`)
+
+Personal CLI utils have a three-stage lifecycle. A **relic** is a personal tool the author keeps:
+
+- **Stage 1 — one-shot util**: single file in `~/.config/bin/` (status quo; `bbs`, `pb`, `up`, etc.).
+- **Stage 2 — in-house relic**: directory at `~/.config/relics/<name>/`, yadm-tracked, with a manifest (`relic.sh`), an `entrypoints/` directory, and optional `src/`, `tests/`, `scripts/`. Published onto PATH via the shared lib.
+- **Stage 3 — external relic**: independent repo at `~/Developer/<name>/` (`bb`, `halo` today). Runtime dep on `install-on-path.sh` only; knowledge bidirectional (Reliquary tracks the list of known external relics in `GRADUATION.md`).
+
+`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`), the shared library (`lib/relic.sh`), the relic skeleton (`template/`), and deferred design (`design/relic-cli.md`).
+
+`~/.config/attic/` is the **private relic lane** — the whole subtree is encrypted (the `.config/attic/**` pattern in `~/.config/yadm/encrypt`). Same anatomy inside as public relics.
+
+Manifest-declared `BREW_DEPS` and `MIN_RUNTIME_VERSION` are **load-bearing**: `relic::check_deps` fails closed at publish time. When a relic graduates to Stage 3, its deps should be reflected in the appropriate Brewfile — the manifest stays the source of truth.
+
+Bootstrap re-publishes all relics via `~/.config/yadm/snippets/shared/12-publish-relics.sh`. `up` runs `relic::update` per relic; opt out with `UP_SKIP_RELICS=1 up` or `up --no-relics`.
+
+Full reference: `~/.config/reliquary/GRADUATION.md`.
+
 ### yadm wrapper (`~/.config/bin/yadm-wrapper`)
 
 Aliased as `yadm` in interactive shells. Adds custom commands:
