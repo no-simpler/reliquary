@@ -82,12 +82,12 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 On `$PATH` via `env.d/040-env.sh` (the same loop that adds `~/.config/bin/`), but **not** YADM-tracked.
 Canonical lane for executables managed by external meta-projects (halo, bb).
 
-- Each meta-project maintains a registry file in `~/.local/bin/` listing the filenames it owns: `.halo-managed`, `.bb-managed`.
-- Do not `yadm add` anything from `~/.local/bin/`, including the registry files.
-- Do not hand-edit registry files; they are written by each meta-project's publish helper.
+- A single registry file `~/.local/bin/.reliquary-managed` lists every managed binary, one per line, as `<name>[<TAB><owner>]`. The **owner** column is optional, per-entry provenance (the publishing meta-project). `#` comments and blank lines are ignored; membership is keyed on the first field.
+- Do not `yadm add` anything from `~/.local/bin/`, including the registry file.
+- Do not hand-edit the registry; it is written by the publish helper. (Legacy per-meta `.<name>-managed` files are folded into the single registry automatically — by bootstrap, `relic migrate`, and first publish.)
 - The binaries are regenerable: re-run the owning meta-project's publish flow. See that meta-project's `CLAUDE.md` for the protocol.
 
-The publish helper lives here: `~/.config/shell/lib/install-on-path.sh` (yadm-tracked, sourced on demand by each meta-project's publish scripts). Callers invoke it as `META_NAME=<name> source "$HOME/.config/shell/lib/install-on-path.sh"`; the helper enforces the registry contract above. One canonical implementation across all meta-projects — do not duplicate into individual meta-repos.
+The publish helper lives here: `~/.config/shell/lib/install-on-path.sh` (yadm-tracked, sourced on demand by each meta-project's publish scripts). Callers invoke it as `META_NAME=<name> source "$HOME/.config/shell/lib/install-on-path.sh"`; `META_NAME` is **optional** (when set it becomes the owner column and gates collision detection). **PATH names must be unique** — the helper fails fast if a name is already owned by a different relic, already resolves elsewhere on `$PATH`, or collides with a foreign file. One canonical implementation across all meta-projects — do not duplicate into individual meta-repos.
 
 Sanctioned sidesteps: a meta-project may bypass the helper for advanced cases (template substitution, self-update, embedded provenance). The `bb` CLI is the canonical example. Those callers stay responsible for not stomping on YADM-tracked files.
 
@@ -96,10 +96,12 @@ Sanctioned sidesteps: a meta-project may bypass the helper for advanced cases (t
 Personal CLI utils have a three-stage lifecycle. A **relic** is a personal tool the author keeps:
 
 - **Stage 1 — one-shot util**: single file in `~/.config/bin/` (status quo; `bbs`, `pb`, `up`, etc.).
-- **Stage 2 — in-house relic**: directory at `~/.config/relics/<name>/`, yadm-tracked, with a manifest (`relic.sh`), an `entrypoints/` directory, and optional `src/`, `tests/`, `scripts/`. Published onto PATH via the shared lib.
-- **Stage 3 — external relic**: independent repo at `~/Developer/<name>/` (`bb`, `halo` today). Runtime dep on `install-on-path.sh` only; knowledge bidirectional (Reliquary tracks the list of known external relics in `GRADUATION.md`).
+- **Stage 2 — in-house relic**: directory at `~/.config/relics/<name>/`, yadm-tracked, with a manifest (`relic.sh`), an `entrypoints/` directory, and optional `src/`, `tests/`, `scripts/`. Published onto PATH via the shared lib. The `relic` CLI itself is the first Stage-2 relic.
+- **Stage 3 — external relic**: independent repo at `~/Developer/<name>/` (`bb`, `halo` today). The dependency is strictly **unidirectional** (relic → reliquary, via `install-on-path.sh`). Reliquary's "known external relics" list in `GRADUATION.md` is a best-effort convenience, not authoritative; it can also discover registrants via the registry's owner column, but doesn't chase this exhaustively.
 
-`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`), the shared library (`lib/relic.sh`), the relic skeleton (`template/`), and deferred design (`design/relic-cli.md`).
+The `relic` CLI (`relic list|status|publish|test|update|registry|migrate`) is the user-facing surface over all of this — see `GRADUATION.md`.
+
+`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`), the shared library (`lib/relic.sh`), the relic skeleton (`template/`), and deferred-work handoffs (`design/`: the `install-on-path.sh` hoist, `relic scaffold`/`graduate`).
 
 `~/.config/attic/` is the **private relic lane** — the whole subtree is encrypted (the `.config/attic/**` pattern in `~/.config/yadm/encrypt`). Same anatomy inside as public relics.
 

@@ -5,7 +5,9 @@ Each subdirectory is a Stage 2 relic — see
 including anatomy, manifest schema, publish flow, and promotion to
 external (Stage 3) status.
 
-The deferred `relic` CLI is sketched at
-`~/.config/reliquary/design/relic-cli.md`.
+The `relic` CLI lives here at `relic/` — the first Stage-2 relic, and the
+user-facing surface over the whole system. Deferred next steps (the
+`install-on-path.sh` hoist, `relic scaffold`/`graduate`) are in
+`~/.config/reliquary/design/`.
 
 Private relics live under `~/.config/attic/` (encrypted; same anatomy).

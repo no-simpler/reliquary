@@ -42,4 +42,5 @@
   "format_on_save": "off",
   "autosave": "on_focus_change",
   "auto_update": true,
+  "file_scan_exclusions": [],
 }
