@@ -1,3 +1,13 @@
+# --- Exclusions (NOTE: here a leading ! means EXCLUDE — the OPPOSITE of
+#     .gitignore. Order-independent; applies repo-wide but only trims inside
+#     trees an include pattern below already matched.) ---
+!**/__pycache__
+!**/.pytest_cache
+!**/*.pyc
+!**/.mypy_cache
+!**/.ruff_cache
+!**/.DS_Store
+
 .config/arc/benefactor.md
 .config/brew/Brewfile@benefactor
 .config/brew/Brewfile@benefactor-light
