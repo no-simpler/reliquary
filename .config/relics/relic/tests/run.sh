@@ -84,6 +84,44 @@ check "readable attic surfaced"   "$(printf '%s\n' "$listing" | awk -F'\t' '$1==
 check "state_plain published" "$(state_plain published)" "yes"
 check "state_plain unpublished" "$(state_plain unpublished)" "no"
 
+# ── doctor: registry ↔ ~/.local/bin ↔ entrypoints drift ─────────────────────
+LOCAL_BIN="$tmp/bin"
+REGISTRY="$tmp/bin/.reliquary-managed"
+RELICS_LANE="$tmp/drelics"
+ATTIC_LANE="$tmp/dattic"          # absent dir → inhouse_relics skips it
+mkdir -p "$LOCAL_BIN" "$RELICS_LANE/tool"
+printf '# header\n\nalive\towner1\ndead\towner2\ntool\trelicowner\n' > "$REGISTRY"
+: > "$LOCAL_BIN/alive";   chmod +x "$LOCAL_BIN/alive"
+: > "$LOCAL_BIN/tool";    chmod +x "$LOCAL_BIN/tool"
+: > "$LOCAL_BIN/foreign"; chmod +x "$LOCAL_BIN/foreign"   # on PATH lane, unregistered
+# relic 'tool' declares two entrypoints; only 'tool' is registered, 'extra' is not
+printf 'NAME="tool"\nRUNTIME="bash"\n' > "$RELICS_LANE/tool/relic.sh"
+mkdir -p "$RELICS_LANE/tool/entrypoints"
+: > "$RELICS_LANE/tool/entrypoints/tool"
+: > "$RELICS_LANE/tool/entrypoints/extra"
+
+check "doctor_orphans flags dead"   "$(doctor_orphans | awk -F'\t' '$1=="dead"{print $2}')"  "owner2"
+check "doctor_orphans skips alive"  "$(doctor_orphans | awk -F'\t' '$1=="alive"{print "y"}')" ""
+check "doctor_orphans count"        "$(doctor_orphans | grep -c .)"                            "1"
+check "doctor_unpublished flags extra" "$(doctor_unpublished | awk -F'\t' '$2=="extra"{print $1}')" "tool"
+check "doctor_unpublished skips tool"  "$(doctor_unpublished | awk -F'\t' '$2=="tool"{print "y"}')"  ""
+check "doctor_unmanaged flags foreign" "$(doctor_unmanaged | grep -x foreign)"                 "foreign"
+check "doctor_unmanaged skips registry dotfile" "$(doctor_unmanaged | grep -c '^\.')"          "0"
+check "doctor_unmanaged skips registered" "$(doctor_unmanaged | grep -xc alive)"               "0"
+
+# ── prune: install_on_path_prune_registry drops dead, keeps live + owner ────
+prune_out="$(
+    source "$INSTALL_ON_PATH_LIB"
+    _INSTALL_ON_PATH_DIR="$LOCAL_BIN"
+    _INSTALL_ON_PATH_REGISTRY="$REGISTRY"
+    install_on_path_prune_registry >/dev/null
+    cat "$REGISTRY"
+)"
+check "prune keeps alive+owner"  "$(printf '%s\n' "$prune_out" | awk '$1=="alive"{print $2}')" "owner1"
+check "prune keeps tool"         "$(printf '%s\n' "$prune_out" | awk '$1=="tool"{print "y"}')"  "y"
+check "prune drops dead"         "$(printf '%s\n' "$prune_out" | awk '$1=="dead"{print "y"}')"  ""
+check "prune preserves comment"  "$(printf '%s\n' "$prune_out" | grep -c '^# header')"          "1"
+
 rm -rf "$tmp"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

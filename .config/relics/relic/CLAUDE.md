@@ -22,9 +22,16 @@ hoist, `relic scaffold`, `relic graduate`), see `~/.config/reliquary/design/`.
 
 ## Commands
 
-`list`, `status`, `publish`, `test`, `update`, `registry [--migrate]`, `migrate`.
-`<name>` is optional for status/publish/test/update (cwd auto-detect). Unambiguous
-command prefixes are accepted (`relic st`, `relic pub`).
+`list`, `status`, `publish`, `test`, `update`, `registry [--migrate|--prune]`,
+`migrate`, `doctor`. `<name>` is optional for status/publish/test/update (cwd
+auto-detect). Unambiguous command prefixes are accepted (`relic st`, `relic pub`).
+
+- `doctor` — read-only cross-check of registry ↔ `~/.local/bin/` ↔ each relic's
+  entrypoints. Reports orphan registry entries (no backing file), unpublished
+  entrypoints (declared but unregistered), and unmanaged lane files (informational).
+  Exits non-zero on the first two; unmanaged-file notes alone don't fail it.
+- `registry --prune` — drop registry entries whose `~/.local/bin/<name>` target is
+  gone (the fix for `doctor`'s orphans); delegates to `install-on-path.sh`.
 
 - **In-house relics** (Stage 2, `relics/` + `attic/`) support the full set.
 - **External relics** (Stage 3, from GRADUATION.md's known list) are read-only here:

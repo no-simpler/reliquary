@@ -38,9 +38,15 @@ assume**:
 
 ## Smaller follow-ups
 
-- `relic registry --prune`: drop registry entries whose target no longer exists
-  in `~/.local/bin/` (the inverse of the live-vs-registry drift, e.g. the
-  historical `transcribe-asr` gap — present on PATH, absent from the registry
-  until republish).
-- `relic doctor`: cross-check registry ↔ `~/.local/bin/` ↔ each relic's
-  entrypoints, reporting orphans and unpublished entrypoints.
+- ~~`relic registry --prune`~~ **DONE.** Drops registry entries whose target no
+  longer exists in `~/.local/bin/`. Logic lives in `install-on-path.sh`
+  (`install_on_path_prune_registry`, the canonical registry writer); the CLI
+  delegates, mirroring `relic migrate`.
+- ~~`relic doctor`~~ **DONE.** Read-only cross-check of registry ↔ `~/.local/bin/`
+  ↔ each relic's entrypoints. Reports orphan registry entries, unpublished
+  entrypoints (the `transcribe-asr`-shaped gap), and informational unmanaged lane
+  files; exits non-zero on the first two. Pure helpers (`doctor_orphans`,
+  `doctor_unpublished`, `doctor_unmanaged`) in `src/relic.sh`, covered by
+  `tests/run.sh`.
+
+Remaining deferred work in this file: `relic scaffold` and `relic graduate`.
