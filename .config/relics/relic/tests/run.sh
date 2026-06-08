@@ -122,6 +122,56 @@ check "prune keeps tool"         "$(printf '%s\n' "$prune_out" | awk '$1=="tool"
 check "prune drops dead"         "$(printf '%s\n' "$prune_out" | awk '$1=="dead"{print "y"}')"  ""
 check "prune preserves comment"  "$(printf '%s\n' "$prune_out" | grep -c '^# header')"          "1"
 
+# ── scaffold: name/runtime validation, shebang inference, manifest patch, tree ─
+if valid_relic_name foo-bar_1; then check "valid name foo-bar_1" ok ok; else check "valid name foo-bar_1" no ok; fi
+if valid_relic_name ".hidden";  then check "reject leading dot"  no rej; else check "reject leading dot"  rej rej; fi
+if valid_relic_name "-dash";    then check "reject leading dash" no rej; else check "reject leading dash" rej rej; fi
+if valid_relic_name "a/b";      then check "reject slash"        no rej; else check "reject slash"        rej rej; fi
+if valid_relic_name "";         then check "reject empty"        no rej; else check "reject empty"        rej rej; fi
+if valid_runtime bash;          then check "valid runtime bash"  ok ok; else check "valid runtime bash"  no ok; fi
+if valid_runtime perl;          then check "reject runtime perl" no rej; else check "reject runtime perl" rej rej; fi
+
+sdir="$(mktemp -d)"
+printf '#!/usr/bin/env bash\necho hi\n'   > "$sdir/b";  check "infer bash"   "$(infer_runtime "$sdir/b")"  "bash"
+printf '#!/bin/sh\necho hi\n'             > "$sdir/s";  check "infer sh→bash" "$(infer_runtime "$sdir/s")"  "bash"
+printf '#!/usr/bin/env python3\nprint(1)\n' > "$sdir/p"; check "infer python" "$(infer_runtime "$sdir/p")"  "python"
+printf '#!/usr/bin/env fish\necho hi\n'   > "$sdir/f";  check "infer fish"   "$(infer_runtime "$sdir/f")"  "fish"
+printf 'no shebang here\n'                > "$sdir/n";  check "infer none"   "$(infer_runtime "$sdir/n")"  ""
+
+mf="$sdir/relic.sh"
+printf 'NAME=""                # x\nRUNTIME=""             # y\nDOCKER=0\n' > "$mf"
+manifest_set "$mf" NAME widget
+manifest_set "$mf" RUNTIME bash
+( source "$mf"; printf '%s\n' "$NAME" )    > "$sdir/_name"; check "manifest NAME"    "$(cat "$sdir/_name")"    "widget"
+( source "$mf"; printf '%s\n' "$RUNTIME" ) > "$sdir/_rt";   check "manifest RUNTIME" "$(cat "$sdir/_rt")"      "bash"
+check "manifest keeps comment" "$(grep -c '# x' "$mf")" "1"
+
+# scaffold_tree against a scratch template
+TEMPLATE_DIR="$sdir/template"
+mkdir -p "$TEMPLATE_DIR/src" "$TEMPLATE_DIR/entrypoints" "$TEMPLATE_DIR/tests"
+printf 'NAME=""\nRUNTIME=""\n' > "$TEMPLATE_DIR/relic.sh"
+printf 'template doc\n'        > "$TEMPLATE_DIR/CLAUDE.md"
+: > "$TEMPLATE_DIR/src/.gitkeep"; : > "$TEMPLATE_DIR/entrypoints/.gitkeep"; : > "$TEMPLATE_DIR/tests/.gitkeep"
+
+# fresh build (no src script)
+mkdir -p "$sdir/relics"
+fresh="$sdir/relics/fresh"
+scaffold_tree fresh "$fresh" bash ""
+( source "$fresh/relic.sh"; printf '%s %s\n' "$NAME" "$RUNTIME" ) > "$sdir/_fresh"
+check "scaffold fresh manifest" "$(cat "$sdir/_fresh")" "fresh bash"
+check "scaffold fresh CLAUDE stub" "$(grep -c 'in-house (Stage-2) relic' "$fresh/CLAUDE.md")" "1"
+check "scaffold fresh keeps gitkeep" "$([[ -f "$fresh/src/.gitkeep" ]] && echo y)" "y"
+
+# promotion (move a src script, wire entrypoint)
+printf '#!/usr/bin/env bash\necho promoted\n' > "$sdir/prom-src"; chmod +x "$sdir/prom-src"
+prom="$sdir/relics/prom"
+scaffold_tree prom "$prom" bash "$sdir/prom-src"
+check "scaffold promo src moved"   "$([[ -f "$prom/src/prom" ]] && echo y)"               "y"
+check "scaffold promo source gone" "$([[ -e "$sdir/prom-src" ]] && echo present)"          ""
+check "scaffold promo symlink"     "$(readlink "$prom/entrypoints/prom")"                  "../src/prom"
+check "scaffold promo drops gitkeep" "$([[ -e "$prom/entrypoints/.gitkeep" ]] && echo y)"  ""
+rm -rf "$sdir"
+
 rm -rf "$tmp"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"

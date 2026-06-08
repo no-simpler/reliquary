@@ -13,6 +13,8 @@
 #   publish [<name>]      publish an in-house relic's entrypoints onto PATH
 #   test    [<name>]      run an in-house relic's tests
 #   update  [<name>]      update/rebuild an in-house relic
+#   scaffold <name> [-r <rt>]  promote a Stage-1 bin/ util (or a fresh idea)
+#                         into a Stage-2 in-house relic
 #   registry [--migrate|--prune]  show / fold / prune the shared PATH registry
 #   migrate               fold legacy per-meta registries into .reliquary-managed
 #   doctor                cross-check registry ↔ ~/.local/bin ↔ entrypoints
@@ -27,11 +29,13 @@ RELIC_LIB="$HOME/.config/reliquary/lib/relic.sh"
 INSTALL_ON_PATH_LIB="$HOME/.config/shell/lib/install-on-path.sh"
 RELICS_LANE="$HOME/.config/relics"
 ATTIC_LANE="$HOME/.config/attic"
+BIN_LANE="$HOME/.config/bin"
+TEMPLATE_DIR="$HOME/.config/reliquary/template"
 GRADUATION="$HOME/.config/reliquary/GRADUATION.md"
 LOCAL_BIN="$HOME/.local/bin"
 REGISTRY="$LOCAL_BIN/.reliquary-managed"
 
-COMMANDS="list status publish test update registry migrate doctor help"
+COMMANDS="list status publish test update scaffold registry migrate doctor help"
 
 # ── output ──────────────────────────────────────────────────────────────────
 
@@ -262,6 +266,86 @@ state_plain() {
     esac
 }
 
+# ── scaffold helpers (pure / file; unit-tested) ─────────────────────────────
+
+# A relic name is the published binary name: a slug of letters, digits, dash,
+# underscore, not starting with a dot or dash. Rejects slashes and empties.
+valid_relic_name() {
+    case "$1" in
+        ""|.*|-*) return 1 ;;
+        *[!A-Za-z0-9_-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+valid_runtime() {
+    case "$1" in
+        python|bash|fish|rust|docker) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Map a script's shebang to a relic RUNTIME. Emits the runtime, or nothing when
+# it can't be inferred (caller then prompts / requires --runtime).
+infer_runtime() {
+    local script="$1" first
+    [[ -r "$script" ]] || return 0
+    IFS= read -r first < "$script" || true
+    case "$first" in
+        '#!'*) ;;
+        *) return 0 ;;
+    esac
+    case "$first" in
+        *python*) printf 'python' ;;
+        *fish*)   printf 'fish'   ;;
+        *bash*)   printf 'bash'   ;;
+        *[/\ ]sh|*[/\ ]sh\ *) printf 'bash' ;;   # /bin/sh, /usr/bin/env sh, sh -e → bash
+        *) return 0 ;;
+    esac
+}
+
+# Rewrite a `KEY="..."` assignment in a bash manifest, preserving any trailing
+# `# comment`. Portable (no sed -i): awk to a temp file, then mv.
+manifest_set() {
+    local file="$1" key="$2" val="$3" tmp
+    tmp="$(mktemp)" || return 1
+    awk -v k="$key" -v v="$val" '
+        $0 ~ ("^"k"=") {
+            c = ""
+            if (match($0, /#.*/)) c = "  " substr($0, RSTART)
+            printf "%s=\"%s\"%s\n", k, v, c
+            next
+        }
+        { print }
+    ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# Build a relic tree at <dir> from $TEMPLATE_DIR: fill NAME/RUNTIME, drop a
+# project CLAUDE.md stub, and (when <src-script> is given) move it into src/ and
+# wire the entrypoint symlink. Parameterised on <dir>/$TEMPLATE_DIR so tests can
+# drive it against scratch dirs.
+scaffold_tree() {
+    local name="$1" dir="$2" runtime="$3" src_script="${4:-}"
+    cp -r "$TEMPLATE_DIR" "$dir" || return 1
+    manifest_set "$dir/relic.sh" NAME "$name" || return 1
+    manifest_set "$dir/relic.sh" RUNTIME "$runtime" || return 1
+    cat > "$dir/CLAUDE.md" <<EOF
+# \`$name\` — in-house (Stage-2) relic
+
+Scaffolded from \`~/.config/reliquary/template\`. See
+\`~/.config/reliquary/GRADUATION.md\` for the lifecycle, manifest schema, and
+publish flow.
+
+TODO: describe what \`$name\` does and any agent context worth keeping.
+EOF
+    if [[ -n "$src_script" ]]; then
+        mv "$src_script" "$dir/src/$name" || return 1
+        chmod +x "$dir/src/$name"
+        rm -f "$dir/src/.gitkeep" "$dir/entrypoints/.gitkeep"
+        ln -s "../src/$name" "$dir/entrypoints/$name" || return 1
+    fi
+}
+
 # ── commands ────────────────────────────────────────────────────────────────
 
 cmd_list() {
@@ -379,6 +463,83 @@ _run_op() {
     fi
 }
 
+cmd_scaffold() {
+    local name="" runtime=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -r|--runtime) runtime="${2:-}"; shift 2 || die "missing value for $1" ;;
+            -*) die "unknown flag: $1" ;;
+            *) [[ -z "$name" ]] || die "unexpected extra argument: $1"; name="$1"; shift ;;
+        esac
+    done
+
+    [[ -n "$name" ]]        || die "scaffold: missing <name>"
+    valid_relic_name "$name" || die "invalid relic name: $name (use letters, digits, dash, underscore)"
+    [[ -z "$runtime" ]] || valid_runtime "$runtime" || die "invalid runtime: $runtime (one of python|bash|fish|rust|docker)"
+
+    if find_inhouse_dir "$name" >/dev/null || [[ -e "$RELICS_LANE/$name" ]]; then
+        die "a relic named '$name' already exists"
+    fi
+    local dir="$RELICS_LANE/$name"
+
+    # Promotion source: an existing Stage-1 one-shot at ~/.config/bin/<name>.
+    local src=""
+    [[ -f "$BIN_LANE/$name" ]] && src="$BIN_LANE/$name"
+
+    # Resolve RUNTIME: explicit flag → shebang inference → prompt (TTY) → die.
+    if [[ -z "$runtime" && -n "$src" ]]; then
+        runtime="$(infer_runtime "$src")"
+        [[ -n "$runtime" ]] && info "${_c_dim}inferred runtime '$runtime' from $src${_c_rst}"
+    fi
+    if [[ -z "$runtime" ]]; then
+        if [[ -t 0 ]]; then
+            local ans
+            printf 'runtime (python|bash|fish|rust|docker): ' >&2
+            IFS= read -r ans || true
+            runtime="$ans"
+        fi
+        [[ -n "$runtime" ]] || die "could not infer RUNTIME; pass --runtime <python|bash|fish|rust|docker>"
+        valid_runtime "$runtime" || die "invalid runtime: $runtime"
+    fi
+
+    scaffold_tree "$name" "$dir" "$runtime" "$src" || die "failed to scaffold $dir"
+    info "${_c_grn}scaffolded${_c_rst} $dir ${_c_dim}(runtime: $runtime)${_c_rst}"
+
+    if [[ -n "$src" ]]; then
+        info "promoted ${_c_bold}$name${_c_rst} from $src → src/$name"
+        _load_relic_lib
+        relic::publish "$dir" || die "publish failed for $name"
+        _stage_in_yadm "$src" "$dir"
+        info ""
+        cmd_status "$name"
+    else
+        info ""
+        info "next steps ${_c_dim}(fresh relic — no Stage-1 source found)${_c_rst}:"
+        info "  1. add your executable under $dir/src/"
+        info "  2. ln -s ../src/<file> $dir/entrypoints/$name"
+        info "  3. relic publish $name"
+        info "${_c_dim}staging is left until there's something publishable.${_c_rst}"
+    fi
+}
+
+# Stage the scaffold result in yadm: the new tree, plus the moved Stage-1 path's
+# deletion when that path was tracked. Best-effort and independent per path — a
+# missing yadm, an untracked source, or a non-yadm HOME must not fail the
+# scaffold, which already stands on disk. Stages only — the commit is deliberate.
+_stage_in_yadm() {
+    local old="$1" dir="$2" staged=0
+    command -v yadm >/dev/null 2>&1 || return 0
+    yadm add "$dir" 2>/dev/null && staged=1
+    if yadm ls-files --error-unmatch "$old" >/dev/null 2>&1; then
+        yadm add -A "$old" 2>/dev/null && staged=1   # -A records the deletion
+    fi
+    if [[ $staged -eq 1 ]]; then
+        info "${_c_dim}staged in yadm: ${dir#"$HOME"/}${_c_rst}"
+    else
+        warn "could not stage in yadm; stage manually if this HOME is yadm-tracked"
+    fi
+}
+
 cmd_registry() {
     if [[ "${1:-}" == "--migrate" ]]; then cmd_migrate; return; fi
     if [[ "${1:-}" == "--prune" ]]; then cmd_prune; return; fi
@@ -465,6 +626,8 @@ commands:
   publish [<name>]      publish an in-house relic's entrypoints onto PATH
   test    [<name>]      run an in-house relic's tests
   update  [<name>]      update/rebuild an in-house relic
+  scaffold <name> [-r <rt>]  promote a Stage-1 ~/.config/bin util (or fresh
+                        idea) into a Stage-2 relic, then publish + stage
   registry [--migrate|--prune]  show / fold / prune the shared PATH registry
   migrate               fold legacy per-meta registries into .reliquary-managed
   doctor                cross-check registry ↔ ~/.local/bin ↔ entrypoints
@@ -472,6 +635,8 @@ commands:
 
 <name> is optional for status/publish/test/update when run from inside a
 relic directory. Unambiguous command prefixes are accepted (e.g. \`relic st\`).
+\`scaffold\` infers RUNTIME from a promoted script's shebang; pass \`-r/--runtime\`
+to override, or for a fresh relic with no source to sniff.
 EOF
 }
 
@@ -503,6 +668,7 @@ main() {
         publish)  cmd_publish "$@" ;;
         test)     cmd_test "$@" ;;
         update)   cmd_update "$@" ;;
+        scaffold) cmd_scaffold "$@" ;;
         registry) cmd_registry "$@" ;;
         migrate)  cmd_migrate "$@" ;;
         doctor)   cmd_doctor "$@" ;;

@@ -1,26 +1,31 @@
 # Handoff: `relic` CLI — next subcommands
 
 **Status:** `relic` v1 has landed at `~/.config/relics/relic/` with
-`list / status / publish / test / update / registry / migrate`. Two
-lifecycle-automation commands were deferred until a real relic or two teaches
-the ergonomics (don't design these from zero data). Both live in the same
-single self-contained `src/relic.sh` — keep that constraint (the published
-entrypoint is one copied file; no runtime sibling sourcing without a bundling
-`scripts/publish.sh`).
+`list / status / publish / test / update / registry / migrate`, and `scaffold`
+landed after it (see below). One lifecycle-automation command remains deferred —
+`graduate` — until a real relic or two teaches the ergonomics (don't design it
+from zero data). It lives in the same single self-contained `src/relic.sh` —
+keep that constraint (the published entrypoint is one copied file; no runtime
+sibling sourcing without a bundling `scripts/publish.sh`).
 
-## `relic scaffold <name>` — Stage 1 → 2
+## ~~`relic scaffold <name>` — Stage 1 → 2~~ **DONE.**
 
-Turn a one-shot `~/.config/bin/<name>` (or a fresh idea) into an in-house relic.
+Promotes a one-shot `~/.config/bin/<name>` (or a fresh idea) into an in-house
+relic. Implemented in `src/relic.sh` (`cmd_scaffold` + the pure helpers
+`valid_relic_name`, `valid_runtime`, `infer_runtime`, `manifest_set`,
+`scaffold_tree`), covered by `tests/run.sh`.
 
-- `cp -r ~/.config/reliquary/template ~/.config/relics/<name>`.
-- If promoting an existing Stage-1 script: move it into `src/`, leave the
-  `entrypoints/<name>` symlink pointing at it.
-- Fill the manifest (`NAME`, `RUNTIME`, deps). Prompt for `RUNTIME` if not
-  inferable from the script's shebang.
-- Publish and confirm (`relic publish <name>` then `relic status <name>`).
-- Open question: should it `yadm rm` the old Stage-1 file and `yadm add` the new
-  tree, or leave staging to the user? Lean: stage nothing, just print the
-  `yadm add` line — matches the repo's manual-commit house style.
+- Copies `~/.config/reliquary/template`; fills `NAME`/`RUNTIME` via `manifest_set`
+  and drops a relic-specific `CLAUDE.md` stub.
+- Promotion: moves the Stage-1 script into `src/<name>`, wires the
+  `entrypoints/<name> -> ../src/<name>` symlink, infers RUNTIME from the shebang
+  (override with `-r/--runtime`; prompts on a TTY when neither is available).
+- Publishes (`relic::publish`) and confirms (`relic status`).
+- **Resolved open question** (per user directive — yadm is run agentically, never
+  handed to the user): scaffold **stages its own result** — `yadm add` of the new
+  tree plus the moved Stage-1 path's removal (staged only; the commit stays a
+  deliberate step). The earlier "stage nothing, print the yadm line" lean was
+  overridden.
 
 ## `relic graduate <name>` — Stage 2 → 3
 
@@ -49,4 +54,4 @@ assume**:
   `doctor_unpublished`, `doctor_unmanaged`) in `src/relic.sh`, covered by
   `tests/run.sh`.
 
-Remaining deferred work in this file: `relic scaffold` and `relic graduate`.
+Remaining deferred work in this file: `relic graduate`.
