@@ -1,8 +1,18 @@
 # Handoff: hoist `install-on-path.sh` into `reliquary/lib/`
 
-**Status:** deferred. Registry consolidation and the `relic` CLI have landed;
-the hoist was intentionally split out to avoid churning the external repos in
-the same session (halo had no remote and a dirty tree at the time).
+**Status:** deferred — but **no longer blocked, and ready to execute.** Registry
+consolidation and the `relic` CLI have landed; the hoist was originally split out
+to avoid churning the external repos in the same session (halo had a dirty tree
+at the time). That precondition is now satisfied: as of the session that added
+`relic doctor` / `registry --prune`, both `~/Developer/bb` and `~/Developer/halo`
+are clean. The next session can do the move as one coordinated changeset without
+waiting on anything — see the steps and reference checklist below.
+
+Note one new caller to update that didn't exist when this handoff was written:
+`install-on-path.sh` now also defines `install_on_path_prune_registry` (a sibling
+of `install_on_path_migrate_registries`); it moves with the file, no path edits
+needed, but the `relic registry --prune` / `migrate` delegation in `relic.sh`
+sources the lib via the same `INSTALL_ON_PATH_LIB` constant covered in step 3.
 
 ## Why
 

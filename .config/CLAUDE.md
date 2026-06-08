@@ -99,7 +99,7 @@ Personal CLI utils have a three-stage lifecycle. A **relic** is a personal tool 
 - **Stage 2 — in-house relic**: directory at `~/.config/relics/<name>/`, yadm-tracked, with a manifest (`relic.sh`), an `entrypoints/` directory, and optional `src/`, `tests/`, `scripts/`. Published onto PATH via the shared lib. The `relic` CLI itself is the first Stage-2 relic.
 - **Stage 3 — external relic**: independent repo at `~/Developer/<name>/` (`bb`, `halo` today). The dependency is strictly **unidirectional** (relic → reliquary, via `install-on-path.sh`). Reliquary's "known external relics" list in `GRADUATION.md` is a best-effort convenience, not authoritative; it can also discover registrants via the registry's owner column, but doesn't chase this exhaustively.
 
-The `relic` CLI (`relic list|status|publish|test|update|registry|migrate`) is the user-facing surface over all of this — see `GRADUATION.md`.
+The `relic` CLI (`relic list|status|publish|test|update|registry|migrate|doctor`) is the user-facing surface over all of this — see `GRADUATION.md`. `registry` takes `--migrate`/`--prune`; `doctor` is a read-only registry ↔ PATH ↔ entrypoints health check.
 
 `~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`), the shared library (`lib/relic.sh`), the relic skeleton (`template/`), and deferred-work handoffs (`design/`: the `install-on-path.sh` hoist, `relic scaffold`/`graduate`).
 

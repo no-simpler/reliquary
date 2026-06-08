@@ -206,3 +206,37 @@ install_on_path_migrate_registries() {
 
     return 0
 }
+
+# Drop registry entries whose target no longer exists in ~/.local/bin/, the
+# inverse of a republish: a relic was renamed or retired but its name lingered
+# in .reliquary-managed. Comments, blank lines, and the owner column on
+# surviving entries are preserved; each pruned name is printed to stdout.
+# Idempotent and safe to re-run: a clean registry rewrites byte-identical.
+install_on_path_prune_registry() {
+    [[ -f "$_INSTALL_ON_PATH_REGISTRY" ]] || return 0
+
+    local tmp name pruned=0
+    tmp="$(mktemp "${TMPDIR:-/tmp}/reliquary-managed.XXXXXX")" || return 1
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Pass comments and blanks through untouched.
+        case "$line" in
+            '#'*|'') printf '%s\n' "$line" >> "$tmp"; continue ;;
+        esac
+        name="${line%%[[:space:]]*}"
+        if [[ -z "$name" ]]; then
+            printf '%s\n' "$line" >> "$tmp"
+            continue
+        fi
+        if [[ -e "$_INSTALL_ON_PATH_DIR/$name" ]]; then
+            printf '%s\n' "$line" >> "$tmp"
+        else
+            printf 'pruned %s (no file at %s)\n' "$name" "$_INSTALL_ON_PATH_DIR/$name"
+            pruned=$((pruned + 1))
+        fi
+    done < "$_INSTALL_ON_PATH_REGISTRY"
+
+    mv "$tmp" "$_INSTALL_ON_PATH_REGISTRY"
+    [[ $pruned -eq 0 ]] && printf 'registry clean — nothing to prune\n'
+    return 0
+}

@@ -122,18 +122,26 @@ the registry entry as-is.
 Stage-2 relic, self-hosted at `~/.config/relics/relic/`:
 
 ```
-relic list                  # all relics: stage, runtime, published-state
-relic status [<name>]       # one relic's detail (deps, PATH wiring, git dirty)
-relic publish [<name>]      # in-house relic → PATH (wraps relic::publish)
-relic test    [<name>]      # wraps relic::test
-relic update  [<name>]      # wraps relic::update
-relic registry [--migrate]  # show the shared registry (name → owner)
-relic migrate               # fold legacy per-meta registries
+relic list                       # all relics: stage, runtime, published-state
+relic status [<name>]            # one relic's detail (deps, PATH wiring, git dirty)
+relic publish [<name>]           # in-house relic → PATH (wraps relic::publish)
+relic test    [<name>]           # wraps relic::test
+relic update  [<name>]           # wraps relic::update
+relic registry [--migrate|--prune]  # show / fold / prune the shared registry
+relic migrate                    # fold legacy per-meta registries
+relic doctor                     # cross-check registry ↔ ~/.local/bin ↔ entrypoints
 ```
 
 `<name>` is optional for status/publish/test/update (cwd auto-detect).
 In-house relics get the full set; external relics are read-only here
 (`list`/`status` report them best-effort; manage them in their own repos).
+
+`relic doctor` is a read-only health check: it reports orphan registry entries
+(registered but no file on PATH), unpublished entrypoints (declared by a relic
+but missing from the registry — the `transcribe-asr`-shaped drift), and
+informational unmanaged lane files. `relic registry --prune` is its companion
+fix: it drops orphan entries whose `~/.local/bin/<name>` target is gone.
+
 Deferred subcommands (`scaffold`, `graduate`) and the `install-on-path.sh`
 hoist are sketched in `design/` for a later session.
 

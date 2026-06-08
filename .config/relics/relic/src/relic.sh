@@ -13,8 +13,9 @@
 #   publish [<name>]      publish an in-house relic's entrypoints onto PATH
 #   test    [<name>]      run an in-house relic's tests
 #   update  [<name>]      update/rebuild an in-house relic
-#   registry [--migrate]  show the shared PATH registry (name → owner)
+#   registry [--migrate|--prune]  show / fold / prune the shared PATH registry
 #   migrate               fold legacy per-meta registries into .reliquary-managed
+#   doctor                cross-check registry ↔ ~/.local/bin ↔ entrypoints
 #   help                  this message
 #
 # <name> may be omitted for status/publish/test/update when run from inside
@@ -27,9 +28,10 @@ INSTALL_ON_PATH_LIB="$HOME/.config/shell/lib/install-on-path.sh"
 RELICS_LANE="$HOME/.config/relics"
 ATTIC_LANE="$HOME/.config/attic"
 GRADUATION="$HOME/.config/reliquary/GRADUATION.md"
-REGISTRY="$HOME/.local/bin/.reliquary-managed"
+LOCAL_BIN="$HOME/.local/bin"
+REGISTRY="$LOCAL_BIN/.reliquary-managed"
 
-COMMANDS="list status publish test update registry migrate help"
+COMMANDS="list status publish test update registry migrate doctor help"
 
 # ── output ──────────────────────────────────────────────────────────────────
 
@@ -75,6 +77,54 @@ reg_owner() {
         /^[[:space:]]*#/ { next } /^[[:space:]]*$/ { next }
         $1 == n { print $2; exit }
     ' "$REGISTRY"
+}
+
+# Emit every registered name (first field), one per line.
+reg_names() {
+    [[ -f "$REGISTRY" ]] || return 0
+    awk '/^[[:space:]]*#/ { next } /^[[:space:]]*$/ { next } { print $1 }' "$REGISTRY"
+}
+
+# ── doctor (registry ↔ ~/.local/bin ↔ entrypoints drift) ─────────────────────
+
+# Registry entries with no backing file in $LOCAL_BIN — `registry --prune`
+# fodder. Emits "<name>\t<owner>" per orphan.
+doctor_orphans() {
+    local name owner
+    while IFS= read -r name; do
+        [[ -z "$name" ]] && continue
+        [[ -e "$LOCAL_BIN/$name" ]] && continue
+        owner="$(reg_owner "$name")"
+        printf '%s\t%s\n' "$name" "$owner"
+    done < <(reg_names)
+}
+
+# In-house entrypoints that aren't in the registry — i.e. declared but never
+# published (the inverse of an orphan). Emits "<relic>\t<entrypoint>" per gap.
+# Attic-safe: rides on inhouse_relics, which only surfaces readable manifests.
+doctor_unpublished() {
+    local name dir lane ep
+    while IFS=$'\t' read -r name dir lane; do
+        while IFS= read -r ep; do
+            [[ -z "$ep" ]] && continue
+            reg_has "$ep" && continue
+            printf '%s\t%s\n' "$name" "$ep"
+        done < <(relic_entrypoints "$dir")
+    done < <(inhouse_relics)
+}
+
+# Executable files in $LOCAL_BIN (non-dotfiles) absent from the registry —
+# foreign or sanctioned-sidestep binaries sharing the lane. Informational.
+doctor_unmanaged() {
+    local f n
+    [[ -d "$LOCAL_BIN" ]] || return 0
+    for f in "$LOCAL_BIN"/*; do
+        [[ -f "$f" && -x "$f" ]] || continue
+        n="$(basename "$f")"
+        case "$n" in .*) continue ;; esac
+        reg_has "$n" && continue
+        printf '%s\n' "$n"
+    done
 }
 
 # ── discovery ───────────────────────────────────────────────────────────────
@@ -331,6 +381,7 @@ _run_op() {
 
 cmd_registry() {
     if [[ "${1:-}" == "--migrate" ]]; then cmd_migrate; return; fi
+    if [[ "${1:-}" == "--prune" ]]; then cmd_prune; return; fi
     if [[ ! -f "$REGISTRY" ]]; then
         info "${_c_dim}registry empty — $REGISTRY does not exist yet${_c_rst}"
         return
@@ -348,6 +399,60 @@ cmd_migrate() {
     info "folded any legacy per-meta registries into $REGISTRY"
 }
 
+cmd_prune() {
+    _load_install_on_path
+    install_on_path_prune_registry
+}
+
+cmd_doctor() {
+    local problems=0 any name owner ep
+
+    info "${_c_bold}Orphan registry entries${_c_rst} ${_c_dim}(registered, no file in ~/.local/bin)${_c_rst}"
+    any=0
+    while IFS=$'\t' read -r name owner; do
+        [[ -z "$name" ]] && continue
+        any=1; problems=$((problems + 1))
+        info "  ${_c_yel}$name${_c_rst}${owner:+ ${_c_dim}(owner: $owner)${_c_rst}}"
+    done < <(doctor_orphans)
+    if [[ $any -eq 0 ]]; then
+        printf '  %s(none)%s\n' "$_c_grn" "$_c_rst"
+    else
+        info "  ${_c_dim}fix: relic registry --prune${_c_rst}"
+    fi
+
+    info ""
+    info "${_c_bold}Unpublished entrypoints${_c_rst} ${_c_dim}(declared by a relic, not in registry)${_c_rst}"
+    any=0
+    while IFS=$'\t' read -r name ep; do
+        [[ -z "$ep" ]] && continue
+        any=1; problems=$((problems + 1))
+        info "  ${_c_yel}$ep${_c_rst} ${_c_dim}($name)${_c_rst}"
+    done < <(doctor_unpublished)
+    if [[ $any -eq 0 ]]; then
+        printf '  %s(none)%s\n' "$_c_grn" "$_c_rst"
+    else
+        info "  ${_c_dim}fix: relic publish <relic>${_c_rst}"
+    fi
+
+    info ""
+    info "${_c_bold}Unmanaged files${_c_rst} ${_c_dim}(in ~/.local/bin, not in registry — informational)${_c_rst}"
+    any=0
+    while IFS= read -r name; do
+        [[ -z "$name" ]] && continue
+        any=1
+        info "  ${_c_dim}$name${_c_rst}"
+    done < <(doctor_unmanaged)
+    [[ $any -eq 0 ]] && printf '  %s(none)%s\n' "$_c_grn" "$_c_rst"
+
+    info ""
+    if [[ $problems -eq 0 ]]; then
+        info "${_c_grn}healthy${_c_rst} — registry, PATH lane, and entrypoints agree"
+        return 0
+    fi
+    info "${_c_yel}$problems issue(s) found${_c_rst}"
+    return 1
+}
+
 usage() {
     cat <<EOF
 relic — manage Reliquary relics
@@ -360,8 +465,9 @@ commands:
   publish [<name>]      publish an in-house relic's entrypoints onto PATH
   test    [<name>]      run an in-house relic's tests
   update  [<name>]      update/rebuild an in-house relic
-  registry [--migrate]  show the shared PATH registry (name → owner)
+  registry [--migrate|--prune]  show / fold / prune the shared PATH registry
   migrate               fold legacy per-meta registries into .reliquary-managed
+  doctor                cross-check registry ↔ ~/.local/bin ↔ entrypoints
   help                  this message
 
 <name> is optional for status/publish/test/update when run from inside a
@@ -399,6 +505,7 @@ main() {
         update)   cmd_update "$@" ;;
         registry) cmd_registry "$@" ;;
         migrate)  cmd_migrate "$@" ;;
+        doctor)   cmd_doctor "$@" ;;
         help)     usage ;;
     esac
 }
