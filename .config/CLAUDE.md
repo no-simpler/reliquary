@@ -29,7 +29,7 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 
 **Path availability.** `yadm` is on `$PATH` in non-interactive bash and zsh: `~/.zshenv` and `~/.bash_env` (via `$BASH_ENV`) source `env.d/040-env.sh`, which puts Homebrew on `$PATH`. Use bare `yadm <cmd>` — no need for `/opt/homebrew/bin/yadm`. The wrapper alias is interactive-only (see below); wrapper-only subcommands still need explicit `~/.config/bin/yadm-wrapper <cmd>`.
 
-**Authorization.** `yadm commit` and `yadm push` are pre-approved — no need to ask before either. `yadm encrypt` triggers Touch ID; announce it before running so the user is ready to approve.
+**Authorization.** `yadm commit` and `yadm push` are pre-approved — run them yourself; never ask first and never hand the commit/push off to the user to run. Be aware that **`yadm commit` triggers a Touch ID prompt** — commits are SSH-signed through 1Password (`op-ssh-sign`, per the global git config) — as does `yadm encrypt`. If the user is AFK the prompt times out and the command fails; that just means the user is away, not a real error. Surface it plainly and let them retry when back — don't thrash, retry in a loop, or try to work around the signing.
 
 ## Repository structure
 
@@ -99,9 +99,9 @@ Personal CLI utils have a three-stage lifecycle. A **relic** is a personal tool 
 - **Stage 2 — in-house relic**: directory at `~/.config/relics/<name>/`, yadm-tracked, with a manifest (`relic.sh`), an `entrypoints/` directory, and optional `src/`, `tests/`, `scripts/`. Published onto PATH via the shared lib. The `relic` CLI itself is the first Stage-2 relic.
 - **Stage 3 — external relic**: independent repo at `~/Developer/<name>/` (`bb`, `halo` today). The dependency is strictly **unidirectional** (relic → reliquary, via `install-on-path.sh`). Reliquary's "known external relics" list in `GRADUATION.md` is a best-effort convenience, not authoritative; it can also discover registrants via the registry's owner column, but doesn't chase this exhaustively.
 
-The `relic` CLI (`relic list|status|publish|test|update|registry|migrate|doctor`) is the user-facing surface over all of this — see `GRADUATION.md`. `registry` takes `--migrate`/`--prune`; `doctor` is a read-only registry ↔ PATH ↔ entrypoints health check.
+The `relic` CLI (`relic list|status|publish|test|update|scaffold|registry|migrate|doctor`) is the user-facing surface over all of this — see `GRADUATION.md`. `scaffold <name>` promotes a Stage-1 `~/.config/bin` util (or a fresh idea) into a Stage-2 relic — infers RUNTIME from the script's shebang (or `-r/--runtime`), publishes, and stages the result in yadm. `registry` takes `--migrate`/`--prune`; `doctor` is a read-only registry ↔ PATH ↔ entrypoints health check.
 
-`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`), the shared library (`lib/relic.sh`), the relic skeleton (`template/`), and deferred-work handoffs (`design/`: the `install-on-path.sh` hoist, `relic scaffold`/`graduate`).
+`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`), the shared library (`lib/relic.sh`), the relic skeleton (`template/`), and deferred-work handoffs (`design/`: the `install-on-path.sh` hoist, `relic graduate`).
 
 `~/.config/attic/` is the **private relic lane** — the whole subtree is encrypted (the `.config/attic/**` pattern in `~/.config/yadm/encrypt`). Same anatomy inside as public relics.
 

@@ -6,7 +6,7 @@ same `relic::publish` / `install-on-path.sh` rails it exposes.
 
 For the lifecycle, stages, and registry model, see
 `~/.config/reliquary/GRADUATION.md`. For deferred work (the `install-on-path.sh`
-hoist, `relic scaffold`, `relic graduate`), see `~/.config/reliquary/design/`.
+hoist, `relic graduate`), see `~/.config/reliquary/design/`.
 
 ## Anatomy
 
@@ -22,10 +22,20 @@ hoist, `relic scaffold`, `relic graduate`), see `~/.config/reliquary/design/`.
 
 ## Commands
 
-`list`, `status`, `publish`, `test`, `update`, `registry [--migrate|--prune]`,
-`migrate`, `doctor`. `<name>` is optional for status/publish/test/update (cwd
-auto-detect). Unambiguous command prefixes are accepted (`relic st`, `relic pub`).
+`list`, `status`, `publish`, `test`, `update`, `scaffold`,
+`registry [--migrate|--prune]`, `migrate`, `doctor`. `<name>` is optional for
+status/publish/test/update (cwd auto-detect). Unambiguous command prefixes are
+accepted (`relic st`, `relic pub`; note `s` alone is now ambiguous —
+status/scaffold — so `relic sc` for scaffold).
 
+- `scaffold <name> [-r <rt>]` — Stage 1 → 2 promotion. If `~/.config/bin/<name>`
+  exists it is moved into `src/<name>`, the `entrypoints/<name>` symlink is wired,
+  RUNTIME is inferred from its shebang (override with `-r/--runtime`), then the
+  relic is published and the result staged in yadm (`yadm add` of the tree + the
+  moved Stage-1 path's removal — staged only, the commit stays deliberate). With
+  no Stage-1 source it lays down a bare skeleton and prints next steps. Helpers
+  (`valid_relic_name`, `valid_runtime`, `infer_runtime`, `manifest_set`,
+  `scaffold_tree`) are pure/file-level and unit-tested in `tests/run.sh`.
 - `doctor` — read-only cross-check of registry ↔ `~/.local/bin/` ↔ each relic's
   entrypoints. Reports orphan registry entries (no backing file), unpublished
   entrypoints (declared but unregistered), and unmanaged lane files (informational).

@@ -14,8 +14,9 @@ This is the canonical reference. For benefactor-specific deltas, see
 | 2     | `~/.config/relics/<name>/`        | in-house relic, yadm-tracked    | `relic`               |
 | 3     | `~/Developer/<name>/`             | external relic, own git repo    | `bb`, `halo`          |
 
-**Stage 1 → 2**: scaffold from `~/.config/reliquary/template/`, move the
-script into `src/`, write a manifest, symlink the entrypoint, publish.
+**Stage 1 → 2**: `relic scaffold <name>` — scaffolds from
+`~/.config/reliquary/template/`, moves the script into `src/`, writes the
+manifest, symlinks the entrypoint, publishes (or lay it out by hand).
 
 **Stage 2 → 3**: see "Promotion to external relic" below.
 
@@ -127,6 +128,7 @@ relic status [<name>]            # one relic's detail (deps, PATH wiring, git di
 relic publish [<name>]           # in-house relic → PATH (wraps relic::publish)
 relic test    [<name>]           # wraps relic::test
 relic update  [<name>]           # wraps relic::update
+relic scaffold <name> [-r <rt>]  # Stage 1 → 2: promote a bin/ util or fresh idea
 relic registry [--migrate|--prune]  # show / fold / prune the shared registry
 relic migrate                    # fold legacy per-meta registries
 relic doctor                     # cross-check registry ↔ ~/.local/bin ↔ entrypoints
@@ -142,7 +144,11 @@ but missing from the registry — the `transcribe-asr`-shaped drift), and
 informational unmanaged lane files. `relic registry --prune` is its companion
 fix: it drops orphan entries whose `~/.local/bin/<name>` target is gone.
 
-Deferred subcommands (`scaffold`, `graduate`) and the `install-on-path.sh`
+`relic scaffold <name>` automates **Stage 1 → 2**: it moves a `~/.config/bin`
+one-shot util into `src/`, wires the entrypoint, fills the manifest (RUNTIME
+inferred from the script's shebang, or `-r/--runtime`), publishes, and stages the
+result in yadm. With no Stage-1 source it scaffolds a bare skeleton and prints
+next steps. The deferred `graduate` subcommand and the `install-on-path.sh`
 hoist are sketched in `design/` for a later session.
 
 ## Private lane: `~/.config/attic/`
