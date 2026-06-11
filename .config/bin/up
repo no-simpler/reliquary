@@ -171,23 +171,50 @@ update_rust() {
     net_timeout 600 rustup update
 }
 
+# Run `cargo install-update -a`, capturing a transcript (for network-vs-real
+# classification) and cargo's true exit code in <rc_file>.
+#
+# When attached to a real terminal we run it under a pseudo-tty via script(1)
+# so cargo keeps its colored, live progress output (and the red miette error
+# box). Without a tty (piped, cron, background) script(1) can't allocate a pty,
+# so we use a plain pipe — no color, but cargo still runs and is captured. As a
+# safety net, if script(1) leaves an empty transcript (it failed to set up the
+# pty and thus never ran cargo) we fall back to the pipe so the update still
+# happens.
+#   run_cargo_update <transcript_file> <rc_file>
+run_cargo_update() {
+    local log="$1" rcf="$2"
+    local inner='cargo install-update -a; echo $? > "'"$rcf"'"'
+    if [ -t 1 ] && [ -t 0 ] && command -v script &>/dev/null; then
+        case "$OSTYPE" in
+            darwin*|*bsd*) net_timeout 2400 script -q "$log" /bin/bash -c "$inner" ;;
+            *)             net_timeout 2400 script -q -e -c "$inner" "$log" ;;
+        esac
+        [ -s "$log" ] && return 0   # pty worked; rc already stashed by $inner
+    fi
+    net_timeout 2400 cargo install-update -a 2>&1 | tee "$log"
+    echo "${PIPESTATUS[0]}" > "$rcf"
+}
+
 # --- Cargo-installed binaries ----------------------------------------------
 update_cargo_bins() {
     command -v cargo-install-update &>/dev/null || { echo "cargo-update is not installed. Skipping."; return 3; }
 
-    local log attempt=1 max=3 backoff=5 rc=0
+    local log rcf attempt=1 max=3 backoff=5 rc=0
     log="$(mktemp -t up-cargo 2>/dev/null || mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/up-cargo.$$")"
+    rcf="$(mktemp -t up-cargo-rc 2>/dev/null || mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/up-cargo-rc.$$")"
 
     while :; do
         # crates.io throws transient DNS/timeout errors over this VPN; warming
         # the resolver cache first and spacing out a few retries rides out a
         # blip far better than cargo's own sub-second internal retries.
         prime_dns index.crates.io static.crates.io
-        # Single, *visible* pass (check + update). The old code ran `-l` (list)
-        # then a silent `-q` update, so the slow part produced no output and
-        # looked hung. pipefail (set at top) makes the exit reflect cargo, not tee.
-        net_timeout 2400 cargo install-update -a 2>&1 | tee "$log"
-        rc=${PIPESTATUS[0]}
+        printf '1\n' > "$rcf"   # default to failure if the run is interrupted
+        # Single, *visible* pass (check + update) under a tty for full color.
+        # The old code ran `-l` (list) then a silent `-q` update, so the slow
+        # part produced no output and looked hung.
+        run_cargo_update "$log" "$rcf"
+        rc="$(head -n1 "$rcf" 2>/dev/null)"; case "$rc" in ''|*[!0-9]*) rc=1 ;; esac
         [ "$rc" -eq 0 ] && break
         [ "$attempt" -ge "$max" ] && break
         print_warn "cargo update attempt ${attempt}/${max} failed (exit ${rc}); retrying in ${backoff}s..."
@@ -201,7 +228,7 @@ update_cargo_bins() {
         print_warn "crates.io looks unreachable (likely VPN/network) — leaving cargo binaries for next run."
         rc=3
     fi
-    rm -f "$log"
+    rm -f "$log" "$rcf"
     return "$rc"
 }
 
