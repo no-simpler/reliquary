@@ -1,214 +1,322 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
+# up — system-wide updater (brew/apt/…, npm, rust, zinit, vim-plug, gcloud,
+# tmux/TPM, in-house relics).
+#
+# Resilience model:
+#   * No `set -e`: each updater is isolated, so one failure never aborts the
+#     rest of the run. Per-step status is collected and printed as a summary.
+#   * Flaky / VPN-throttled networks are tolerated — git transfers abort instead
+#     of hanging forever, package managers retry transient failures, and (when a
+#     `timeout` binary is present) every network step has a hard wall-clock cap.
+#   * Failures are surfaced loudly at the end instead of being swallowed.
+#
+# Flags / env:
+#   --no-relics, UP_SKIP_RELICS=1   skip in-house relic updates
+#   GIT_HTTP_LOW_SPEED_LIMIT/TIME   override the git stall thresholds (below)
 
-# Define colors using escape sequences
-BOLD="\033[1m"
-GREEN="\033[32m"
-RESET="\033[0m"
+set -o pipefail
 
-# Function to print bold green messages with a bold arrow
-print_msg() {
-    echo -e "${BOLD}==>${RESET} ${BOLD}${GREEN}$1${RESET}"
+# --- Colors ----------------------------------------------------------------
+BOLD="\033[1m"; DIM="\033[2m"; RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; RESET="\033[0m"
+
+print_msg()  { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}${GREEN}$1${RESET}"; }
+print_warn() { printf '%b\n' "${BOLD}${YELLOW}==>${RESET} ${YELLOW}$1${RESET}"; }
+print_err()  { printf '%b\n' "${BOLD}${RED}!!>${RESET} ${RED}$1${RESET}"; }
+
+# --- Network resilience (VPN-friendly) -------------------------------------
+# Abort git transfers that stall under ~1 KB/s for 30s rather than hang forever
+# on a flaky VPN. Covers brew taps, zinit, vim-plug, TPM and relic git fetches.
+export GIT_HTTP_LOW_SPEED_LIMIT="${GIT_HTTP_LOW_SPEED_LIMIT:-1000}"
+export GIT_HTTP_LOW_SPEED_TIME="${GIT_HTTP_LOW_SPEED_TIME:-30}"
+# Bound SSH-based git (git@github …) connection setup and notice dead links.
+export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o ConnectTimeout=15 -o ServerAliveInterval=10 -o ServerAliveCountMax=3}"
+# Homebrew + cargo: retry transient download failures (the exact class of error
+# crates.io throws over a flaky VPN). cargo uses the git CLI so it also inherits
+# the limits above.
+export HOMEBREW_CURL_RETRIES="${HOMEBREW_CURL_RETRIES:-3}"
+export CARGO_NET_RETRY="${CARGO_NET_RETRY:-3}"
+export CARGO_NET_GIT_FETCH_WITH_CLI="${CARGO_NET_GIT_FETCH_WITH_CLI:-true}"
+
+# --- Timeout shim ----------------------------------------------------------
+# Hard wall-clock caps for network steps when a timeout binary is available
+# (`timeout` on Linux, `gtimeout` from `brew install coreutils`). Without one,
+# net_timeout runs the command directly and relies on the per-tool limits above.
+if   command -v timeout  &>/dev/null; then TIMEOUT_BIN="timeout"
+elif command -v gtimeout &>/dev/null; then TIMEOUT_BIN="gtimeout"
+else TIMEOUT_BIN=""; fi
+
+# net_timeout <seconds> <cmd...>
+net_timeout() {
+    local secs="$1"; shift
+    if [ -n "$TIMEOUT_BIN" ]; then
+        # --foreground keeps the child attached to the tty (sudo prompts, the
+        # vim-plug UI) and lets Ctrl-C through.
+        "$TIMEOUT_BIN" --foreground "$secs" "$@"
+    else
+        "$@"
+    fi
 }
 
-# Function to update Homebrew on macOS
+# --- DNS priming -----------------------------------------------------------
+# Best-effort: warm the system DNS cache for the given hosts so a tool with a
+# flaky resolver (cargo/reqwest under this VPN's split-DNS times out resolving
+# index.crates.io even while curl resolves it in milliseconds) gets a cached
+# answer instead of a lookup timeout. Never fails the caller.
+prime_dns() {
+    local h
+    for h in "$@"; do
+        if command -v dscacheutil &>/dev/null; then
+            dscacheutil -q host -a name "$h" >/dev/null 2>&1 || true
+        elif command -v getent &>/dev/null; then
+            getent hosts "$h" >/dev/null 2>&1 || true
+        fi
+    done
+}
+
+# net_looks_unreachable <file> — true if <file> contains a transient
+# network/DNS error signature (vs a real build/tooling failure).
+net_looks_unreachable() {
+    grep -qiE 'dns error|request timed out|could not (GET|connect)|error sending request|failed to (get|download|fetch)|temporary failure in name resolution|connection (refused|reset|timed out)|network is unreachable' "$1"
+}
+
+# --- Step runner + summary -------------------------------------------------
+# Convention: each update_* function returns 0 = ok, 3 = skipped, else = failed.
+STEP_RESULTS=()
+
+run_step() {
+    # run_step <label> <function> [args...]
+    local label="$1"; shift
+    print_msg "${label}..."
+    local rc=0
+    "$@" || rc=$?
+    case "$rc" in
+        0) STEP_RESULTS+=("OK|${label}") ;;
+        3) STEP_RESULTS+=("SKIP|${label}") ;;
+        *) STEP_RESULTS+=("FAIL|${label} (exit ${rc})")
+           print_err "${label} failed (exit ${rc}); continuing with remaining steps." ;;
+    esac
+    return 0
+}
+
+print_summary() {
+    echo
+    print_msg "Update summary"
+    local entry status text
+    local failures=0
+    for entry in "${STEP_RESULTS[@]}"; do
+        status="${entry%%|*}"
+        text="${entry#*|}"
+        case "$status" in
+            OK)   printf '%b\n' "    ${GREEN}\xe2\x9c\x94 ${text}${RESET}" ;;
+            SKIP) printf '%b\n' "    ${DIM}\xe2\x80\x93 ${text} (skipped)${RESET}" ;;
+            *)    printf '%b\n' "    ${RED}\xe2\x9c\x97 ${text}${RESET}"; failures=$((failures + 1)) ;;
+        esac
+    done
+    return "$failures"
+}
+
+# --- Package managers ------------------------------------------------------
 update_brew() {
-    print_msg "Updating Homebrew..."
-    brew update
-    brew upgrade
-    brew upgrade --cask
-    brew cleanup
-    brew doctor || true
+    local rc=0
+    net_timeout 1200 brew update        || rc=1
+    net_timeout 1800 brew upgrade        || rc=1
+    net_timeout 1800 brew upgrade --cask || rc=1
+    brew cleanup    || true
+    brew doctor     || true   # advisory only — never fail the step on this
+    return "$rc"
 }
 
-# Function to update packages on Debian-based systems
 update_debian() {
-    print_msg "Updating Debian-based system..."
-    sudo apt update
-    sudo apt upgrade -y
-    sudo apt dist-upgrade -y
-    sudo apt autoremove -y
+    local rc=0
+    sudo apt update          || rc=1
+    sudo apt upgrade -y      || rc=1
+    sudo apt dist-upgrade -y || rc=1
+    sudo apt autoremove -y   || rc=1
+    return "$rc"
 }
 
-# Function to update packages on Red Hat-based systems
 update_redhat() {
-    print_msg "Updating Red Hat-based system..."
-    sudo dnf upgrade -y
-    sudo dnf autoremove -y
+    local rc=0
+    sudo dnf upgrade -y    || rc=1
+    sudo dnf autoremove -y || rc=1
+    return "$rc"
 }
 
-# Function to update packages on Arch-based systems
 update_arch() {
-    print_msg "Updating Arch-based system..."
-    sudo pacman -Syu --noconfirm
-    sudo pacman -Sc --noconfirm
+    local rc=0
+    sudo pacman -Syu --noconfirm || rc=1
+    sudo pacman -Sc --noconfirm  || rc=1
+    return "$rc"
 }
 
-# Function to update packages on SUSE-based systems
 update_suse() {
-    print_msg "Updating SUSE-based system..."
-    sudo zypper refresh
-    sudo zypper update -y
-    sudo zypper dist-upgrade -y
-    sudo zypper clean --all
+    local rc=0
+    sudo zypper refresh        || rc=1
+    sudo zypper update -y      || rc=1
+    sudo zypper dist-upgrade -y|| rc=1
+    sudo zypper clean --all    || rc=1
+    return "$rc"
 }
 
-# Update Rust toolchains and cargo-installed binaries
+# --- Global npm packages ---------------------------------------------------
+update_npm() {
+    command -v npm &>/dev/null || { echo "npm is not installed. Skipping."; return 3; }
+    net_timeout 600 npm update -g --fetch-retries=3
+}
+
+# --- Rust toolchains -------------------------------------------------------
 update_rust() {
-    if command -v rustup &> /dev/null; then
-        print_msg "Updating Rust toolchains..."
-        rustup update
-
-        if command -v cargo-install-update &> /dev/null; then
-            print_msg "Updating cargo-installed binaries..."
-            cargo install-update -a -l
-            cargo install-update -a -q
-        else
-            echo "cargo-update is not installed. Skipping cargo binary updates."
-        fi
-    else
-        echo "rustup is not installed. Skipping Rust update."
-    fi
+    command -v rustup &>/dev/null || { echo "rustup is not installed. Skipping."; return 3; }
+    net_timeout 600 rustup update
 }
 
-# Update zinit & its plugins
+# --- Cargo-installed binaries ----------------------------------------------
+update_cargo_bins() {
+    command -v cargo-install-update &>/dev/null || { echo "cargo-update is not installed. Skipping."; return 3; }
+
+    local log attempt=1 max=3 backoff=5 rc=0
+    log="$(mktemp -t up-cargo 2>/dev/null || mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/up-cargo.$$")"
+
+    while :; do
+        # crates.io throws transient DNS/timeout errors over this VPN; warming
+        # the resolver cache first and spacing out a few retries rides out a
+        # blip far better than cargo's own sub-second internal retries.
+        prime_dns index.crates.io static.crates.io
+        # Single, *visible* pass (check + update). The old code ran `-l` (list)
+        # then a silent `-q` update, so the slow part produced no output and
+        # looked hung. pipefail (set at top) makes the exit reflect cargo, not tee.
+        net_timeout 2400 cargo install-update -a 2>&1 | tee "$log"
+        rc=${PIPESTATUS[0]}
+        [ "$rc" -eq 0 ] && break
+        [ "$attempt" -ge "$max" ] && break
+        print_warn "cargo update attempt ${attempt}/${max} failed (exit ${rc}); retrying in ${backoff}s..."
+        sleep "$backoff"
+        attempt=$((attempt + 1)); backoff=$((backoff * 2))
+    done
+
+    if [ "$rc" -ne 0 ] && net_looks_unreachable "$log"; then
+        # Environmental (VPN/network), not a defect — report as skipped so it
+        # doesn't flag the run red. The binaries get another shot next run.
+        print_warn "crates.io looks unreachable (likely VPN/network) — leaving cargo binaries for next run."
+        rc=3
+    fi
+    rm -f "$log"
+    return "$rc"
+}
+
+# --- zinit + plugins -------------------------------------------------------
 update_zinit() {
-    if command -v zsh &> /dev/null; then
-        local ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
+    command -v zsh &>/dev/null || return 3
+    local ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
+    [ -d "$ZINIT_HOME" ] || { echo "zinit is not installed. Skipping."; return 3; }
 
-        if [[ -d "$ZINIT_HOME" ]]; then
-            print_msg "Updating zinit and plugins..."
-            zsh -c "source '$ZINIT_HOME/zinit.zsh'; zinit self-update; zinit update --all"
+    local rc=0
+    net_timeout 900 zsh -c "source '$ZINIT_HOME/zinit.zsh'; zinit self-update; zinit update --all" || rc=1
 
-            # Clean up broken completion symlinks left by removed upstream completions
-            local completions_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/completions"
-            if [[ -d "$completions_dir" ]]; then
-                find "$completions_dir" -type l ! -exec test -e {} \; -delete
-            fi
-        else
-            echo "zinit is not installed. Skipping zinit update."
-        fi
+    # Clean up broken completion symlinks left by removed upstream completions.
+    local completions_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/completions"
+    if [ -d "$completions_dir" ]; then
+        find "$completions_dir" -type l ! -exec test -e {} \; -delete
     fi
+    return "$rc"
 }
 
-# Update vim-plug plugins
+# --- vim-plug plugins ------------------------------------------------------
 update_vimplug() {
-    if command -v vim &> /dev/null; then
-        if [[ -f "$HOME/.config/vim/autoload/plug.vim" ]]; then
-            print_msg "Updating vim-plug plugins..."
-            vim +PlugUpdate +qall
-        else
-            echo "vim-plug is not installed. Skipping vim-plug update."
-        fi
-    fi
+    command -v vim &>/dev/null || return 3
+    [ -f "$HOME/.config/vim/autoload/plug.vim" ] || { echo "vim-plug is not installed. Skipping."; return 3; }
+    # PlugUpdate clones/pulls over git, so it inherits the low-speed abort above.
+    net_timeout 900 vim +PlugUpdate +qall
 }
 
-# Update gcloud CLI tools
+# --- gcloud CLI components -------------------------------------------------
 update_gcloud() {
-    if command -v gcloud &> /dev/null; then
-        if gcloud info --format='value(config.account)' &> /dev/null; then
-            print_msg "Updating gcloud components..."
-            gcloud components update --quiet
-        else
-            echo "gcloud is not authenticated. Skipping gcloud update."
-        fi
-    else
-        echo "gcloud is not installed. Skipping gcloud update."
+    command -v gcloud &>/dev/null || { echo "gcloud is not installed. Skipping."; return 3; }
+    if ! net_timeout 30 gcloud info --format='value(config.account)' &>/dev/null; then
+        echo "gcloud is not authenticated (or unreachable). Skipping."
+        return 3
     fi
+    net_timeout 900 gcloud components update --quiet
 }
 
-# Update tmux plugin manager (TPM)
+# --- tmux plugin manager ---------------------------------------------------
 update_tpm() {
     local tpm_path="$HOME/.tmux/plugins/tpm"
-
-    if [ -d "$tpm_path" ]; then
-        print_msg "Updating TPM..."
-        git -C "$tpm_path" pull
-    else
-        echo "TPM is not installed. Skipping TPM update."
-    fi
+    [ -d "$tpm_path" ] || { echo "TPM is not installed. Skipping."; return 3; }
+    # --ff-only so a diverged local checkout can't hang on an interactive merge.
+    net_timeout 300 git -C "$tpm_path" pull --ff-only
 }
 
-# Update in-house relics (~/.config/relics + ~/.config/attic).
+# --- In-house relics (~/.config/relics + ~/.config/attic) ------------------
 # Opt out with UP_SKIP_RELICS=1 up  or  up --no-relics.
 # Contract on each relic's scripts/update.sh: non-interactive, time-bounded.
 update_relics() {
-    if [[ -n "${UP_SKIP_RELICS:-}" ]]; then
+    if [ -n "${UP_SKIP_RELICS:-}" ]; then
         echo "Skipping relic update (UP_SKIP_RELICS set)."
-        return 0
+        return 3
     fi
-    if [[ " $* " == *" --no-relics "* ]]; then
-        echo "Skipping relic update (--no-relics)."
-        return 0
-    fi
+    case " $* " in
+        *" --no-relics "*) echo "Skipping relic update (--no-relics)."; return 3 ;;
+    esac
 
     local lib="$HOME/.config/reliquary/lib/relic.sh"
-    [[ -f "$lib" ]] || return 0
+    [ -f "$lib" ] || return 3
 
-    print_msg "Updating in-house relics..."
     # shellcheck disable=SC1090
     source "$lib"
 
-    local lane r
+    local lane r rc=0
     for lane in "$HOME/.config/relics" "$HOME/.config/attic"; do
         [ -d "$lane" ] || continue
         for r in "$lane"/*/; do
             [ -f "${r}relic.sh" ] || continue
-            ( cd "$r" && relic::update "$r" ) || echo "  update failed: $r"
+            ( cd "$r" && relic::update "$r" ) || { print_err "  relic update failed: $r"; rc=1; }
         done
     done
+    return "$rc"
 }
 
-# Update globally installed npm packages
-update_npm() {
-    if command -v npm &> /dev/null; then
-        print_msg "Updating global npm packages..."
-        npm update -g
-    else
-        echo "npm is not installed. Skipping npm update."
-    fi
-}
+# --- Main ------------------------------------------------------------------
+print_msg "Updating system"
 
-print_msg "Updating system..."
-
-# Detect the operating system and call the appropriate update function
+# Detect the OS and run the appropriate package-manager step.
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    update_brew
-elif [[ -f /etc/debian_version ]]; then
-    update_debian
-elif [[ -f /etc/redhat-release ]]; then
-    update_redhat
-elif [[ -f /etc/arch-release ]]; then
-    update_arch
-elif [[ -f /etc/SuSE-release ]]; then
-    update_suse
+    run_step "Homebrew" update_brew
+elif [ -f /etc/debian_version ]; then
+    run_step "APT packages" update_debian
+elif [ -f /etc/redhat-release ]; then
+    run_step "DNF packages" update_redhat
+elif [ -f /etc/arch-release ]; then
+    run_step "Pacman packages" update_arch
+elif [ -f /etc/SuSE-release ]; then
+    run_step "Zypper packages" update_suse
 else
-    echo "Unsupported OS. Exiting."
-    exit 1
+    print_warn "Unsupported OS — skipping system package update."
+    STEP_RESULTS+=("SKIP|System packages (unsupported OS)")
 fi
 
-# Update globally installed npm packages
-update_npm
+run_step "Global npm packages"            update_npm
+run_step "Rust toolchains"                update_rust
+run_step "Cargo binaries"                 update_cargo_bins
+run_step "zinit & plugins"                update_zinit
+run_step "vim-plug plugins"               update_vimplug
+run_step "gcloud components"              update_gcloud
+run_step "TPM"                            update_tpm
+run_step "In-house relics"                update_relics "$@"
 
-# Update Rust toolchains and cargo-installed binaries
-update_rust
-
-# Update zinit & its plugins
-update_zinit
-
-# Update vim-plug plugins
-update_vimplug
-
-# Update gcloud CLI tools
-update_gcloud
-
-# Update tmux plugin manager (TPM)
-update_tpm
-
-# Update in-house relics
-update_relics "$@"
-
-# Update the timestamp
+# Record the attempt timestamp (marks "last ran up", regardless of per-step
+# results — the interactive nag in shell/interactive.d/080-check.sh reads this).
 mkdir -p ~/.local/state/up
 date +%s > ~/.local/state/up/last_upped_at
 
-print_msg "System update completed."
+print_summary
+summary_rc=$?
+
+if [ "$summary_rc" -gt 0 ]; then
+    print_warn "System update completed with ${summary_rc} failed step(s) — see summary above."
+else
+    print_msg "System update completed."
+fi
+
+exit "$summary_rc"
