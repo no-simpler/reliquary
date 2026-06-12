@@ -1,5 +1,6 @@
 # Homebrew taps
 tap "homebrew/bundle"
+tap "no-simpler/tap"
 
 # Version control
 brew "git"
@@ -9,8 +10,10 @@ brew "gh"
 brew "yadm"
 
 # Shell
+brew "bash"
 brew "bash-completion"
 brew "zsh"
+brew "fish"
 brew "tmux"
 brew "fzf"
 
@@ -29,6 +32,12 @@ brew "jq"
 brew "yq"
 brew "bat"
 brew "just"
+brew "shellcheck"
+brew "node"
+brew "python"
+
+# Personal CLIs (own tap)
+brew "clc"
 
 # macOS
 brew "mas"
