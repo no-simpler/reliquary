@@ -83,7 +83,6 @@ end
 ## Rust
 ##
 
-test -d /opt/homebrew/opt/rustup/bin; and fish_add_path /opt/homebrew/opt/rustup/bin
 test -d "$HOME/.cargo/bin"; and fish_add_path "$HOME/.cargo/bin"
 
 ##
