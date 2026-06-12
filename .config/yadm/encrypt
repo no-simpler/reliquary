@@ -31,9 +31,5 @@
 .config/bin/gpg-nexus-op
 .config/bin/gpg-yadm-op
 .config/bin/mm
-.config/bin/nexus-clone
-.config/bin/nexus-install-hook
-.config/bin/nexus-push
-.config/bin/nexus-status
 .config/attic/**
 .config/reliquary/AUX.md
