@@ -31,22 +31,6 @@ if command -q gem
 end
 
 ##
-## Composer globals
-##
-
-test -d "$HOME/.composer/vendor/bin"; and fish_add_path "$HOME/.composer/vendor/bin"
-
-##
-## macOS Homebrew: pyenv
-##
-
-if command -q pyenv
-    set -gx PYENV_ROOT "$HOME/.pyenv"
-    fish_add_path "$PYENV_ROOT/bin"
-    pyenv init - fish | source
-end
-
-##
 ## SDKMAN (via sdkman-for-fish plugin)
 ##
 ## Install plugin: fisher install reitzig/sdkman-for-fish@v2.1.0
