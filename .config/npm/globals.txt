@@ -1,0 +1,8 @@
+# Global npm packages.
+# Restored at bootstrap by ~/.config/yadm/snippets/shared/14-npm-globals.sh
+# and kept current by `up` (npm update -g).
+# One package per line; `#` comments and blank lines ignored.
+
+# Query Markup Documents — on-device markdown search; used by wiki-style
+# projects (e.g. ~/Developer/bb/wiki) via the `qmd` Claude skill.
+@tobilu/qmd
