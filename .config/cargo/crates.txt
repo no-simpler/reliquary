@@ -1,0 +1,21 @@
+# Cargo-installed binaries.
+# Restored at bootstrap by ~/.config/yadm/snippets/shared/13-cargo-bins.sh
+# (via cargo-binstall) and kept current by `up` (cargo install-update -a).
+# One crate per line; `#` comments and blank lines ignored.
+
+cargo-binstall
+cargo-expand
+cargo-feature-combinations
+cargo-generate
+cargo-msrv
+cargo-nextest
+cargo-public-api
+cargo-release
+cargo-semver-checks
+cargo-smart-release
+cargo-tarpaulin
+cargo-udeps
+cargo-update
+grcov
+release-plz
+sqlx-cli
