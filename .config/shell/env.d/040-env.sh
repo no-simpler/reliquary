@@ -37,30 +37,6 @@ if gem env gemdir &>/dev/null; then
 fi
 
 ##
-## Composer globals
-##
-
-if [ -d "$HOME/.composer/vendor/bin" ]; then
-    [[ :$PATH: = *":$HOME/.composer/vendor/bin:"* ]] ||
-        export PATH="$HOME/.composer/vendor/bin:$PATH"
-fi
-
-##
-## macOS Homebrew: pyenv
-##
-
-if command -v pyenv &>/dev/null; then
-    export PYENV_ROOT="$HOME/.pyenv"
-    if [[ :$PATH: != *":$PYENV_ROOT/bin:"* ]]; then
-        export PATH="$PYENV_ROOT/bin:$PATH"
-        eval "$(pyenv init --path)"
-    fi
-    if [[ $PYENV_SHELL != $D__SHELL ]]; then
-        eval "$(pyenv init -)"
-    fi
-fi
-
-##
 ## SDKMAN
 ##
 
