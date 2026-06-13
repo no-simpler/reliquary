@@ -12,8 +12,9 @@
 #   * Failures are surfaced loudly at the end instead of being swallowed.
 #
 # Flags / env:
-#   --no-relics, UP_SKIP_RELICS=1   skip in-house relic updates
-#   GIT_HTTP_LOW_SPEED_LIMIT/TIME   override the git stall thresholds (below)
+#   --no-relics, UP_SKIP_RELICS=1     skip in-house relic updates
+#   --no-decruft, UP_SKIP_DECRUFT=1   skip the OS-cruft sweep (decruft)
+#   GIT_HTTP_LOW_SPEED_LIMIT/TIME     override the git stall thresholds (below)
 
 set -o pipefail
 
@@ -304,6 +305,23 @@ update_relics() {
     return "$rc"
 }
 
+# --- OS cruft sweep (decruft) ----------------------------------------------
+# Remove inert OS metadata cruft (.DS_Store, ._*, …) left in browsable git repos
+# and the XDG depots — the local-disk counterpart to the macOS net/USB defaults
+# (no OS toggle exists for internal volumes). Opt out with UP_SKIP_DECRUFT=1 or
+# up --no-decruft.
+update_decruft() {
+    if [ -n "${UP_SKIP_DECRUFT:-}" ]; then
+        echo "Skipping OS-cruft sweep (UP_SKIP_DECRUFT set)."
+        return 3
+    fi
+    case " $* " in
+        *" --no-decruft "*) echo "Skipping OS-cruft sweep (--no-decruft)."; return 3 ;;
+    esac
+    command -v decruft &>/dev/null || { echo "decruft is not installed. Skipping."; return 3; }
+    decruft
+}
+
 # --- Main ------------------------------------------------------------------
 print_msg "Updating system"
 
@@ -331,6 +349,7 @@ run_step "vim-plug plugins"               update_vimplug
 run_step "gcloud components"              update_gcloud
 run_step "TPM"                            update_tpm
 run_step "In-house relics"                update_relics "$@"
+run_step "OS cruft sweep"                 update_decruft "$@"
 
 # Record the attempt timestamp (marks "last ran up", regardless of per-step
 # results — the interactive nag in shell/interactive.d/080-check.sh reads this).
