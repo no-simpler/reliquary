@@ -1,0 +1,46 @@
+# Machine-wide git excludes — XDG global excludesfile ($XDG_CONFIG_HOME/git/ignore).
+# Active for every repo on this machine (git reads this path by default when
+# core.excludesfile is unset). Holds OS/tool cruft that should never be committed
+# from anywhere. Per-repo .gitignore still carries project-specific rules (and a
+# belt-and-suspenders .DS_Store for collaborators who don't share this file).
+#
+# Deliberately omits IDE project dirs (.idea/, .vscode/): some repos selectively
+# commit files under them, and a directory-level ignore here would block those
+# re-includes. Those stay per-repo.
+
+# --- macOS ---
+.DS_Store
+.DS_Store?
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.fseventsd
+.DocumentRevisions-V100
+.TemporaryItems
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.apdisk
+
+# --- Windows (shared drives / collaborators) ---
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- Linux ---
+.directory
+.Trash-*
+
+# --- Editor swap / backup / lock files (never meaningful to commit) ---
+*~
+*.swp
+*.swo
+*.swn
+\#*\#
+.#*
+
+# --- Claude Code (machine-local agent state) ---
+**/.claude/settings.local.json
