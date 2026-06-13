@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+#
+# decruft — remove inert OS/filesystem metadata cruft (.DS_Store, ._*,
+# Thumbs.db, .Spotlight-V100, …) from browsable git repos under $HOME and from
+# the XDG data dir. Editor swap/backup/lock files (*~ *.swp \#*\# .#*) are
+# intentionally NOT deleted — they stay gitignored (commit-safe) but may be live
+# crash-recovery state; their lifecycle belongs to the editor.
+#
+# Two lanes, two policies:
+#
+#   git repos — discovered anywhere under $HOME (Linux has no ~/Developer, so we
+#     don't assume one). For each repo, `git clean -Xdn` is the oracle: it lists
+#     only *ignored, untracked* paths — so it already RESPECTS per-repo unignores
+#     (a `!\.DS_Store` re-include is not ignored → never listed) and never touches
+#     tracked files. We intersect that list with the cruft patterns and remove
+#     only the intersection by hand (so non-cruft ignored paths like node_modules
+#     or .env are left strictly alone). In ~99% of repos the cruft is ignored via
+#     the central excludes (~/.config/git/ignore); repos that unignore some of it
+#     keep it.
+#
+#   XDG data dir ($XDG_DATA_HOME, default ~/.local/share) — the depots live here
+#     and there is no gitignore, so we just remove cruft by name. Git repos found
+#     under it (handled by the repo lane) and heavy/non-browsable trees are pruned.
+#
+# Non-browsable / heavy dirs are pruned in both lanes for speed. Directories left
+# empty by a removal are REPORTED, never deleted (git doesn't track empty dirs;
+# auto-rmdir could surprise intentional placeholders).
+#
+# Usage: decruft [-n|--dry-run] [-q|--quiet] [-h|--help]
+set -o pipefail
+
+DRY=0; QUIET=0
+for a in "$@"; do
+    case "$a" in
+        -n|--dry-run) DRY=1 ;;
+        -q|--quiet)   QUIET=1 ;;
+        -h|--help)    sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *) echo "decruft: unknown argument: $a" >&2; exit 2 ;;
+    esac
+done
+
+XDG_DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
+
+# Dirs pruned everywhere: VCS internals, dependency/build trees, big caches, and
+# the nexus blob store (multi-GB of encrypted .gpg — never browsable cruft).
+PRUNE_NAMES=(node_modules target target-native vendor Pods \
+             .venv venv .build .next .output dist build \
+             .gradle .m2 .cargo .rustup .npm .cache .pnpm-store \
+             __pycache__ .pytest_cache .mypy_cache .ruff_cache)
+
+# True if a basename is inert OS/filesystem metadata cruft — always safe to
+# delete. The central excludes (~/.config/git/ignore) ALSO ignore editor
+# swap/backup/lock files (*~ *.swp \#*\# .#*), but decruft deliberately does NOT
+# delete those: ignoring keeps them out of commits, but a live vim swap or emacs
+# lock/autosave is active crash-recovery state, and `up` may run while an editor
+# is open elsewhere. So decruft removes only inert OS metadata; editor files are
+# left to the editor.
+is_cruft() {
+    case "$1" in
+        ._zinit) return 1 ;;          # zinit metadata, not an AppleDouble fork
+        .DS_Store|.DS_Store\?|._*|.AppleDouble|.LSOverride|.apdisk \
+        |.Spotlight-V100|.Trashes|.fseventsd|.DocumentRevisions-V100 \
+        |.TemporaryItems|.VolumeIcon.icns|.com.apple.timemachine.donotpresent \
+        |Thumbs.db|Thumbs.db:encryptable|ehthumbs.db|Desktop.ini \
+        |.directory) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+REMOVED=0
+declare -a TOUCHED_DIRS=()
+
+# remove <path> — delete a confirmed-cruft file/dir (unless dry-run) and record
+# its parent for the empty-dir report.
+remove() {
+    local p="$1"
+    [ -e "$p" ] || return 0
+    if [ "$QUIET" -eq 0 ]; then
+        printf '  %s %s\n' "$([ "$DRY" -eq 1 ] && echo 'would remove' || echo 'removed')" "$p"
+    fi
+    if [ "$DRY" -eq 0 ]; then
+        if [ -d "$p" ] && [ ! -L "$p" ]; then rm -rf -- "$p"; else rm -f -- "$p"; fi
+    fi
+    REMOVED=$((REMOVED + 1))
+    TOUCHED_DIRS+=("$(dirname -- "$p")")
+}
+
+# --- Lane 1: git repos under $HOME -----------------------------------------
+# Build the find prune expression once from PRUNE_NAMES, plus a couple of
+# absolute heavy paths.
+build_prune() {
+    local out=() n first=1
+    for n in "${PRUNE_NAMES[@]}"; do
+        [ $first -eq 1 ] && first=0 || out+=(-o)
+        out+=(-name "$n")
+    done
+    printf '%s\0' "${out[@]}"
+}
+mapfile -d '' PRUNE_EXPR < <(build_prune)
+
+discover_repos() {
+    # Absolute prunes: big non-repo trees, VM/container mounts (OrbStack holds
+    # hundreds of Linux git repos that aren't user-browsable), and tool-managed
+    # plugin clones (zinit) whose internal markers collide with cruft patterns.
+    find "$HOME" \
+        \( -type d \( "${PRUNE_EXPR[@]}" \
+              -o -path "$HOME/Library" -o -path "$HOME/.Trash" \
+              -o -path "$HOME/OrbStack" -o -path "$HOME/.orbstack" \
+              -o -path "$XDG_DATA/nexus" -o -path "$XDG_DATA/zinit" \) -prune \) -o \
+        -name .git -print -prune 2>/dev/null \
+    | while IFS= read -r g; do dirname -- "$g"; done | LC_ALL=C sort -u
+}
+
+mapfile -t REPOS < <(discover_repos)
+
+for repo in "${REPOS[@]}"; do
+    [ -d "$repo" ] || continue
+    while IFS= read -r line; do
+        rel="${line#Would remove }"
+        [ "$rel" = "$line" ] && continue          # not a "Would remove" line
+        base="$(basename -- "${rel%/}")"
+        is_cruft "$base" && remove "$repo/$rel"
+    done < <(git -C "$repo" clean -Xdn 2>/dev/null)
+done
+
+# --- Lane 2: XDG data dir (non-git; depots) --------------------------------
+if [ -d "$XDG_DATA" ]; then
+    # Prune heavy dirs, the nexus blob store, and any git repo already handled
+    # by lane 1 (so we don't pattern-stomp a repo's unignored cruft).
+    xdg_prune=( -name .git -o -path "$XDG_DATA/nexus" -o -path "$XDG_DATA/zinit" )
+    for n in "${PRUNE_NAMES[@]}"; do xdg_prune+=( -o -name "$n" ); done
+    for r in "${REPOS[@]}"; do
+        case "$r" in "$XDG_DATA"/*|"$XDG_DATA") xdg_prune+=( -o -path "$r" ) ;; esac
+    done
+
+    while IFS= read -r f; do
+        remove "$f"
+    done < <(find "$XDG_DATA" \( "${xdg_prune[@]}" \) -prune -o \
+                  \( -name '.DS_Store' -o \( -name '._*' \! -name '._zinit' \) \
+                     -o -name '.AppleDouble' -o -name '.LSOverride' -o -name '.apdisk' \
+                     -o -name '.Spotlight-V100' -o -name '.Trashes' \
+                     -o -name '.fseventsd' -o -name '.DocumentRevisions-V100' \
+                     -o -name '.TemporaryItems' -o -name '.VolumeIcon.icns' \
+                     -o -name 'Thumbs.db' -o -name 'ehthumbs.db' -o -name 'Desktop.ini' \
+                     -o -name '.directory' \) \
+                  -print 2>/dev/null)
+fi
+
+# --- Report ----------------------------------------------------------------
+# Directories left empty by our removals (reported, not deleted).
+declare -a EMPTY=()
+if [ ${#TOUCHED_DIRS[@]} -gt 0 ]; then
+    while IFS= read -r d; do
+        [ -d "$d" ] && [ -z "$(ls -A -- "$d" 2>/dev/null)" ] && EMPTY+=("$d")
+    done < <(printf '%s\n' "${TOUCHED_DIRS[@]}" | LC_ALL=C sort -u)
+fi
+
+verb="removed"; [ "$DRY" -eq 1 ] && verb="would remove"
+if [ "$REMOVED" -eq 0 ]; then
+    [ "$QUIET" -eq 0 ] && echo "decruft: no cruft found across ${#REPOS[@]} repo(s) + ${XDG_DATA/#$HOME/\~}"
+else
+    echo "decruft: ${verb} ${REMOVED} cruft item(s) across ${#REPOS[@]} repo(s) + XDG data dir"
+fi
+if [ ${#EMPTY[@]} -gt 0 ]; then
+    echo "decruft: ${#EMPTY[@]} director(ies) left empty (not deleted):"
+    printf '  %s\n' "${EMPTY[@]}"
+fi
+exit 0
