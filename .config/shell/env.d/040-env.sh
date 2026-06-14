@@ -53,16 +53,6 @@ if [ -d "$SDKMAN_DIR" ]; then
 fi
 
 ##
-## macOS Homebrew: Lesspipe
-##
-
-if [ -x /usr/local/bin/lesspipe.sh ]; then
-    export LESSOPEN='| /usr/local/bin/lesspipe.sh %s'
-    export LESS_ADVANCED_PREPROCESSOR=1
-    export LESS=' -R '
-fi
-
-##
 ## macOS Catalina & onward: silence warning about default shell change
 ##
 
