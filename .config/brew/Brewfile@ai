@@ -1,4 +1,3 @@
-cask "ollama"
 cask "diffusionbee"
 
 # Audio transcription (halo/alfred tess)
