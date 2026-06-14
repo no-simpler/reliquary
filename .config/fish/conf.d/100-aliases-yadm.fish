@@ -5,7 +5,8 @@ status is-interactive; or return
 ## yadm
 ##
 
-alias yadm ~/.config/bin/yadm-wrapper
+# `yadm` resolves to ~/.config/bin/yadm (symlink to yadm-wrapper), placed ahead
+# of Homebrew on $PATH by conf.d/040-env.fish — so no alias is needed for the wrapper.
 abbr --add ya 'yadm add'
 abbr --add yf 'yadm fetch --prune --prune-tags --tags --force'
 abbr --add yrs 'yadm restore --staged'

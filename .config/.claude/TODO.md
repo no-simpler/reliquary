@@ -53,12 +53,6 @@ Classify each as encrypt-and-track or skip-and-document: `~/.config/acli/*.yaml`
 `~/.kube/config`, `~/.gnupg/gpg-agent.conf` (config only, never keys). If tracked,
 add an opaque pattern to `~/.config/yadm/encrypt`.
 
-## yadm-wrapper non-interactive accessibility
-Wrapper-only subcommands (`verify`/`check`/`update`/`own`/`disown`) only work via
-the interactive `yadm` alias; scripts/agents must call `~/.config/bin/yadm-wrapper`
-directly. Recommended: install a `~/.config/bin/yadm` shim ahead of brew on PATH
-that delegates to `$YADM_BIN` (avoid recursion). Alt: rename wrapper to `y`/`dot`.
-
 ## Cross-shell env var parity (excl. conda — see anaconda item)
 Promote `PAGER`, `LESS`, `LSCOLORS`, `LS_COLORS` (currently zsh-only, set by
 zinit/omz plugins) into `040-env.{sh,fish}` so `less`/`ls` behave identically
@@ -71,7 +65,7 @@ internals as-is.
 - fisher: verify `up`'s `fisher update` actually applies pinned `fish_plugins`.
 
 ## yadm doctor self-check command
-Single `~/.config/bin/` command running: `yadm-wrapper check`, `yadm-wrapper verify`,
+Single `~/.config/bin/` command running: `yadm check`, `yadm verify`,
 shell startup smoke-tests (`<shell> -ic 'echo ok'`), `check-shell-parity`, and a
 `$PATH`-duplicate sanity check. Could also run as a post-checkout hook. (Overlaps the
 dream pre-pass in `~/.config/.claude/DREAM.md` — that's the manual-invocation home; a

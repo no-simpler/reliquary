@@ -1,7 +1,26 @@
 #!/bin/bash
 
-# Path to the actual yadm executable
-YADM_BIN=$(type -p yadm)
+# Path to the actual yadm executable.
+# This wrapper is itself on PATH as `yadm` (a ~/.config/bin/yadm symlink, placed
+# ahead of Homebrew by env.d/040-env.sh), so a plain `type -p yadm` would resolve
+# back to us and recurse. Scan PATH for the first real yadm OUTSIDE ~/.config/bin.
+YADM_BIN=""
+_self_dir="$HOME/.config/bin"
+_oldifs=$IFS
+IFS=:
+for _d in $PATH; do
+    if [ "$_d" != "$_self_dir" ] && [ -x "$_d/yadm" ]; then
+        YADM_BIN="$_d/yadm"
+        break
+    fi
+done
+IFS=$_oldifs
+unset _self_dir _oldifs _d
+
+if [ -z "$YADM_BIN" ]; then
+    echo "yadm-wrapper: real yadm not found on PATH (outside ~/.config/bin)." >&2
+    exit 1
+fi
 
 # SSH URL of dotfiles repository
 REPO_URL_SSH=git@github.com:no-simpler/reliquary.git

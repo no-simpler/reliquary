@@ -22,6 +22,18 @@ if test -f /opt/homebrew/bin/brew
 end
 
 ##
+## Force ~/.config/bin ahead of Homebrew on $PATH
+##
+## So the `yadm` wrapper (the ~/.config/bin/yadm symlink) shadows brew's yadm.
+## Must run after the Homebrew block (brew's shellenv reorders PATH on each
+## source). Strip any existing entry, then prepend — idempotent.
+##
+
+if test -d "$HOME/.config/bin"
+    set -gx PATH "$HOME/.config/bin" (string match -v "$HOME/.config/bin" -- $PATH)
+end
+
+##
 ## Ruby gems
 ##
 
