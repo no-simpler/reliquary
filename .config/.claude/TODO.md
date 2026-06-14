@@ -6,15 +6,6 @@ Single live queue for Reliquary work.
 > `yadm log` is the record of what was done. No DONE section. Add new work as a
 > new section; keep each item independently sized so it can be picked up alone.
 
-## anaconda: wire-or-remove (+ fish conda gap)
-The `anaconda` cask (~5GB, untracked) is installed, so the conda-init blocks in
-`shell/env.d/040-env.sh` and `fish/conf.d/040-env.fish` are *live*. Decide:
-- **Remove:** uninstall cask, then delete both now-dead anaconda blocks.
-- **Keep/wire:** add to a Brewfile, then fix the fish gap — `CONDA_*` vars are
-  exported in bash+zsh but not fish (fish's `conda shell.fish hook` isn't
-  auto-activating `base`). Fix the fish init or document fish as deliberately
-  unactivated.
-
 ## Move shell rc files inward
 Relocate `.bashrc`/`.bash_profile`/`.zshrc`/`.zprofile`/`.hushlogin` from `$HOME`
 root into `~/.config/`. zsh: set `ZDOTDIR=$HOME/.config/zsh` in a minimal
