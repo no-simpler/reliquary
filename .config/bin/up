@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# up — system-wide updater (brew/apt/…, npm, rust, zinit, vim-plug, gcloud,
-# tmux/TPM, in-house relics).
+# up — system-wide updater (brew/apt/…, npm, rust, zinit, fisher, vim-plug,
+# gcloud, tmux/TPM, in-house relics).
 #
 # Resilience model:
 #   * No `set -e`: each updater is isolated, so one failure never aborts the
@@ -254,6 +254,17 @@ update_zinit() {
     return "$rc"
 }
 
+# --- fisher (fish plugins) -------------------------------------------------
+update_fisher() {
+    command -v fish &>/dev/null || return 3
+    [ -f "$HOME/.config/fish/functions/fisher.fish" ] || { echo "fisher is not installed. Skipping."; return 3; }
+    # `fisher update` (no args) re-reads ~/.config/fish/fish_plugins and pulls
+    # each pinned plugin over git, so it inherits the low-speed abort above.
+    # Mirrors how bootstrap's 12-fish.sh applies the manifest on a fresh machine
+    # — this is the fish counterpart to update_zinit / update_vimplug / update_tpm.
+    net_timeout 600 fish -c "fisher update"
+}
+
 # --- vim-plug plugins ------------------------------------------------------
 update_vimplug() {
     command -v vim &>/dev/null || return 3
@@ -349,6 +360,7 @@ run_step "Global npm packages"            update_npm
 run_step "Rust toolchains"                update_rust
 run_step "Cargo binaries"                 update_cargo_bins
 run_step "zinit & plugins"                update_zinit
+run_step "fisher plugins"                 update_fisher
 run_step "vim-plug plugins"               update_vimplug
 run_step "gcloud components"              update_gcloud
 run_step "TPM"                            update_tpm

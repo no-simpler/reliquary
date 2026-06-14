@@ -39,11 +39,6 @@ zinit/omz plugins) into `040-env.{sh,fish}` so `less`/`ls` behave identically
 regardless of launching shell. Leave color vars (`010-colors.sh`) and zsh/posh
 internals as-is.
 
-## Plugin reproducibility
-- vim-plug: document `:PlugInstall`/`:PlugUpdate` in bootstrap notes.
-- TPM: add a TPM update step to `~/.config/bin/up` (currently only initial install).
-- fisher: verify `up`'s `fisher update` actually applies pinned `fish_plugins`.
-
 ## yadm doctor: optional post-checkout hook
 `yadm doctor` exists as a wrapper subcommand + dream pre-pass step. Not yet wired as a
 yadm post-checkout hook (would run the detect-only checks automatically after `yadm pull`/
