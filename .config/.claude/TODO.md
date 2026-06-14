@@ -6,10 +6,6 @@ Single live queue for Reliquary work.
 > `yadm log` is the record of what was done. No DONE section. Add new work as a
 > new section; keep each item independently sized so it can be picked up alone.
 
-## Encryption pattern hygiene
-`~/.config/yadm/encrypt` spans themes (benefactor/mm/bt). Consider themed
-sub-archives via `yadm encrypt -A`, or consolidating glob patterns. Keep names opaque.
-
 ## oh-my-posh config placement
 `~/.config/oh-my-posh/dreamsofautonomy.toml` is the only theme. Fine as-is unless
 you want `POSH_THEMES_PATH` discovery — then update `040-env.*`.
