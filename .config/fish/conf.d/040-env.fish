@@ -93,3 +93,19 @@ test -d "$HOME/.cargo/bin"; and fish_add_path "$HOME/.cargo/bin"
 
 set -l orbstack_init "$HOME/.orbstack/shell/init2.fish"
 test -r $orbstack_init; and source $orbstack_init 2>/dev/null
+
+##
+## Final pass: collapse duplicate $PATH entries (first occurrence wins)
+##
+## The third-party init blocks above (gcloud, OrbStack) append/prepend their
+## dirs with no dedup guard, so a child shell that inherits an already-populated
+## $PATH and re-sources this file ends up with doubled entries. Dedup once here
+## as the final step. Subtractive only — first occurrences keep their order, so
+## ~/.config/bin stays ahead of Homebrew (the yadm-wrapper shadow invariant).
+##
+
+set -l deduped
+for dir in $PATH
+    contains -- $dir $deduped; or set -a deduped $dir
+end
+set -gx PATH $deduped
