@@ -124,6 +124,7 @@ Reachable as `yadm` in **every** shell — `~/.config/bin/yadm` is a symlink to 
 - `yadm check` - compares archive SHA256 to detect drift
 - `yadm verify` - decrypts archive to tmpdir and diffs against disk
 - `yadm ls-all` - complete tracked set: `yadm ls-files` (plaintext) + archive listing (`decrypt -l`, Touch ID)
+- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, archive drift); detect-only, Touch-ID-free. `--full` adds the `verify` deep check. Used by the dream pre-pass (`~/.config/.claude/DREAM.md`)
 - `yadm update` - `pull --ff-only` + check encrypted files
 - All other commands pass through to real yadm, followed by an encrypted-files check
 

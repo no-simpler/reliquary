@@ -25,20 +25,24 @@ stop, surface it, and treat it as its own session.
 Run the mechanical checks before the judgment sweep — cheap, no-judgment, detect-only:
 
 ```
-~/.config/bin/check-shell-parity
+yadm doctor
 ```
 
-Verifies the paired POSIX (`*.sh`) / fish (`*.fish`) configs define the same alias / abbr /
-function *names*. A non-zero exit names the lagging file and the missing names. Adjudicate each:
+Bundles the scriptable health checks: `yadm` resolves to the wrapper in every shell, interactive
+startup smoke tests, `$PATH`-dup sanity, alias/abbr/function parity across the paired POSIX
+(`*.sh`) / fish (`*.fish`) configs, and encrypted-archive SHA drift. Touch-ID-free; non-zero exit
+on any *failure* (warnings, e.g. PATH dups, don't fail). `yadm doctor --full` adds the Touch-ID
+archive-vs-disk `verify` — run it deliberately, not in the unattended pre-pass.
+
+When doctor reports parity drift it names the lagging file and the missing names. Adjudicate each:
 add the missing definition to the lagging shell (translating syntax — `alias NAME=val` ↔
 `alias NAME val` / `abbr --add NAME val`; `name() {…}` ↔ `function name … end`), or, if the
-divergence is intentional and permanent, add the name to that pair's allowlist inside the script
-with a one-line reason.
+divergence is intentional and permanent, add the name to that pair's allowlist inside
+`check-shell-parity` with a one-line reason.
 
-**Extension policy:** as more Reliquary checks become scriptable (e.g. the planned `yadm doctor`
-self-check — startup smoke tests, `$PATH`-dup sanity, encrypted-file drift), fold them in here as
-additional pre-pass commands rather than describing them as judgment prose. The pre-pass is the
-reliable floor; the passes below are the judgment layer it cannot replace.
+**Extension policy:** as more Reliquary checks become scriptable, fold them into `yadm doctor`
+(a new section in the wrapper's `doctor()`), not into prose here. The pre-pass is the reliable
+floor; the passes below are the judgment layer it cannot replace.
 
 ## The recurring passes
 
@@ -92,7 +96,7 @@ opaque pattern reveals.
 ## Closing the pass
 
 1. Doc-only edits don't need a verification loop; if a doc cites a symbol or path, confirm it still
-   resolves. Re-run `check-shell-parity` if the pass touched a shell config.
+   resolves. Re-run `yadm doctor` if the pass touched a shell config.
 2. Write a short summary: what was tightened, what was deferred, what would be worth its own session.
 3. Commit per `CLAUDE.md` conventions once the tree is stable — informative-but-concise message,
    no co-authorship line, stage every `M`/`R`. `yadm commit` triggers a Touch ID prompt (commits are

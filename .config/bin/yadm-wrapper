@@ -170,6 +170,144 @@ list_all_tracked() {
     $YADM_BIN decrypt -l
 }
 
+# Reliquary health self-check helpers
+_doctor_ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+_doctor_warn() { printf '  \033[33m!\033[0m %s\n' "$1"; DOCTOR_WARNS=$((DOCTOR_WARNS + 1)); }
+_doctor_fail() { printf '  \033[31m✗\033[0m %s\n' "$1"; DOCTOR_FAILS=$((DOCTOR_FAILS + 1)); }
+_doctor_skip() { printf '  \033[2m–\033[0m %s\n' "$1"; }
+_doctor_head() { printf '\n\033[1m==>\033[0m \033[1m%s\033[0m\n' "$1"; }
+
+# Function: dotfiles/Reliquary health self-check.
+# Detect-only and Touch-ID-free by default; --full adds the archive verify.
+doctor() {
+    local full=false
+    case "${1:-}" in
+        -f|--full) full=true ;;
+        "")        ;;
+        *) echo "Usage: yadm doctor [--full]" >&2; return 2 ;;
+    esac
+
+    DOCTOR_FAILS=0
+    DOCTOR_WARNS=0
+    local shells="bash zsh fish"
+
+    # Probe each shell ONCE (interactive, so env.d + interactive.d run), tagging
+    # each datum so startup noise can't be mistaken for our output.
+    local sh probe
+    local p_bash p_zsh p_fish
+    for sh in $shells; do
+        if ! command -v "$sh" >/dev/null 2>&1; then
+            eval "p_$sh=__skip__"
+            continue
+        fi
+        if [ "$sh" = fish ]; then
+            probe=$("$sh" -ic 'command -v yadm | sed "s/^/__D_YADM__/"; echo __D_OK__; printf "__D_PATH__%s\n" (string join : -- $PATH)' 2>/dev/null)
+        else
+            probe=$("$sh" -ic 'command -v yadm | sed "s/^/__D_YADM__/"; echo __D_OK__; printf "__D_PATH__%s\n" "$PATH"' 2>/dev/null)
+        fi
+        eval "p_$sh=\$probe"
+    done
+
+    _doctor_get() { # $1=shell var contents, $2=tag -> strips tag prefix, first hit
+        printf '%s\n' "$1" | grep "^$2" | head -n1 | sed "s/^$2//"
+    }
+
+    # 1. yadm resolves to the wrapper in every shell
+    _doctor_head "yadm resolves to the wrapper (not brew)"
+    for sh in $shells; do
+        eval "probe=\$p_$sh"
+        if [ "$probe" = __skip__ ]; then _doctor_skip "$sh not installed"; continue; fi
+        local resolved
+        resolved=$(_doctor_get "$probe" __D_YADM__)
+        if [ "$resolved" = "$HOME/.config/bin/yadm" ]; then
+            _doctor_ok "$sh → ~/.config/bin/yadm"
+        else
+            _doctor_fail "$sh → ${resolved:-(unresolved)} — expected ~/.config/bin/yadm"
+        fi
+    done
+
+    # 2. Interactive startup smoke test
+    _doctor_head "interactive shell startup is clean"
+    for sh in $shells; do
+        eval "probe=\$p_$sh"
+        if [ "$probe" = __skip__ ]; then _doctor_skip "$sh not installed"; continue; fi
+        if printf '%s' "$probe" | grep -q __D_OK__; then
+            _doctor_ok "$sh -ic starts without error"
+        else
+            _doctor_fail "$sh -ic did not complete startup"
+        fi
+    done
+
+    # 3. $PATH free of duplicate entries
+    _doctor_head "\$PATH has no duplicate entries"
+    for sh in $shells; do
+        eval "probe=\$p_$sh"
+        if [ "$probe" = __skip__ ]; then _doctor_skip "$sh not installed"; continue; fi
+        local path dups
+        path=$(_doctor_get "$probe" __D_PATH__)
+        dups=$(printf '%s' "$path" | tr ':' '\n' | grep -v '^$' | sort | uniq -d | tr '\n' ' ')
+        if [ -z "${dups// /}" ]; then
+            _doctor_ok "$sh PATH clean"
+        else
+            _doctor_warn "$sh PATH duplicates: $dups"
+        fi
+    done
+
+    unset -f _doctor_get
+
+    # 4. Shell alias/abbr/function parity
+    _doctor_head "shell alias/function parity"
+    local parity="$HOME/.config/bin/check-shell-parity"
+    if [ -x "$parity" ]; then
+        local pout prc
+        pout=$("$parity" 2>&1); prc=$?
+        if [ "$prc" -eq 0 ]; then
+            _doctor_ok "in sync across paired configs"
+        else
+            _doctor_fail "drift detected:"
+            printf '%s\n' "$pout" | sed 's/^/      /'
+        fi
+    else
+        _doctor_warn "check-shell-parity not found — skipped"
+    fi
+
+    # 5. Encrypted-archive drift (SHA compare; no Touch ID)
+    _doctor_head "encrypted archive drift"
+    local drift
+    drift=$(check_yadm_encrypted_files 2>&1)
+    if [ -z "$drift" ]; then
+        _doctor_ok "archive matches last decrypt/encrypt"
+    else
+        _doctor_warn "drift — encrypt/decrypt may be needed:"
+        printf '%s\n' "$drift" | sed 's/^/      /'
+    fi
+
+    # 6. Archive vs disk verification (Touch ID) — opt-in
+    _doctor_head "archive vs disk verification"
+    if $full; then
+        local vout vrc
+        vout=$(verify_encrypted 2>&1); vrc=$?
+        if [ "$vrc" -eq 0 ]; then
+            _doctor_ok "all encrypted files in sync"
+        else
+            _doctor_fail "differences found:"
+            printf '%s\n' "$vout" | sed 's/^/      /'
+        fi
+    else
+        _doctor_skip "skipped — run 'yadm doctor --full' for the Touch-ID deep check"
+    fi
+
+    # Summary
+    if [ "$DOCTOR_FAILS" -eq 0 ] && [ "$DOCTOR_WARNS" -eq 0 ]; then
+        printf '\n\033[1;32m==> healthy\033[0m — all checks passed\n'
+    elif [ "$DOCTOR_FAILS" -eq 0 ]; then
+        printf '\n\033[1;33m==> ok with %d warning(s)\033[0m\n' "$DOCTOR_WARNS"
+    else
+        printf '\n\033[1;31m==> %d failure(s), %d warning(s)\033[0m\n' "$DOCTOR_FAILS" "$DOCTOR_WARNS"
+    fi
+    [ "$DOCTOR_FAILS" -eq 0 ]
+}
+
 # Function to set the yadm repo URL
 set_yadm_repo_url() {
     local url="$1"
@@ -220,6 +358,9 @@ case $1 in
         ;;
     ls-all)
         list_all_tracked
+        ;;
+    doctor)
+        doctor "$2"
         ;;
     update)
         update_yadm_repo

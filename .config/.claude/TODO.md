@@ -64,12 +64,17 @@ internals as-is.
 - TPM: add a TPM update step to `~/.config/bin/up` (currently only initial install).
 - fisher: verify `up`'s `fisher update` actually applies pinned `fish_plugins`.
 
-## yadm doctor self-check command
-Single `~/.config/bin/` command running: `yadm check`, `yadm verify`,
-shell startup smoke-tests (`<shell> -ic 'echo ok'`), `check-shell-parity`, and a
-`$PATH`-duplicate sanity check. Could also run as a post-checkout hook. (Overlaps the
-dream pre-pass in `~/.config/.claude/DREAM.md` — that's the manual-invocation home; a
-`yadm doctor` would be the standalone CLI surface for the same mechanical checks.)
+## $PATH duplicate entries (surfaced by `yadm doctor`)
+`yadm doctor` flags duplicate `$PATH` entries (warnings, not failures):
+`~/.orbstack/bin` in all three shells, `…/google-cloud-sdk/bin` in zsh. Harmless
+(redundant lookups) but indicates the OrbStack/gcloud init blocks in `040-env.{sh,fish}`
+re-prepend on re-source without a guard. Fix: wrap those sources in a presence check, or
+add a final dedup pass over `$PATH` in `040-env`. Leave the third-party init files alone.
+
+## yadm doctor: optional post-checkout hook
+`yadm doctor` exists as a wrapper subcommand + dream pre-pass step. Not yet wired as a
+yadm post-checkout hook (would run the detect-only checks automatically after `yadm pull`/
+clone). Decide whether that's wanted; hooks live under `~/.config/yadm/hooks/` (encrypted).
 
 ## Bash prompt parity gap
 `050-prompt.{fish,zsh}` use oh-my-posh; `050-prompt.bash` has a hand-rolled `PS1`.
