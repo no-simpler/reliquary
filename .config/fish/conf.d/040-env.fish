@@ -67,21 +67,6 @@ if command -q brew
 end
 
 ##
-## Anaconda
-##
-
-if test -d /opt/homebrew/anaconda3
-    set -l conda_setup (/opt/homebrew/anaconda3/bin/conda shell.fish hook 2>/dev/null)
-    if test $status -eq 0
-        eval $conda_setup
-    else if test -f /opt/homebrew/anaconda3/etc/fish/conf.d/conda.fish
-        source /opt/homebrew/anaconda3/etc/fish/conf.d/conda.fish
-    else
-        fish_add_path /opt/homebrew/anaconda3/bin
-    end
-end
-
-##
 ## Rust
 ##
 
