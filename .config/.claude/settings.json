@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(yadm:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)"
+    ],
+    "deny": [
+      "Bash(/opt/homebrew/bin/yadm:*)",
+      "Bash(/usr/local/bin/yadm:*)",
+      "Bash(/usr/bin/yadm:*)"
+    ]
+  }
+}
