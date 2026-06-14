@@ -74,10 +74,6 @@ clone). Decide whether that's wanted; hooks live under `~/.config/yadm/hooks/` (
 Either port bash to oh-my-posh (`oh-my-posh init bash`) or document bash as the
 deliberate no-posh fallback shell.
 
-## 060-fzf is zsh-only
-Bash has no fzf key bindings (fish uses its own Fisher plugin). Add `060-fzf.bash`
-(`fzf --bash`), or merge into `060-fzf.sh` with shell detection calling `fzf --<shell>`.
-
 ## Encryption pattern hygiene
 `~/.config/yadm/encrypt` spans themes (benefactor/mm/bt). Consider themed
 sub-archives via `yadm encrypt -A`, or consolidating glob patterns. Keep names opaque.
