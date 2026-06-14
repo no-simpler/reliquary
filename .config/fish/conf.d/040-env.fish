@@ -46,16 +46,6 @@ else
 end
 
 ##
-## macOS Homebrew: Lesspipe
-##
-
-if test -x /usr/local/bin/lesspipe.sh
-    set -gx LESSOPEN '| /usr/local/bin/lesspipe.sh %s'
-    set -gx LESS_ADVANCED_PREPROCESSOR 1
-    set -gx LESS ' -R '
-end
-
-##
 ## Google Cloud SDK
 ##
 
