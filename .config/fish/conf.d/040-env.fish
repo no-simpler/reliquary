@@ -22,6 +22,18 @@ if test -f /opt/homebrew/bin/brew
 end
 
 ##
+## Pager & ls colors (always-on; previously interactive-zsh-only via omz)
+##
+## See env.d/040-env.sh for rationale. Kept byte-identical in value to the POSIX
+## file so both shells render `less`, `ls`, and completions the same.
+##
+
+set -gx PAGER less
+set -gx LESS -R
+set -gx LSCOLORS Gxfxcxdxbxegedabagacad
+set -gx LS_COLORS "di=1;36:ln=35:so=32:pi=33:ex=31:bd=34;46:cd=34;43:su=30;41:sg=30;46:tw=30;42:ow=30;43"
+
+##
 ## Force ~/.config/bin ahead of Homebrew on $PATH
 ##
 ## So the `yadm` wrapper (the ~/.config/bin/yadm symlink) shadows brew's yadm.
