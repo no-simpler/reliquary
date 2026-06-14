@@ -150,3 +150,34 @@ if [ -n "$D__SHELL" ]; then
 
     unset ORBSTACK_INIT
 fi
+
+##
+## Final pass: collapse duplicate $PATH entries (first occurrence wins)
+##
+## The third-party init blocks above (gcloud, OrbStack) append/prepend their
+## dirs with no dedup guard, so a child shell that inherits an already-populated
+## $PATH and re-sources this file ends up with doubled entries. Rather than
+## patch each upstream snippet, dedup once here as the final step. Subtractive
+## only — first occurrences keep their order, so ~/.config/bin stays ahead of
+## Homebrew (the yadm-wrapper shadow invariant holds).
+##
+
+if [ "$D__SHELL" = "zsh" ]; then
+    # zsh doesn't word-split unquoted $PATH, so the POSIX loop below would be a
+    # no-op here; use the native uniquing of the tied `path` array instead
+    # (also keeps first occurrence).
+    typeset -U path PATH
+elif [ -n "$PATH" ]; then
+    _dedup=""
+    _OIFS=$IFS
+    IFS=:
+    for _dir in $PATH; do
+        case ":$_dedup:" in
+            *":$_dir:"*) ;;
+            *) _dedup="${_dedup:+$_dedup:}$_dir" ;;
+        esac
+    done
+    IFS=$_OIFS
+    export PATH="$_dedup"
+    unset _dedup _OIFS _dir
+fi
