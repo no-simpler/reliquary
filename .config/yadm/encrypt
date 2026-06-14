@@ -8,6 +8,7 @@
 !**/.ruff_cache
 !**/.DS_Store
 
+.config/acli/*
 .config/arc/benefactor.md
 .config/brew/Brewfile@benefactor
 .config/brew/Brewfile@benefactor-light
