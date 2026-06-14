@@ -36,6 +36,10 @@ export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o ConnectTimeout=15 -o ServerAli
 # crates.io throws over a flaky VPN). cargo uses the git CLI so it also inherits
 # the limits above.
 export HOMEBREW_CURL_RETRIES="${HOMEBREW_CURL_RETRIES:-3}"
+# Homebrew 6.0 made "ask mode" the default, so a bare `brew upgrade` now blocks
+# on `Do you want to proceed with the upgrade? [y/n]`. `up` is meant to be
+# hands-off, so opt out of the prompt (semantics: set = on, value ignored).
+export HOMEBREW_NO_ASK=1
 export CARGO_NET_RETRY="${CARGO_NET_RETRY:-3}"
 export CARGO_NET_GIT_FETCH_WITH_CLI="${CARGO_NET_GIT_FETCH_WITH_CLI:-true}"
 
