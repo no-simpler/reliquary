@@ -137,6 +137,20 @@ verify_encrypted() {
     fi
 }
 
+# Function to list the complete tracked set (plaintext + encrypted archive)
+list_all_tracked() {
+    local BOLD="\033[1m"
+    local NORMAL="\033[0m"
+    local DIM="\033[2m"
+
+    echo -e "${BOLD}==>${NORMAL} ${BOLD}Plaintext-tracked${NORMAL} ${DIM}(yadm ls-files)${NORMAL}"
+    $YADM_BIN ls-files
+
+    echo
+    echo -e "${BOLD}==>${NORMAL} ${BOLD}Encrypted-tracked${NORMAL} ${DIM}(archive listing — Touch ID)${NORMAL}"
+    $YADM_BIN decrypt -l
+}
+
 # Function to set the yadm repo URL
 set_yadm_repo_url() {
     local url="$1"
@@ -184,6 +198,9 @@ case $1 in
         ;;
     verify)
         verify_encrypted
+        ;;
+    ls-all)
+        list_all_tracked
         ;;
     update)
         update_yadm_repo
