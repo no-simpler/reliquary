@@ -148,8 +148,8 @@ fix: it drops orphan entries whose `~/.local/bin/<name>` target is gone.
 one-shot util into `src/`, wires the entrypoint, fills the manifest (RUNTIME
 inferred from the script's shebang, or `-r/--runtime`), publishes, and stages the
 result in yadm. With no Stage-1 source it scaffolds a bare skeleton and prints
-next steps. The deferred `graduate` subcommand and the `install-on-path.sh`
-hoist are sketched in `design/` for a later session.
+next steps. The deferred `graduate` subcommand is sketched in `design/` for a
+later session.
 
 ## Private lane: `~/.config/attic/`
 
@@ -200,13 +200,13 @@ wedge the whole update run.
 - `~/.config/attic/`                                  — private relics (encrypted)
 - `~/.config/reliquary/lib/relic.sh`                  — shared library
 - `~/.config/reliquary/template/`                     — relic skeleton
-- `~/.config/reliquary/design/`                       — deferred work (hoist, scaffold, graduate)
-- `~/.config/shell/lib/install-on-path.sh`            — stable PATH API + single registry
+- `~/.config/reliquary/design/`                       — deferred work (graduate)
+- `~/.config/reliquary/lib/install-on-path.sh`        — stable PATH API + single registry
 - `~/.local/bin/.reliquary-managed`                   — the shared PATH registry (not tracked)
 - `~/.config/yadm/snippets/shared/12-publish-relics.sh` — bootstrap migrate + re-publish
 - `~/.config/bin/up`                                  — periodic update loop
 - `~/.config/yadm/encrypt`                            — `.config/attic/**` pattern
 
-The `~/.config/shell/lib/` home for `install-on-path.sh` is grandfathered. A
-deferred change will hoist it to `~/.config/reliquary/lib/`, coordinated with
-external relics' source paths — see `design/`.
+`install-on-path.sh` lives in `~/.config/reliquary/lib/` alongside `relic.sh` —
+one logical subsystem in one tree. External relics source it by that absolute
+path; the dependency stays strictly unidirectional (relic → reliquary).

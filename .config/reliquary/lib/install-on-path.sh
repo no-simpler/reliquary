@@ -8,13 +8,12 @@
 #   - all known external relics — currently bb and halo
 #     (see ~/.config/reliquary/GRADUATION.md "Known external relics")
 #
-# This file's location (~/.config/shell/lib/) is grandfathered. A deferred
-# change plans to hoist it to ~/.config/reliquary/lib/ alongside the rest of
-# relic infrastructure — see ~/.config/reliquary/design/.
+# Lives in ~/.config/reliquary/lib/ alongside the rest of relic infrastructure
+# (relic.sh); sourced on demand by callers, never auto-loaded.
 #
 # Usage (source from a meta-repo or aspect publish.sh):
 #
-#   META_NAME=halo source "$HOME/.config/shell/lib/install-on-path.sh"
+#   META_NAME=halo source "$HOME/.config/reliquary/lib/install-on-path.sh"
 #   install_on_path /path/to/built-binary chosen-name
 #
 # A meta-repo or any of its aspects may publish zero, one, or many PATH
