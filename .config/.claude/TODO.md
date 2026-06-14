@@ -15,7 +15,7 @@ scrubbed from every tracked Brewfile (plain **and** encrypted `@benefactor*`,
 - **Formulae (likely junk — per-item verdict needed):** `asciinema`, `ffmpeg`,
   `git-filter-repo`, `pango`, `rabbitmq-c`, `redis`, `whisper-cpp`, `dive`.
   `poppler` is a leaf too (PDF lib) — check adhoc dependents before cutting.
-- **Casks (judgment calls):** `draw-things`, `discord`, `obsidian`, `postman`,
+- **Casks (judgment calls):** `draw-things`, `discord`, `obsidian`,
   `protonvpn` (2nd VPN; viscosity tracked), `vivaldi` (6th browser), `sourcetree`,
   `keymapp` (ZSA hw), `robloxstudio`, `zoom`.
 - **`google-cloud-sdk` is NOT a duplicate** — it's the *old token* for the renamed
@@ -67,6 +67,13 @@ Wrapper-only subcommands (`verify`/`check`/`update`/`own`/`disown`) only work vi
 the interactive `yadm` alias; scripts/agents must call `~/.config/bin/yadm-wrapper`
 directly. Recommended: install a `~/.config/bin/yadm` shim ahead of brew on PATH
 that delegates to `$YADM_BIN` (avoid recursion). Alt: rename wrapper to `y`/`dot`.
+
+## yadm: list-all-tracked command (incl. encrypted)
+`yadm ls-files` only shows plaintext-tracked files; encrypted-tracked files live
+inside the archive and are invisible to it, and the `encrypt` patterns aren't
+authoritative for what's actually archived. Add a `yadm-wrapper` subcommand that
+prints the complete tracked set in one go — `yadm ls-files` plus the archive
+listing (`decrypt -l`) — so discovery doesn't require two steps + pattern guesswork.
 
 ## Cross-shell env var parity (excl. conda — see anaconda item)
 Promote `PAGER`, `LESS`, `LSCOLORS`, `LS_COLORS` (currently zsh-only, set by
