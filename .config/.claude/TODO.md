@@ -6,12 +6,6 @@ Single live queue for Reliquary work.
 > `yadm log` is the record of what was done. No DONE section. Add new work as a
 > new section; keep each item independently sized so it can be picked up alone.
 
-## Sensitive/token-bearing configs — encrypt or document exclusion
-Classify each as encrypt-and-track or skip-and-document: `~/.config/acli/*.yaml`,
-`~/.config/raycast/config.json`, `~/.config/gh/hosts.yml`, `~/.docker/config.json`,
-`~/.kube/config`, `~/.gnupg/gpg-agent.conf` (config only, never keys). If tracked,
-add an opaque pattern to `~/.config/yadm/encrypt`.
-
 ## Cross-shell env var parity (excl. conda — see anaconda item)
 Promote `PAGER`, `LESS`, `LSCOLORS`, `LS_COLORS` (currently zsh-only, set by
 zinit/omz plugins) into `040-env.{sh,fish}` so `less`/`ls` behave identically
@@ -37,5 +31,5 @@ sub-archives via `yadm encrypt -A`, or consolidating glob patterns. Keep names o
 you want `POSH_THEMES_PATH` discovery — then update `040-env.*`.
 
 ---
-_Reference (not a todo): confirmed-correct exclusions and the original inventory
-live in the audit plan `~/.claude/plans/this-macos-machine-syncs-manages-groovy-zephyr.md`._
+_Reference (not a todo): confirmed-correct config exclusions are documented in
+`~/.config/CLAUDE.md` → "Deliberately not tracked (audited)"._
