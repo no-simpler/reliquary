@@ -177,9 +177,10 @@ _doctor_fail() { printf '  \033[31m✗\033[0m %s\n' "$1"; DOCTOR_FAILS=$((DOCTOR
 _doctor_skip() { printf '  \033[2m–\033[0m %s\n' "$1"; }
 _doctor_head() { printf '\n\033[1m==>\033[0m \033[1m%s\033[0m\n' "$1"; }
 
-# Function: dotfiles/Reliquary health self-check.
+# Function: dotfiles/Reliquary health self-check (the actual check sequence).
 # Detect-only and Touch-ID-free by default; --full adds the archive verify.
-doctor() {
+# Wrapped by doctor() below, which adds --quiet on top.
+_doctor_run() {
     local full=false
     case "${1:-}" in
         -f|--full) full=true ;;
@@ -308,6 +309,39 @@ doctor() {
     [ "$DOCTOR_FAILS" -eq 0 ]
 }
 
+# Function: doctor entry point. Adds --quiet on top of _doctor_run.
+#   (no flags)         full report, exit non-zero only on a failure
+#   --full             also run the Touch-ID archive verify
+#   --quiet / -q       run silently; print the full report ONLY if not perfectly
+#                      healthy (any failure or warning). Used by `yadm update` so
+#                      a routine sync stays quiet but a regression still surfaces.
+# Flags compose: `yadm doctor --full --quiet` is valid.
+doctor() {
+    local quiet=false full="" a
+    for a in "$@"; do
+        case "$a" in
+            -q|--quiet) quiet=true ;;
+            -f|--full)  full=--full ;;
+            *) echo "Usage: yadm doctor [--full] [--quiet]" >&2; return 2 ;;
+        esac
+    done
+
+    if ! $quiet; then
+        _doctor_run $full
+        return $?
+    fi
+
+    # Quiet: capture the report, emit it only when something needs attention.
+    # _doctor_run exits non-zero on failures; warnings keep exit 0, so also gate
+    # on the "healthy" summary marker (the only summary that means all-clear).
+    local out rc
+    out=$(_doctor_run $full 2>&1); rc=$?
+    if [ "$rc" -ne 0 ] || ! printf '%s' "$out" | grep -q '==> healthy'; then
+        printf '%s\n' "$out"
+    fi
+    return $rc
+}
+
 # Function to set the yadm repo URL
 set_yadm_repo_url() {
     local url="$1"
@@ -328,8 +362,11 @@ handle_encrypt_decrypt() {
 
 # Function to update yadm repository
 update_yadm_repo() {
-    $YADM_BIN pull --ff-only
-    check_yadm_encrypted_files
+    $YADM_BIN pull --ff-only || return $?
+    # Quiet health check after a deliberate sync: silent when healthy, full
+    # report on any drift/regression the pull may have introduced. This already
+    # includes the encrypted-archive drift check, so no separate call is needed.
+    doctor --quiet
 }
 
 # Main script logic
@@ -360,7 +397,7 @@ case $1 in
         list_all_tracked
         ;;
     doctor)
-        doctor "$2"
+        doctor "${@:2}"
         ;;
     update)
         update_yadm_repo

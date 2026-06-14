@@ -6,11 +6,6 @@ Single live queue for Reliquary work.
 > `yadm log` is the record of what was done. No DONE section. Add new work as a
 > new section; keep each item independently sized so it can be picked up alone.
 
-## yadm doctor: optional post-checkout hook
-`yadm doctor` exists as a wrapper subcommand + dream pre-pass step. Not yet wired as a
-yadm post-checkout hook (would run the detect-only checks automatically after `yadm pull`/
-clone). Decide whether that's wanted; hooks live under `~/.config/yadm/hooks/` (encrypted).
-
 ## Bash prompt parity gap
 `050-prompt.{fish,zsh}` use oh-my-posh; `050-prompt.bash` has a hand-rolled `PS1`.
 Either port bash to oh-my-posh (`oh-my-posh init bash`) or document bash as the
