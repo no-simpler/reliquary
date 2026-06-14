@@ -22,7 +22,7 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 
 **yadm is whitelist-based (footgun).** yadm blanket-ignores `$HOME` and tracks only files explicitly `yadm add`-ed. A file you just created is therefore **not** under version control until you add it — never assume a new file is tracked; verify with `yadm ls-files <path>` and add it deliberately. Conversely, a clean `yadm status` means "nothing *tracked* changed", not "nothing worth saving". There is also no usable blanket add: `yadm add -A` / `yadm add .` will not pick up new files (they're ignored), so every new path must be named explicitly in `yadm add`.
 
-**Encrypted files are invisible to `yadm ls-files`.** Some files are tracked only *inside* the encrypted archive (`~/.local/share/yadm/archive`), not as individual git entries — so `yadm ls-files` will not list them. The patterns in `~/.config/yadm/encrypt` are also **not** authoritative for what is actually archived (a pattern may match nothing on this machine). To enumerate exactly what is encrypted-tracked, list the archive: `~/.config/bin/yadm-wrapper decrypt -l` (Touch ID). The complete tracked set = `yadm ls-files` (plaintext) **plus** that archive listing — `yadm ls-all` (wrapper subcommand) prints both in one go (Touch ID, for the archive half).
+**Encrypted files are invisible to `yadm ls-files`.** Some files are tracked only *inside* the encrypted archive (`~/.local/share/yadm/archive`), not as individual git entries — so `yadm ls-files` will not list them. The patterns in `~/.config/yadm/encrypt` are also **not** authoritative for what is actually archived (a pattern may match nothing on this machine). To enumerate exactly what is encrypted-tracked, list the archive: `yadm decrypt -l` (Touch ID). The complete tracked set = `yadm ls-files` (plaintext) **plus** that archive listing — `yadm ls-all` (wrapper subcommand) prints both in one go (Touch ID, for the archive half).
 
 **Reading `yadm status`** (easy to misread):
 - `M ` / `R `: tracked file modified or renamed → almost always belongs in the next commit
@@ -31,7 +31,7 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 
 **Default staging policy.** When committing in this repo, stage every `M` / `R` line unless explicitly told to exclude one. Reliquary bundles whatever is dirty; splitting the working tree by topic isn't the house style. Skipping an `M` line on the assumption it's "unrelated" has historically been wrong.
 
-**Path availability.** `yadm` is on `$PATH` in non-interactive bash and zsh: `~/.zshenv` and `~/.bash_env` (via `$BASH_ENV`) source `env.d/040-env.sh`, which puts Homebrew on `$PATH`. Use bare `yadm <cmd>` — no need for `/opt/homebrew/bin/yadm`. The wrapper alias is interactive-only (see below); wrapper-only subcommands still need explicit `~/.config/bin/yadm-wrapper <cmd>`.
+**Path availability.** `yadm` is on `$PATH` in non-interactive bash and zsh: `~/.zshenv` and `~/.bash_env` (via `$BASH_ENV`) source `env.d/040-env.sh`, which puts both Homebrew and `~/.config/bin` on `$PATH`. Crucially, `~/.config/bin` is forced **ahead** of Homebrew there, and `~/.config/bin/yadm` is a symlink to the wrapper — so bare `yadm <cmd>` resolves to the **wrapper** (not brew's yadm) in *every* shell, interactive or not, including wrapper-only subcommands (`check`/`verify`/`update`/`own`/`disown`/`ls-all`). No alias and no explicit `~/.config/bin/yadm-wrapper` path are needed anymore. (The wrapper finds the real yadm by scanning `$PATH` outside `~/.config/bin`, so it never recurses.)
 
 **Authorization.** `yadm commit` and `yadm push` are pre-approved — run them yourself; never ask first and never hand the commit/push off to the user to run. Be aware that **`yadm commit` triggers a Touch ID prompt** — commits are SSH-signed through 1Password (`op-ssh-sign`, per the global git config) — as does `yadm encrypt`. If the user is AFK the prompt times out and the command fails; that just means the user is away, not a real error. Surface it plainly and let them retry when back — don't thrash, retry in a loop, or try to work around the signing.
 
@@ -79,7 +79,7 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm); writes timestamp to `~/.local/state/up/last_upped_at`
 - `check-shell-parity` - detects POSIX↔fish alias/abbr/function name drift across the paired `shell/interactive.d/*.sh` ↔ `fish/conf.d/*.fish` files; exits non-zero on drift (run by the dream procedure in `~/.config/.claude/DREAM.md`)
 - `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt
-- `yadm-wrapper` - wraps yadm with custom subcommands (see below)
+- `yadm-wrapper` - wraps yadm with custom subcommands (see below); also reachable as `yadm` via the `~/.config/bin/yadm` symlink (shadows brew's yadm — see "Path availability")
 - Additional encrypted scripts may exist (see `~/.config/yadm/encrypt`)
 
 ### Externally-managed PATH lane (`~/.local/bin/`)
@@ -118,7 +118,7 @@ Full reference: `~/.config/reliquary/GRADUATION.md`.
 
 ### yadm wrapper (`~/.config/bin/yadm-wrapper`)
 
-Aliased as `yadm` in interactive shells. Adds custom commands:
+Reachable as `yadm` in **every** shell — `~/.config/bin/yadm` is a symlink to this script, and `env.d/040-env.{sh,fish}` force `~/.config/bin` ahead of Homebrew on `$PATH` so it shadows brew's yadm (no alias involved). Adds custom commands:
 - `yadm own` / `yadm disown` - switch remote between SSH and HTTPS
 - `yadm encrypt` / `yadm decrypt` - delegates to yadm + records archive SHA256
 - `yadm check` - compares archive SHA256 to detect drift
@@ -127,7 +127,7 @@ Aliased as `yadm` in interactive shells. Adds custom commands:
 - `yadm update` - `pull --ff-only` + check encrypted files
 - All other commands pass through to real yadm, followed by an encrypted-files check
 
-The alias is interactive-only. From non-interactive shells, invoke `~/.config/bin/yadm-wrapper <cmd>` for wrapper-only subcommands; bare `yadm <cmd>` works for everything else (see "yadm operations" above).
+Because the wrapper shadows brew's yadm on `$PATH`, bare `yadm <cmd>` — including wrapper-only subcommands — works in interactive *and* non-interactive shells alike (see "Path availability" above). The wrapper resolves the real yadm by scanning `$PATH` outside `~/.config/bin`, so it never recurses into itself.
 
 ### Bootstrap (`~/.config/yadm/bootstrap`)
 

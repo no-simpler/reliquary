@@ -2,8 +2,8 @@
 ## yadm
 ##
 
-# Wrap yadm executable to add custom commands to it
-alias yadm=~/.config/bin/yadm-wrapper
+# `yadm` resolves to ~/.config/bin/yadm (symlink to yadm-wrapper), placed ahead
+# of Homebrew on $PATH by env.d/040-env.sh — so no alias is needed for the wrapper.
 alias ya='yadm add'
 alias yf='yadm fetch --prune --prune-tags --tags --force'
 alias yrs='yadm restore --staged'
