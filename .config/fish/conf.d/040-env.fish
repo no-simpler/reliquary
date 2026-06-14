@@ -30,6 +30,8 @@ end
 
 set -gx PAGER less
 set -gx LESS -R
+# CLICOLOR=1: bare `ls` honors LSCOLORS too (not only via an alias). See 040-env.sh.
+set -gx CLICOLOR 1
 set -gx LSCOLORS Gxfxcxdxbxegedabagacad
 set -gx LS_COLORS "di=1;36:ln=35:so=32:pi=33:ex=31:bd=34;46:cd=34;43:su=30;41:sg=30;46:tw=30;42:ow=30;43"
 
