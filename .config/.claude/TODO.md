@@ -6,26 +6,6 @@ Single live queue for Reliquary work.
 > `yadm log` is the record of what was done. No DONE section. Add new work as a
 > new section; keep each item independently sized so it can be picked up alone.
 
-## Brew leaf cleanup (resume activity)
-One-time pass over `brew leaves -r` + casks: each item either gets firmly wired
-into Reliquary (Brewfile/bootstrap) or removed as garbage. Removals must be
-scrubbed from every tracked Brewfile (plain **and** encrypted `@benefactor*`,
-`@home`) and any bootstrap/env wiring.
-
-- **Formulae (likely junk — per-item verdict needed):** `asciinema`, `ffmpeg`,
-  `git-filter-repo`, `pango`, `rabbitmq-c`, `redis`, `whisper-cpp`, `dive`.
-  `poppler` is a leaf too (PDF lib) — check adhoc dependents before cutting.
-- **Casks (judgment calls):** `draw-things`, `discord`, `obsidian`,
-  `protonvpn` (2nd VPN; viscosity tracked), `vivaldi` (6th browser), `sourcetree`,
-  `keymapp` (ZSA hw), `robloxstudio`, `zoom`.
-- **`google-cloud-sdk` is NOT a duplicate** — it's the *old token* for the renamed
-  `gcloud-cli` cask (`Caskroom/google-cloud-sdk -> gcloud-cli` symlink; same install).
-  Do not `brew uninstall` it — that deletes the shared files and breaks gcloud, and
-  needs sudo. Only loose end: the stale old-name token still shows in `brew list --cask`.
-  Dropping it cleanly is fiddly/risky; low priority, leave unless it actively bites.
-- Procedure per item: `brew uninstall <x>` → `brew autoremove -n` for orphans →
-  scrub from `~/.config/brew/Brewfile*` → regenerate affected `*.lock.json`.
-
 ## anaconda: wire-or-remove (+ fish conda gap)
 The `anaconda` cask (~5GB, untracked) is installed, so the conda-init blocks in
 `shell/env.d/040-env.sh` and `fish/conf.d/040-env.fish` are *live*. Decide:
