@@ -128,8 +128,8 @@ Reachable as `yadm` in **every** shell — `~/.config/bin/yadm` is a symlink to 
 - `yadm check` - compares archive SHA256 to detect drift
 - `yadm verify` - decrypts archive to tmpdir and diffs against disk
 - `yadm ls-all` - complete tracked set: `yadm ls-files` (plaintext) + archive listing (`decrypt -l`, Touch ID)
-- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, archive drift); detect-only, Touch-ID-free. `--full` adds the `verify` deep check. Used by the dream pre-pass (`~/.config/.claude/DREAM.md`)
-- `yadm update` - `pull --ff-only` + check encrypted files
+- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, archive drift); detect-only, Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
+- `yadm update` - `pull --ff-only`, then `doctor --quiet` (silent when healthy; surfaces drift/regressions the pull introduced — the quiet doctor already covers the encrypted-archive check)
 - All other commands pass through to real yadm, followed by an encrypted-files check
 
 Because the wrapper shadows brew's yadm on `$PATH`, bare `yadm <cmd>` — including wrapper-only subcommands — works in interactive *and* non-interactive shells alike (see "Path availability" above). The wrapper resolves the real yadm by scanning `$PATH` outside `~/.config/bin`, so it never recurses into itself.
