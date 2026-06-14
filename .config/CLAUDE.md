@@ -77,6 +77,7 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `bbs` - interactive Brewfile scope selector (applies `Brewfile@<scope>` files)
 - `pb` - lists personal bin executables, shows which are yadm-managed
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm); writes timestamp to `~/.local/state/up/last_upped_at`
+- `check-shell-parity` - detects POSIX↔fish alias/abbr/function name drift across the paired `shell/interactive.d/*.sh` ↔ `fish/conf.d/*.fish` files; exits non-zero on drift (run by the dream procedure in `~/.config/.claude/DREAM.md`)
 - `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below)
 - Additional encrypted scripts may exist (see `~/.config/yadm/encrypt`)

@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+#
+# check-shell-parity — drift detector for the paired POSIX (*.sh) / fish (*.fish)
+# shell-config files.
+#
+# Aliases, abbreviations and functions are hand-maintained twice: once in the
+# bash/zsh files under shell/interactive.d/ and once in the fish files under
+# fish/conf.d/. There is no equivalence check, and real divergence has crept in
+# before. This script compares the *names* defined on each side of every known
+# pair and exits non-zero when a name exists on one side but not the other.
+#
+# Names only: alias *values* cannot be compared across shells (`${PATH//:/\n}`
+# vs `string join \n $PATH`), so this checks the surface that actually drifts —
+# "an alias was added to one shell and forgotten in the other".
+#
+# Exit: 0 = in sync, 1 = drift or a missing pair file.
+
+set -o pipefail
+
+# --- Colors (house style, see bin/up) --------------------------------------
+BOLD="\033[1m"; RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; RESET="\033[0m"
+
+print_msg()  { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}${GREEN}$1${RESET}"; }
+print_warn() { printf '%b\n' "${BOLD}${YELLOW}==>${RESET} ${YELLOW}$1${RESET}"; }
+print_err()  { printf '%b\n' "${BOLD}${RED}!!>${RESET} ${RED}$1${RESET}"; }
+
+CONFIG="$HOME/.config"
+
+# --- Pairs -----------------------------------------------------------------
+# "posix_relpath|fish_relpath|label", relative to ~/.config.
+# Explicit list, not auto-discovery: both dirs hold unpaired shell-specific
+# files (fzf.fish, 040-env.*, *.zsh, *.bash) that have no counterpart.
+PAIRS=(
+    "shell/interactive.d/090-funcs.sh|fish/conf.d/090-funcs.fish|funcs"
+    "shell/interactive.d/100-aliases.sh|fish/conf.d/100-aliases.fish|aliases"
+    "shell/interactive.d/100-aliases-docker.sh|fish/conf.d/100-aliases-docker.fish|docker"
+    "shell/interactive.d/100-aliases-git.sh|fish/conf.d/100-aliases-git.fish|git"
+    "shell/interactive.d/100-aliases-yadm.sh|fish/conf.d/100-aliases-yadm.fish|yadm"
+)
+
+# --- Allowlist -------------------------------------------------------------
+# Names exempt from parity, keyed by pair label. These are *intentional,
+# permanent* per-shell divergences — not drift.
+allow_for() {
+    case "$1" in
+    aliases)
+        # ..      bash-only nav alias (zsh uses a `-g` global alias from `...`
+        #         up; fish uses abbrs and defines no `..`)
+        # libpath POSIX-only ($LD_LIBRARY_PATH; not meaningful on fish/macOS)
+        # rzc     zsh-only (.zcompdump reset + re-source ~/.zshrc)
+        echo ".. libpath rzc"
+        ;;
+    *) echo "" ;;
+    esac
+}
+
+# --- Name extraction -------------------------------------------------------
+# Emit one defined name per line. Sorting/dedup happens at the call site.
+
+# POSIX: `alias [-g|-s|--] NAME=...` (the keyword may be mid-line behind a
+# guard such as `[ -d X ] && alias ...`) and `name() {` function definitions.
+posix_names() {
+    awk '
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i == "alias") {
+                    j = i + 1
+                    while (j <= NF && ($j == "-g" || $j == "-s" || $j == "--")) j++
+                    if (j <= NF) { sub(/=.*/, "", $j); print $j }
+                    break
+                }
+            }
+        }
+        /^[[:space:]]*[A-Za-z0-9_]+\(\)/ {
+            name = $0
+            sub(/^[[:space:]]*/, "", name)
+            sub(/\(\).*/, "", name)
+            print name
+        }
+    ' "$1"
+}
+
+# fish: `alias NAME ...`, `abbr [--add|-a] [--] NAME ...`, `function NAME`.
+fish_names() {
+    awk '
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i == "alias") {
+                    j = i + 1
+                    while (j <= NF && $j == "--") j++
+                    if (j <= NF) print $j
+                    break
+                }
+                if ($i == "abbr") {
+                    j = i + 1
+                    while (j <= NF && ($j == "--add" || $j == "-a" || $j == "--")) j++
+                    if (j <= NF) print $j
+                    break
+                }
+            }
+        }
+        /^[[:space:]]*function[[:space:]]+/ { print $2 }
+    ' "$1"
+}
+
+# --- Compare ---------------------------------------------------------------
+fail=0
+checked=0
+
+for entry in "${PAIRS[@]}"; do
+    IFS='|' read -r posix_rel fish_rel label <<<"$entry"
+    posix="$CONFIG/$posix_rel"
+    fish="$CONFIG/$fish_rel"
+
+    if [[ ! -f "$posix" ]]; then print_err "[$label] missing POSIX file: $posix_rel"; fail=1; continue; fi
+    if [[ ! -f "$fish" ]];  then print_err "[$label] missing fish file: $fish_rel";  fail=1; continue; fi
+
+    # Allowlisted names are filtered out of *both* sides before diffing.
+    allow_re=""
+    for n in $(allow_for "$label"); do
+        allow_re+="${allow_re:+|}$(printf '%s' "$n" | sed 's/[.[\*^$]/\\&/g')"
+    done
+    filter() { if [[ -n "$allow_re" ]]; then grep -Ev "^(${allow_re})$"; else cat; fi; }
+
+    posix_set="$(posix_names "$posix" | filter | sort -u)"
+    fish_set="$(fish_names "$fish"  | filter | sort -u)"
+
+    posix_only="$(comm -23 <(printf '%s\n' "$posix_set") <(printf '%s\n' "$fish_set") | grep -v '^$')"
+    fish_only="$(comm -13 <(printf '%s\n' "$posix_set") <(printf '%s\n' "$fish_set") | grep -v '^$')"
+
+    if [[ -n "$posix_only" || -n "$fish_only" ]]; then
+        fail=1
+        print_err "[$label] name drift between $posix_rel and $fish_rel"
+        [[ -n "$posix_only" ]] && printf '%b\n' "    only in POSIX: ${YELLOW}$(echo $posix_only)${RESET}"
+        [[ -n "$fish_only"  ]] && printf '%b\n' "    only in fish:  ${YELLOW}$(echo $fish_only)${RESET}"
+    fi
+    checked=$((checked + 1))
+done
+
+echo
+if [[ "$fail" -ne 0 ]]; then
+    print_err "shell parity check FAILED"
+    exit 1
+fi
+print_msg "shell alias/function names in sync across $checked pairs"

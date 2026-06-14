@@ -35,15 +35,6 @@ The `anaconda` cask (~5GB, untracked) is installed, so the conda-init blocks in
   auto-activating `base`). Fix the fish init or document fish as deliberately
   unactivated.
 
-## Drift-proof shared aliases & helpers across shells
-Aliases/helpers are duplicated in POSIX (`*.sh`) and fish (`*.fish`) with no
-equivalence check; real divergence has crept in before. Pairs:
-`shell/090-funcs.sh`↔`fish/conf.d/090-funcs.fish`,
-`shell/100-aliases{,-docker,-git,-yadm}.sh`↔ fish equivalents.
-Recommended: add `~/.config/bin/check-shell-parity` that diffs alias/function
-names between paired files and exits non-zero on mismatch; wire into `up` or a
-pre-commit hook. (Alt: generate both from one TOML/YAML spec.)
-
 ## Move shell rc files inward
 Relocate `.bashrc`/`.bash_profile`/`.zshrc`/`.zprofile`/`.hushlogin` from `$HOME`
 root into `~/.config/`. zsh: set `ZDOTDIR=$HOME/.config/zsh` in a minimal
@@ -88,8 +79,10 @@ internals as-is.
 
 ## yadm doctor self-check command
 Single `~/.config/bin/` command running: `yadm-wrapper check`, `yadm-wrapper verify`,
-shell startup smoke-tests (`<shell> -ic 'echo ok'`), the parity check above once it
-exists, and a `$PATH`-duplicate sanity check. Could also run as a post-checkout hook.
+shell startup smoke-tests (`<shell> -ic 'echo ok'`), `check-shell-parity`, and a
+`$PATH`-duplicate sanity check. Could also run as a post-checkout hook. (Overlaps the
+dream pre-pass in `~/.config/.claude/DREAM.md` — that's the manual-invocation home; a
+`yadm doctor` would be the standalone CLI surface for the same mechanical checks.)
 
 ## Bash prompt parity gap
 `050-prompt.{fish,zsh}` use oh-my-posh; `050-prompt.bash` has a hand-rolled `PS1`.
