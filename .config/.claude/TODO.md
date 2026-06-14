@@ -6,12 +6,6 @@ Single live queue for Reliquary work.
 > `yadm log` is the record of what was done. No DONE section. Add new work as a
 > new section; keep each item independently sized so it can be picked up alone.
 
-## Cross-shell env var parity (excl. conda — see anaconda item)
-Promote `PAGER`, `LESS`, `LSCOLORS`, `LS_COLORS` (currently zsh-only, set by
-zinit/omz plugins) into `040-env.{sh,fish}` so `less`/`ls` behave identically
-regardless of launching shell. Leave color vars (`010-colors.sh`) and zsh/posh
-internals as-is.
-
 ## yadm doctor: optional post-checkout hook
 `yadm doctor` exists as a wrapper subcommand + dream pre-pass step. Not yet wired as a
 yadm post-checkout hook (would run the detect-only checks automatically after `yadm pull`/

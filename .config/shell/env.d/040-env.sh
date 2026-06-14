@@ -66,6 +66,22 @@ fi
 export BASH_SILENCE_DEPRECATION_WARNING=1
 
 ##
+## Pager & ls colors (always-on; previously interactive-zsh-only via omz)
+##
+## Oh My Zsh set these only in interactive zsh, so fish and non-interactive
+## shells diverged. Promote them here so `less`, `ls`, and completion coloring
+## behave identically regardless of launching shell. LSCOLORS drives macOS/BSD
+## `ls` (activated by the `ls -FG` alias); LS_COLORS drives zsh completion
+## coloring (and GNU `ls` if ever installed). Values are the omz defaults; keep
+## them byte-identical to 040-env.fish.
+##
+
+export PAGER=less
+export LESS=-R
+export LSCOLORS=Gxfxcxdxbxegedabagacad
+export LS_COLORS='di=1;36:ln=35:so=32:pi=33:ex=31:bd=34;46:cd=34;43:su=30;41:sg=30;46:tw=30;42:ow=30;43'
+
+##
 ## Google Cloud SDK
 ##
 
