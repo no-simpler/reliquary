@@ -3,7 +3,7 @@
 # relic.sh — shared library for Stage 1+2 relic management.
 #
 # Stage 3 (external relics like ~/Developer/bb, ~/Developer/halo) do NOT
-# depend on this lib. They publish via ~/.config/shell/lib/install-on-path.sh
+# depend on this lib. They publish via ~/.config/reliquary/lib/install-on-path.sh
 # directly. The stable cross-stage API is install-on-path; relic.sh is the
 # convenience layer for in-house relics.
 #
@@ -152,7 +152,7 @@ relic::publish() {
     (
         export META_NAME="$name_for_meta"
         # shellcheck disable=SC1091
-        source "$HOME/.config/shell/lib/install-on-path.sh" || exit $?
+        source "$HOME/.config/reliquary/lib/install-on-path.sh" || exit $?
 
         local count=0
         for ep in "$entrypoints_dir"/*; do

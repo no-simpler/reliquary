@@ -26,7 +26,7 @@
 set -uo pipefail
 
 RELIC_LIB="$HOME/.config/reliquary/lib/relic.sh"
-INSTALL_ON_PATH_LIB="$HOME/.config/shell/lib/install-on-path.sh"
+INSTALL_ON_PATH_LIB="$HOME/.config/reliquary/lib/install-on-path.sh"
 RELICS_LANE="$HOME/.config/relics"
 ATTIC_LANE="$HOME/.config/attic"
 BIN_LANE="$HOME/.config/bin"

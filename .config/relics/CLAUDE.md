@@ -6,8 +6,7 @@ including anatomy, manifest schema, publish flow, and promotion to
 external (Stage 3) status.
 
 The `relic` CLI lives here at `relic/` — the first Stage-2 relic, and the
-user-facing surface over the whole system. Deferred next steps (the
-`install-on-path.sh` hoist, `relic graduate`) are in
-`~/.config/reliquary/design/`.
+user-facing surface over the whole system. The deferred next step
+(`relic graduate`) is in `~/.config/reliquary/design/`.
 
 Private relics live under `~/.config/attic/` (encrypted; same anatomy).

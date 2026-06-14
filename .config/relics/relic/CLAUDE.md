@@ -5,8 +5,8 @@ The first in-house (Stage-2) relic. It manages the relic lifecycle and
 same `relic::publish` / `install-on-path.sh` rails it exposes.
 
 For the lifecycle, stages, and registry model, see
-`~/.config/reliquary/GRADUATION.md`. For deferred work (the `install-on-path.sh`
-hoist, `relic graduate`), see `~/.config/reliquary/design/`.
+`~/.config/reliquary/GRADUATION.md`. For deferred work (`relic graduate`),
+see `~/.config/reliquary/design/`.
 
 ## Anatomy
 
@@ -14,7 +14,7 @@ hoist, `relic graduate`), see `~/.config/reliquary/design/`.
 - `src/relic.sh` — the whole CLI, **one self-contained file**. This is load-bearing:
   the published entrypoint is a single `cp`-copied file in `~/.local/bin/`, so the
   CLI cannot rely on sibling files at runtime. It sources its libraries by absolute
-  path (`reliquary/lib/relic.sh`, `shell/lib/install-on-path.sh`). Do **not** split
+  path (`reliquary/lib/relic.sh`, `reliquary/lib/install-on-path.sh`). Do **not** split
   `src/` into multiple sourced files without also adding a bundling `scripts/publish.sh`.
 - `entrypoints/relic` → `../src/relic.sh` — the published name.
 - `tests/run.sh` — sources `src/relic.sh` (which self-guards via the
