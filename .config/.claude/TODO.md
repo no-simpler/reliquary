@@ -59,13 +59,6 @@ the interactive `yadm` alias; scripts/agents must call `~/.config/bin/yadm-wrapp
 directly. Recommended: install a `~/.config/bin/yadm` shim ahead of brew on PATH
 that delegates to `$YADM_BIN` (avoid recursion). Alt: rename wrapper to `y`/`dot`.
 
-## yadm: list-all-tracked command (incl. encrypted)
-`yadm ls-files` only shows plaintext-tracked files; encrypted-tracked files live
-inside the archive and are invisible to it, and the `encrypt` patterns aren't
-authoritative for what's actually archived. Add a `yadm-wrapper` subcommand that
-prints the complete tracked set in one go — `yadm ls-files` plus the archive
-listing (`decrypt -l`) — so discovery doesn't require two steps + pattern guesswork.
-
 ## Cross-shell env var parity (excl. conda — see anaconda item)
 Promote `PAGER`, `LESS`, `LSCOLORS`, `LS_COLORS` (currently zsh-only, set by
 zinit/omz plugins) into `040-env.{sh,fish}` so `less`/`ls` behave identically

@@ -22,7 +22,7 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 
 **yadm is whitelist-based (footgun).** yadm blanket-ignores `$HOME` and tracks only files explicitly `yadm add`-ed. A file you just created is therefore **not** under version control until you add it — never assume a new file is tracked; verify with `yadm ls-files <path>` and add it deliberately. Conversely, a clean `yadm status` means "nothing *tracked* changed", not "nothing worth saving". There is also no usable blanket add: `yadm add -A` / `yadm add .` will not pick up new files (they're ignored), so every new path must be named explicitly in `yadm add`.
 
-**Encrypted files are invisible to `yadm ls-files`.** Some files are tracked only *inside* the encrypted archive (`~/.local/share/yadm/archive`), not as individual git entries — so `yadm ls-files` will not list them. The patterns in `~/.config/yadm/encrypt` are also **not** authoritative for what is actually archived (a pattern may match nothing on this machine). To enumerate exactly what is encrypted-tracked, list the archive: `~/.config/bin/yadm-wrapper decrypt -l` (Touch ID). The complete tracked set = `yadm ls-files` (plaintext) **plus** that archive listing. (A wrapper subcommand to print both at once is a TODO — see `~/.config/.claude/TODO.md`.)
+**Encrypted files are invisible to `yadm ls-files`.** Some files are tracked only *inside* the encrypted archive (`~/.local/share/yadm/archive`), not as individual git entries — so `yadm ls-files` will not list them. The patterns in `~/.config/yadm/encrypt` are also **not** authoritative for what is actually archived (a pattern may match nothing on this machine). To enumerate exactly what is encrypted-tracked, list the archive: `~/.config/bin/yadm-wrapper decrypt -l` (Touch ID). The complete tracked set = `yadm ls-files` (plaintext) **plus** that archive listing — `yadm ls-all` (wrapper subcommand) prints both in one go (Touch ID, for the archive half).
 
 **Reading `yadm status`** (easy to misread):
 - `M ` / `R `: tracked file modified or renamed → almost always belongs in the next commit
@@ -123,6 +123,7 @@ Aliased as `yadm` in interactive shells. Adds custom commands:
 - `yadm encrypt` / `yadm decrypt` - delegates to yadm + records archive SHA256
 - `yadm check` - compares archive SHA256 to detect drift
 - `yadm verify` - decrypts archive to tmpdir and diffs against disk
+- `yadm ls-all` - complete tracked set: `yadm ls-files` (plaintext) + archive listing (`decrypt -l`, Touch ID)
 - `yadm update` - `pull --ff-only` + check encrypted files
 - All other commands pass through to real yadm, followed by an encrypted-files check
 
