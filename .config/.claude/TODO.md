@@ -6,18 +6,6 @@ Single live queue for Reliquary work.
 > `yadm log` is the record of what was done. No DONE section. Add new work as a
 > new section; keep each item independently sized so it can be picked up alone.
 
-## Move shell rc files inward
-Relocate `.bashrc`/`.bash_profile`/`.zshrc`/`.zprofile`/`.hushlogin` from `$HOME`
-root into `~/.config/`. zsh: set `ZDOTDIR=$HOME/.config/zsh` in a minimal
-`~/.zshenv` (only file that can't move), move the rest into `~/.config/zsh/`.
-bash: keep one-line forwarders at root, or symlink from a bootstrap snippet.
-Update bootstrap snippets to install forwarders/symlinks on new machines.
-
-## Tracked-on-disk root dotfiles still untracked
-`~/.zshenv` and `~/.profile` (rustup-generated one-liners). Decide: track as
-canonical, or document "leave to rustup" in README. NOTE: if rc files move
-inward via `ZDOTDIR`, `~/.zshenv` becomes load-bearing and MUST be tracked.
-
 ## Sensitive/token-bearing configs — encrypt or document exclusion
 Classify each as encrypt-and-track or skip-and-document: `~/.config/acli/*.yaml`,
 `~/.config/raycast/config.json`, `~/.config/gh/hosts.yml`, `~/.docker/config.json`,
