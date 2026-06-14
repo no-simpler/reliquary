@@ -18,7 +18,11 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 
 ## yadm operations
 
-**Tracked-file discovery.** The work tree is `$HOME`, not the cwd. Tracked files live across `$HOME` — `.bashrc`, `.zshrc`, `.bash_profile`, `.zshenv`, `.bash_env`, `.config/...`, `.ssh/config`, `.local/share/yadm/archive`, etc. Don't assume a file at `$HOME` root is untracked just because it sits outside the cwd. Check tracking with `yadm ls-files <path>`. See full dirty state with `yadm status` (always reports relative to `$HOME`).
+**Tracked-file discovery.** The work tree is `$HOME`, not the cwd. Tracked files live across `$HOME` — `.bashrc`, `.zshrc`, `.bash_profile`, `.zshenv`, `.bash_env`, `.gitignore`, `.config/...`, `.ssh/config`, `.local/share/yadm/archive`, etc. Don't assume a file at `$HOME` root is untracked just because it sits outside the cwd. Check tracking with `yadm ls-files <path>`. See full dirty state with `yadm status` (always reports relative to `$HOME`).
+
+**yadm is whitelist-based (footgun).** yadm blanket-ignores `$HOME` and tracks only files explicitly `yadm add`-ed. A file you just created is therefore **not** under version control until you add it — never assume a new file is tracked; verify with `yadm ls-files <path>` and add it deliberately. Conversely, a clean `yadm status` means "nothing *tracked* changed", not "nothing worth saving".
+
+**Encrypted files are invisible to `yadm ls-files`.** Some files are tracked only *inside* the encrypted archive (`~/.local/share/yadm/archive`), not as individual git entries — so `yadm ls-files` will not list them. The patterns in `~/.config/yadm/encrypt` are also **not** authoritative for what is actually archived (a pattern may match nothing on this machine). To enumerate exactly what is encrypted-tracked, list the archive: `~/.config/bin/yadm-wrapper decrypt -l` (Touch ID). The complete tracked set = `yadm ls-files` (plaintext) **plus** that archive listing. (A wrapper subcommand to print both at once is a TODO — see `~/.config/.claude/TODO.md`.)
 
 **Reading `yadm status`** (easy to misread):
 - `M ` / `R `: tracked file modified or renamed → almost always belongs in the next commit
@@ -128,7 +132,7 @@ The alias is interactive-only. From non-interactive shells, invoke `~/.config/bi
 Sourcing order: `lib/` -> `util/` -> OS-specific (`macos/` or `linux/`) -> `shared/`.
 Snippet dirs live under `~/.config/yadm/snippets/`. Files are `NN-name.sh`, sorted and sourced in order.
 
-Key macOS snippets: homebrew install, brewfile apply, mas (App Store), directory creation, choosy, iterm2, quartz filters, tilde-switch.
+Key macOS snippets: homebrew install, brewfile apply, mas (App Store), directory creation, quartz filters, tilde-switch.
 Shared snippets: pbin setup, tpm (tmux plugin manager), rustup.
 Util snippets: print helpers, copy helpers, symlink helpers.
 
@@ -137,14 +141,13 @@ Util snippets: print helpers, copy helpers, symlink helpers.
 - `Brewfile` - base (always applied during bootstrap)
 - `Brewfile@<scope>` - optional scopes applied interactively via `bbs`
 - Some scoped files are tracked publicly, others are encrypted (see `~/.config/yadm/encrypt`)
+- `Brewfile*.lock.json` - **deliberately not tracked** (ignored via `~/.gitignore`). Homebrew is rolling-release, so pinned bottle SHAs expire and aren't reinstallable, while the lock churns on every `brew upgrade`. The Brewfiles are the source of truth (track-latest intent); locks are regenerated locally by `brew bundle`/`bbs`.
 
 ### Other tracked configs
 
-- `alacritty`, `ghostty` - terminal emulator configs
-- `choosy` - browser chooser
+- `ghostty` - terminal emulator config
 - `git/attributes` - `* text=auto`, binary markers for `*.png`/`*.plist`
 - `vim/vimrc` - Vim configuration (Vim 9.2+ native XDG support)
-- `mpv` - media player config
 - `oh-my-posh` - shell prompt theme
 - `quartz-filters` - macOS PDF compression filters
 - `tmux` - tmux configuration

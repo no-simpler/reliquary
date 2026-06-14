@@ -17,10 +17,8 @@
 .config/git/allowed_signers
 .config/git/config
 .config/git/config@benefactor
-.config/iterm2/preferences/*
 .config/mm/env/.env.local@*
 .config/mm/vpn/*.ovpn
-.config/mpv/input.conf
 .config/phpstorm/*.xml
 .config/shell/env.d/150-benefactor.*
 .config/fish/conf.d/150-benefactor.fish
