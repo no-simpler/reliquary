@@ -69,6 +69,10 @@ Non-interactive entry points:
 - bash → `$BASH_ENV` (set to `~/.bash_env` by `~/.zshenv`) globs `env.d/*.sh`; `~/.bash_profile` also sources `~/.bash_env` for login bash
 - fish → conf.d auto-load (env-pure files run unconditionally)
 
+**Root-dotfile placement (`ZDOTDIR`).** Only `~/.zshenv` lives at `$HOME` root — zsh reads it before `ZDOTDIR` exists, so it's the one file that *can't* move. It sets `export ZDOTDIR="$HOME/.config/zsh"`, so zsh's remaining startup files live inward as **`~/.config/zsh/.zprofile`** and **`~/.config/zsh/.zshrc`** (yadm restores them at those tracked paths on clone — no symlink/forwarder needed). Bash's `~/.bash_env`, `~/.bash_profile`, `~/.bashrc` **deliberately stay at root**: bash has no `ZDOTDIR`, so relocating them would require forwarder stubs or symlinks at root anyway — pure indirection with no decluttering. `~/.hushlogin` also stays at root (login reads it there literally). Don't try to "fix" the bash/hushlogin asymmetry; it's intentional.
+
+**No `~/.profile`.** It's intentionally absent. cargo's PATH is owned by `shell/env.d/040-env.{sh,fish}` (which source `~/.cargo/env` / `fish_add_path`), so rustup's habitual `. ~/.cargo/env` injection into `~/.profile` is redundant cruft. The bootstrap installs rustup with `--no-modify-path` (`yadm/snippets/shared/11-rustup.sh`) so it never recreates it. If a `~/.profile` reappears, a rustup reinstall bypassed that flag — delete it.
+
 Pre/post hooks: `~/.pre.{zsh,sh}` and `~/.post.{zsh,sh}` are sourced if present (not tracked; machine-local overrides).
 
 ### Personal bin (`~/.config/bin/`)

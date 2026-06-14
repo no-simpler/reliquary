@@ -4,6 +4,11 @@
 
 export D__SHELL=zsh
 
+# Relocate the remaining zsh startup files (.zprofile, .zshrc, .zlogin) into
+# ~/.config/zsh/. ~/.zshenv must stay at $HOME root — zsh reads it before
+# ZDOTDIR exists — but everything after it is sourced from ZDOTDIR.
+export ZDOTDIR="$HOME/.config/zsh"
+
 for f in ~/.config/shell/env.d/*.sh(N); do source "$f"; done
 unset f
 
