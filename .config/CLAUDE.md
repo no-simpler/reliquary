@@ -31,7 +31,7 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 
 **Default staging policy.** When committing in this repo, stage every `M` / `R` line unless explicitly told to exclude one. Reliquary bundles whatever is dirty; splitting the working tree by topic isn't the house style. Skipping an `M` line on the assumption it's "unrelated" has historically been wrong.
 
-**Path availability.** `yadm` is on `$PATH` in non-interactive bash and zsh: `~/.zshenv` and `~/.bash_env` (via `$BASH_ENV`) source `env.d/040-env.sh`, which puts both Homebrew and `~/.config/bin` on `$PATH`. Crucially, `~/.config/bin` is forced **ahead** of Homebrew there, and `~/.config/bin/yadm` is a symlink to the wrapper — so bare `yadm <cmd>` resolves to the **wrapper** (not brew's yadm) in *every* shell, interactive or not, including wrapper-only subcommands (`check`/`verify`/`update`/`own`/`disown`/`ls-all`). No alias and no explicit `~/.config/bin/yadm-wrapper` path are needed anymore. (The wrapper finds the real yadm by scanning `$PATH` outside `~/.config/bin`, so it never recurses.)
+**Path availability.** `yadm` is on `$PATH` in non-interactive bash and zsh: `~/.zshenv` and `~/.bash_env` (via `$BASH_ENV`) source the `env.d/*.sh` files, which put both Homebrew and `~/.config/bin` on `$PATH`. Crucially, `env.d/999-path.sh` runs **last** (highest-numbered) and forces `~/.config/bin` **ahead** of Homebrew — it has to come after 040-env's own gcloud/cargo/OrbStack prepends and after any pre-polluted inherited `$PATH`, which previously demoted it. `~/.config/bin/yadm` is a symlink to the wrapper — so bare `yadm <cmd>` resolves to the **wrapper** (not brew's yadm) in *every* shell, interactive or not, including wrapper-only subcommands (`check`/`verify`/`update`/`own`/`disown`/`ls-all`). No alias and no explicit `~/.config/bin/yadm-wrapper` path are needed anymore. (The wrapper finds the real yadm by scanning `$PATH` outside `~/.config/bin`, so it never recurses.)
 
 **Authorization.** `yadm commit` and `yadm push` are pre-approved — run them yourself; never ask first and never hand the commit/push off to the user to run. Be aware that **`yadm commit` triggers a Touch ID prompt** — commits are SSH-signed through 1Password (`op-ssh-sign`, per the global git config) — as does `yadm encrypt`. If the user is AFK the prompt times out and the command fails; that just means the user is away, not a real error. Surface it plainly and let them retry when back — don't thrash, retry in a loop, or try to work around the signing.
 
@@ -52,7 +52,7 @@ Filename suffix selects shell:
 
 Numbering controls load order:
 ```
-env.d/         : 040-env  070-fixes  150-benefactor
+env.d/         : 040-env  070-fixes  150-benefactor  999-path
 interactive.d/ : 010-colors  020-plugins  030-config  050-prompt
                  060-fzf  080-check  090-funcs  100-aliases{,-git,-docker,-yadm}
 ```
@@ -122,7 +122,7 @@ Full reference: `~/.config/reliquary/GRADUATION.md`.
 
 ### yadm wrapper (`~/.config/bin/yadm-wrapper`)
 
-Reachable as `yadm` in **every** shell — `~/.config/bin/yadm` is a symlink to this script, and `env.d/040-env.{sh,fish}` force `~/.config/bin` ahead of Homebrew on `$PATH` so it shadows brew's yadm (no alias involved). Adds custom commands:
+Reachable as `yadm` in **every** shell — `~/.config/bin/yadm` is a symlink to this script, and `~/.config/bin` is forced ahead of Homebrew on `$PATH` so it shadows brew's yadm (no alias involved). For bash/zsh that ordering is asserted **last** by `env.d/999-path.sh` (a mid-040 placement let later prepends re-win); fish does its own ordering in `040-env.fish`. Adds custom commands:
 - `yadm own` / `yadm disown` - switch remote between SSH and HTTPS
 - `yadm encrypt` / `yadm decrypt` - delegates to yadm + records archive SHA256
 - `yadm check` - compares archive SHA256 to detect drift

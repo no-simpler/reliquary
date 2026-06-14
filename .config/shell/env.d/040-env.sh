@@ -25,22 +25,11 @@ if [ -f /opt/homebrew/bin/brew ]; then
 fi
 
 ##
-## Force ~/.config/bin ahead of Homebrew on $PATH
+## PATH priority — forcing ~/.config/bin ahead of Homebrew (so the `yadm`
+## wrapper shadows brew's yadm) — lives in env.d/999-path.sh, the highest-
+## numbered file. It MUST run after the gcloud/cargo/OrbStack/gems prepends
+## below (and any pre-polluted inherited $PATH), so it can't sit here.
 ##
-## So the `yadm` wrapper (the ~/.config/bin/yadm symlink) shadows brew's yadm in
-## every shell, interactive or not. MUST run after the Homebrew block: brew's
-## shellenv re-runs path_helper on each source, which would otherwise reorder
-## ~/.config/bin behind /opt/homebrew/bin. Dedup-then-prepend is idempotent.
-##
-
-if [ -d "$HOME/.config/bin" ]; then
-    _cb="$HOME/.config/bin"
-    _p=":$PATH:"
-    _p="${_p//:$_cb:/:}"
-    _p="${_p#:}"; _p="${_p%:}"
-    export PATH="$_cb:$_p"
-    unset _cb _p
-fi
 
 ##
 ## Ruby gems
