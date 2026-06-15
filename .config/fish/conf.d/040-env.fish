@@ -36,6 +36,17 @@ set -gx LSCOLORS Gxfxcxdxbxegedabagacad
 set -gx LS_COLORS "di=1;36:ln=35:so=32:pi=33:ex=31:bd=34;46:cd=34;43:su=30;41:sg=30;46:tw=30;42:ow=30;43"
 
 ##
+## Editor (always-on)
+##
+## Zed system-wide. `--wait` blocks until the buffer closes — required by git
+## commit, crontab, and Claude Code's Ctrl+G external-editor shell-out to
+## $EDITOR. See 040-env.sh; keep the value byte-identical.
+##
+
+set -gx EDITOR "zed --wait"
+set -gx VISUAL "zed --wait"
+
+##
 ## Force ~/.config/bin ahead of Homebrew on $PATH
 ##
 ## So the `yadm` wrapper (the ~/.config/bin/yadm symlink) shadows brew's yadm.
