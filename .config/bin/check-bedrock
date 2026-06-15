@@ -68,6 +68,11 @@ BREW_PREFIX="$(brew --prefix 2>/dev/null)"
 # PATH search (ignores functions/builtins/aliases); the first line is what runs.
 resolve_all() { type -aP -- "$1" 2>/dev/null | awk '!seen[$0]++'; }
 
+# Fully resolve a path (follow symlinks); fall back to the raw path if readlink
+# can't. Used to tell a genuinely different install apart from the same binary
+# reached via two PATH dirs.
+realof() { readlink -f -- "$1" 2>/dev/null || printf '%s' "$1"; }
+
 # --- Per-member sub-API / version probes -----------------------------------
 # Each prints the member's primary ok/fail line (with version); warns/notes are
 # additive. They mutate FAILS/WARNS via the helpers, so never call in $(...).
@@ -136,20 +141,23 @@ check_plain() { ok "$1 — $2"; }
 # OS baseline) sit on PATH. Never fails — the version/sub-API probe on the
 # winner already catches a genuinely wrong winner.
 check_shadows() {
-    local m="$1" winner="$2" hits="$3" exp extras unexpected e
+    local m="$1" winner="$2" hits="$3" exp extras unexpected e wreal
     if [ -n "$BREW_PREFIX" ] && [ -x "$BREW_PREFIX/bin/$m" ] && [ "$winner" != "$BREW_PREFIX/bin/$m" ]; then
         warn "$m: Homebrew has $BREW_PREFIX/bin/$m but '$winner' wins on PATH — check PATH order"
     fi
     exp="$(expected_extra "$m")"
+    wreal="$(realof "$winner")"
     extras="$(printf '%s\n' "$hits" | sed -n '2,$p')"
     unexpected=""
     for e in $extras; do
-        case " $exp $winner " in
-            *" $e "*) : ;;
-            *) unexpected="${unexpected:+$unexpected }$e" ;;
-        esac
+        # OS-baseline copy bedrock deliberately shadows — not drift.
+        case " $exp " in *" $e "*) continue ;; esac
+        # Same real binary reached via another PATH dir (e.g. OrbStack symlinks
+        # docker into both ~/.orbstack/bin and /usr/local/bin) — not a conflict.
+        [ "$(realof "$e")" = "$wreal" ] && continue
+        unexpected="${unexpected:+$unexpected }$e"
     done
-    [ -n "$unexpected" ] && warn "$m: extra copies on PATH (possible shadow/conflict): $unexpected"
+    [ -n "$unexpected" ] && warn "$m: extra copies on PATH (a different install — possible shadow/conflict): $unexpected"
 }
 
 # --- Drive -----------------------------------------------------------------
