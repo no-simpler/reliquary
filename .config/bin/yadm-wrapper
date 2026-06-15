@@ -272,7 +272,26 @@ _doctor_run() {
         _doctor_warn "check-shell-parity not found — skipped"
     fi
 
-    # 5. Encrypted-archive drift (SHA compare; no Touch ID)
+    # 5. Bedrock dependencies (present, configured, PATH-accessible)
+    _doctor_head "bedrock dependencies"
+    local bedrock="$HOME/.config/bin/check-bedrock"
+    if [ -x "$bedrock" ]; then
+        local bout brc
+        bout=$("$bedrock" 2>&1); brc=$?
+        if [ "$brc" -eq 0 ]; then
+            _doctor_ok "all members present, configured, PATH-accessible"
+        elif [ "$brc" -eq 1 ]; then
+            _doctor_warn "satisfied with soft issues:"
+            printf '%s\n' "$bout" | sed 's/^/      /'
+        else
+            _doctor_fail "incomplete:"
+            printf '%s\n' "$bout" | sed 's/^/      /'
+        fi
+    else
+        _doctor_warn "check-bedrock not found — skipped"
+    fi
+
+    # 6. Encrypted-archive drift (SHA compare; no Touch ID)
     _doctor_head "encrypted archive drift"
     local drift
     drift=$(check_yadm_encrypted_files 2>&1)
@@ -283,7 +302,7 @@ _doctor_run() {
         printf '%s\n' "$drift" | sed 's/^/      /'
     fi
 
-    # 6. Archive vs disk verification (Touch ID) — opt-in
+    # 7. Archive vs disk verification (Touch ID) — opt-in
     _doctor_head "archive vs disk verification"
     if $full; then
         local vout vrc

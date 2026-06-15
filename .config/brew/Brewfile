@@ -2,7 +2,7 @@
 tap "no-simpler/tap"
 
 # Version control
-brew "git"
+brew "git"            # bedrock
 brew "git-lfs"
 brew "git-cliff"
 brew "git-filter-repo"
@@ -10,7 +10,7 @@ brew "gh"
 brew "yadm"
 
 # Shell
-brew "bash"
+brew "bash"           # bedrock
 brew "bash-completion"
 brew "zsh"
 brew "fish"
@@ -24,7 +24,7 @@ brew "tree"
 
 # Network
 brew "wget"
-brew "curl"
+brew "curl"           # bedrock
 
 # Development
 brew "vim"
@@ -36,8 +36,8 @@ brew "shellcheck"
 brew "node"
 
 # Python (system-wide; one latest Python 3 + uv toolchain)
-brew "python"
-brew "uv"
+brew "python"         # bedrock
+brew "uv"             # bedrock
 
 # Personal CLIs (own tap)
 brew "clc"
@@ -69,7 +69,7 @@ cask "raindropio"
 # Development
 cask "gcloud-cli"
 cask "jetbrains-toolbox"
-cask "orbstack"
+cask "orbstack"       # bedrock
 
 # Fonts
 cask "font-fira-code"

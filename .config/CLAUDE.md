@@ -7,6 +7,25 @@ yadm is a thin git wrapper whose work tree is `$HOME` and git dir is `~/.local/s
 All standard git commands work via `yadm <cmd>`.
 Only explicitly `yadm add`-ed files are tracked; everything else is ignored.
 
+## Bedrock
+
+The **bedrock** is Reliquary's guaranteed substrate — the minimal set of system-wide deps ensured
+present, configured, and fully PATH-accessible (with their sub-APIs) on every machine, so every other
+repo the author owns may assume it without re-checking. When a tool needs more, it dockerizes rather
+than growing bedrock. Members (v1): **bash** (>=5 on PATH — macOS `/bin/bash` 3.2 is shadowed, not
+used), **python3** (latest, *never* minor-pinned; brew owns the interpreter and self-heals on `brew
+upgrade`; uv supplements it but doesn't own it; per-app floors live in relic manifests' `MIN_RUNTIME_VERSION`),
+**uv** (+`uvx`), **docker** (full API: CLI +`compose`+`buildx`; any impl), **git**, **curl**.
+
+- **Install:** base `brew/Brewfile`, members tagged `# bedrock` (macOS only for now; Linux is a TODO).
+- **Verify:** `bin/check-bedrock` (cross-platform, offline, side-effect-free; exit 0/1/2).
+- **Enforce:** wired into `yadm doctor` (so the dream pre-pass and `yadm update` cover it) and re-asserted
+  at the end of bootstrap (`yadm/snippets/shared/98-bedrock.sh`).
+- **Bootstrap caveat:** snippets are sourced into the running (stock 3.2) bash, which the early
+  modern-bash install does *not* upgrade mid-run — so **every bootstrap snippet stays bash-3.2-safe**.
+
+Full philosophy and the contract for sibling repos: `~/.config/reliquary/BEDROCK.md`.
+
 ## Encryption
 
 Sensitive files are GPG-encrypted into `~/.local/share/yadm/archive` and tracked in the public repo.

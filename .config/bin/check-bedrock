@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+#
+# check-bedrock — verifies the Reliquary "bedrock": the always-on, system-wide
+# dependencies guaranteed present, configured, and fully PATH-accessible (incl.
+# their sub-APIs) on every machine. See ~/.config/reliquary/BEDROCK.md for the
+# philosophy and contract.
+#
+# Bedrock members (v1): bash (>=5 on PATH), python3 (latest, unpinned), uv,
+# docker (full API), git, curl.
+#
+# Verification only — installation is the base Brewfile's job on macOS (and a
+# future Linux path). The check is cross-platform pure shell, so on a machine
+# where bedrock isn't satisfied yet it fails loud, by design. It is also
+# side-effect-free and offline: it never starts the docker daemon (which could
+# auto-launch OrbStack or hang), so it is safe in the unattended `yadm doctor`
+# dream pre-pass. Pass --daemon to additionally probe daemon liveness.
+#
+# Exit: 0 = bedrock satisfied; 1 = satisfied with warnings (soft issues);
+#       2 = incomplete (a member missing or a sub-API broken). The 0/1/2 split
+#       lets `yadm doctor` map results onto its own ok/warn/fail counters.
+
+set -o pipefail
+
+# --- Colors (house style, see bin/check-shell-parity) ----------------------
+BOLD="\033[1m"; RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; DIM="\033[2m"; RESET="\033[0m"
+
+FAILS=0
+WARNS=0
+
+ok()   { printf '%b\n' "  ${GREEN}✓${RESET} $1"; }
+warn() { printf '%b\n' "  ${YELLOW}!${RESET} $1"; WARNS=$((WARNS + 1)); }
+fail() { printf '%b\n' "  ${RED}✗${RESET} $1"; FAILS=$((FAILS + 1)); }
+note() { printf '%b\n' "      ${DIM}$1${RESET}"; }
+head() { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}$1${RESET}"; }
+
+# --- Args ------------------------------------------------------------------
+DAEMON=0
+for a in "$@"; do
+    case "$a" in
+        --daemon)  DAEMON=1 ;;
+        -h|--help) echo "usage: check-bedrock [--daemon]"; exit 0 ;;
+        *) printf 'check-bedrock: unknown argument: %s\n' "$a" >&2; exit 2 ;;
+    esac
+done
+
+# --- Members ---------------------------------------------------------------
+# Each must resolve on PATH (hard requirement). Per-member version / sub-API
+# probes live in the check_<name> functions below.
+MEMBERS="bash python3 uv docker git curl"
+
+# Expected, benign secondary copies per member: the OS baseline that bedrock
+# deliberately shadows by PATH order (cannot be expunged). Their mere presence
+# behind the winner is NOT drift and is never warned about — only *unexpected*
+# extra copies are. Mirrors check-shell-parity's allow_for().
+expected_extra() {
+    case "$1" in
+        bash)    echo "/bin/bash" ;;            # macOS stock bash 3.2 (frozen)
+        python3) echo "/usr/bin/python3" ;;     # macOS Command Line Tools stub
+        git)     echo "/usr/bin/git" ;;         # macOS CLT git shim
+        curl)    echo "/usr/bin/curl" ;;        # macOS system curl
+        *)       echo "" ;;
+    esac
+}
+
+BREW_PREFIX="$(brew --prefix 2>/dev/null)"
+
+# All PATH hits for a command, in order, deduped preserving order. -P forces a
+# PATH search (ignores functions/builtins/aliases); the first line is what runs.
+resolve_all() { type -aP -- "$1" 2>/dev/null | awk '!seen[$0]++'; }
+
+# --- Per-member sub-API / version probes -----------------------------------
+# Each prints the member's primary ok/fail line (with version); warns/notes are
+# additive. They mutate FAILS/WARNS via the helpers, so never call in $(...).
+
+check_bash() {
+    local w="$1" major ver
+    # single-quoted on purpose: these expand inside the probed bash, not here.
+    # shellcheck disable=SC2016
+    major="$("$w" -c 'echo "${BASH_VERSINFO[0]}"' 2>/dev/null)"
+    # shellcheck disable=SC2016
+    ver="$("$w" -c 'echo "$BASH_VERSION"' 2>/dev/null)"
+    if [ -z "$major" ]; then
+        fail "bash — '$w' did not run as bash"
+    elif [ "$major" -ge 5 ] 2>/dev/null; then
+        ok "bash $ver — $w"
+    else
+        fail "bash on PATH is $ver (need >=5) — $w; install modern bash and fix PATH order"
+    fi
+}
+
+check_python3() {
+    local w="$1" ver
+    ver="$("$w" -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null)"
+    if [ -z "$ver" ]; then
+        fail "python3 — '$w' failed to run"
+        return
+    fi
+    ok "python3 $ver — $w"
+    "$w" -m pip --version >/dev/null 2>&1 \
+        || warn "python3: 'python3 -m pip' unavailable (uv covers most needs; ensurepip may be missing)"
+}
+
+check_uv() {
+    local w="$1" ver
+    ver="$("$w" --version 2>/dev/null)"
+    ok "uv ${ver#uv } — $w"
+    command -v uvx >/dev/null 2>&1 \
+        || warn "uv: 'uvx' not on PATH (older uv — use 'uv tool run' instead)"
+}
+
+check_docker() {
+    local w="$1" ver
+    ver="$("$w" --version 2>/dev/null)"
+    ok "docker — $w (${ver})"
+    "$w" compose version >/dev/null 2>&1 \
+        || fail "docker: 'docker compose' plugin missing (bedrock requires the full docker API)"
+    "$w" buildx version >/dev/null 2>&1 \
+        || fail "docker: 'docker buildx' plugin missing (bedrock requires the full docker API)"
+    if [ "$DAEMON" = "1" ]; then
+        if "$w" info >/dev/null 2>&1; then
+            ok "docker daemon reachable"
+        else
+            warn "docker daemon not reachable (runtime state — start OrbStack/Docker)"
+        fi
+    else
+        note "daemon liveness not probed (pass --daemon; avoids auto-starting OrbStack)"
+    fi
+}
+
+# git / curl: presence is the whole contract — no sub-API to verify.
+check_plain() { ok "$1 — $2"; }
+
+# --- Shadow / duplicate scan (shared) --------------------------------------
+# Surfaces the "one system-wide install" goal: warns when Homebrew provides a
+# member but a different copy wins, or when unexpected extra copies (beyond the
+# OS baseline) sit on PATH. Never fails — the version/sub-API probe on the
+# winner already catches a genuinely wrong winner.
+check_shadows() {
+    local m="$1" winner="$2" hits="$3" exp extras unexpected e
+    if [ -n "$BREW_PREFIX" ] && [ -x "$BREW_PREFIX/bin/$m" ] && [ "$winner" != "$BREW_PREFIX/bin/$m" ]; then
+        warn "$m: Homebrew has $BREW_PREFIX/bin/$m but '$winner' wins on PATH — check PATH order"
+    fi
+    exp="$(expected_extra "$m")"
+    extras="$(printf '%s\n' "$hits" | sed -n '2,$p')"
+    unexpected=""
+    for e in $extras; do
+        case " $exp $winner " in
+            *" $e "*) : ;;
+            *) unexpected="${unexpected:+$unexpected }$e" ;;
+        esac
+    done
+    [ -n "$unexpected" ] && warn "$m: extra copies on PATH (possible shadow/conflict): $unexpected"
+}
+
+# --- Drive -----------------------------------------------------------------
+check_member() {
+    local m="$1" hits winner
+    hits="$(resolve_all "$m")"
+    if [ -z "$hits" ]; then
+        fail "$m — not found on PATH (bedrock requires it)"
+        return
+    fi
+    winner="$(printf '%s\n' "$hits" | sed -n 1p)"
+    case "$m" in
+        bash)    check_bash "$winner" ;;
+        python3) check_python3 "$winner" ;;
+        uv)      check_uv "$winner" ;;
+        docker)  check_docker "$winner" ;;
+        *)       check_plain "$m" "$winner" ;;
+    esac
+    check_shadows "$m" "$winner" "$hits"
+}
+
+# Header and summary are cosmetic — shown on a direct, interactive run but
+# suppressed when the output is captured (e.g. `yadm doctor` via $(...)), which
+# adds its own heading and would otherwise duplicate ours. Exit codes always apply.
+[ -t 1 ] && head "bedrock dependencies"
+for m in $MEMBERS; do check_member "$m"; done
+
+if [ -t 1 ]; then
+    echo
+    if [ "$FAILS" -gt 0 ]; then
+        printf '%b\n' "${BOLD}${RED}!!>${RESET} ${RED}bedrock INCOMPLETE — $FAILS failure(s), $WARNS warning(s)${RESET}"
+    elif [ "$WARNS" -gt 0 ]; then
+        printf '%b\n' "${BOLD}${YELLOW}==>${RESET} ${YELLOW}bedrock ok with $WARNS warning(s)${RESET}"
+    else
+        printf '%b\n' "${BOLD}==>${RESET} ${BOLD}${GREEN}bedrock satisfied — all members present, configured, PATH-accessible${RESET}"
+    fi
+fi
+
+[ "$FAILS" -gt 0 ] && exit 2
+[ "$WARNS" -gt 0 ] && exit 1
+exit 0
