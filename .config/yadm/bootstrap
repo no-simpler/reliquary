@@ -1,4 +1,10 @@
 #!/bin/bash
+#
+# Snippets are *sourced* into this running interpreter, which on a fresh macOS
+# is the stock /bin/bash 3.2. Modern bash (>=5) is installed early by
+# macos/02-bash.sh (bedrock), but that does NOT upgrade the already-running
+# shell — so every snippet must stay bash-3.2-safe (POSIX; no associative
+# arrays, no ${x,,}, etc.). See ~/.config/reliquary/BEDROCK.md.
 
 # Function to source snippet files in sorted order
 source_snippets() {
