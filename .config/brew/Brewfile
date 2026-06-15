@@ -34,7 +34,10 @@ brew "bat"
 brew "just"
 brew "shellcheck"
 brew "node"
+
+# Python (system-wide; one latest Python 3 + uv toolchain)
 brew "python"
+brew "uv"
 
 # Personal CLIs (own tap)
 brew "clc"
