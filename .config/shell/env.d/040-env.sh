@@ -86,6 +86,19 @@ export LSCOLORS=Gxfxcxdxbxegedabagacad
 export LS_COLORS='di=1;36:ln=35:so=32:pi=33:ex=31:bd=34;46:cd=34;43:su=30;41:sg=30;46:tw=30;42:ow=30;43'
 
 ##
+## Editor (always-on)
+##
+## Zed is the system-wide editor. `--wait` blocks until the buffer is closed,
+## which callers reading the result back require — git commit, crontab, and
+## Claude Code's Ctrl+G "open in external editor" (which shells out to $EDITOR).
+## Set both EDITOR and VISUAL so tools that prefer VISUAL agree. Keep the value
+## byte-identical to 040-env.fish.
+##
+
+export EDITOR="zed --wait"
+export VISUAL="zed --wait"
+
+##
 ## Google Cloud SDK
 ##
 
