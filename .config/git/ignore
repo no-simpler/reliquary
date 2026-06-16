@@ -44,3 +44,8 @@ $RECYCLE.BIN/
 
 # --- Claude Code (machine-local agent state) ---
 **/.claude/settings.local.json
+# Parallel-session worktrees Claude Code (and clc) create under .claude/worktrees/.
+# These are linked git worktrees of the repo itself — never their own commit in the
+# outer repo — so keep them off git's radar everywhere. In a clc-enrolled repo the
+# whole .claude/ tree is already locally excluded, so this is a harmless no-op there.
+**/.claude/worktrees/
