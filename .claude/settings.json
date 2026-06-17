@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose up -d:*)",
+      "Bash(docker compose exec app:*)",
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(git mv:*)"
+    ],
+    "deny": [
+      "Bash(php:*)",
+      "Bash(composer:*)"
+    ],
+    "defaultMode": "default"
+  },
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": true
+  },
+  "defaultShell": "bash",
+  "effortLevel": "xhigh",
+  "awaySummaryEnabled": false,
+  "skipWorkflowUsageWarning": true,
+  "remoteControlAtStartup": true,
+  "agentPushNotifEnabled": true,
+  "skipAutoPermissionPrompt": true,
+  "voiceEnabled": true
+}
