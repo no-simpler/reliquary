@@ -14,15 +14,16 @@
     ],
     "defaultMode": "default"
   },
+  "defaultShell": "bash",
   "enabledPlugins": {
     "rust-analyzer-lsp@claude-plugins-official": true
   },
-  "defaultShell": "bash",
   "effortLevel": "xhigh",
   "awaySummaryEnabled": false,
   "skipWorkflowUsageWarning": true,
   "remoteControlAtStartup": true,
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
-  "voiceEnabled": true
+  "voiceEnabled": true,
+  "tui": "fullscreen"
 }
