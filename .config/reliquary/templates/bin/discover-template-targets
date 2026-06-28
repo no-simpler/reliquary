@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+#
+# discover-template-targets — read-only enumeration of agentic-template targets.
+#
+# Lists the projects on this machine that look like ours and carry a root CLAUDE.md
+# and/or a DREAM.md, grouped per project, so a PROPAGATE.md session can present them
+# for selection. Keys on the presence of a `.claude/` directory (a "brain root") — not
+# on `.git`, because yadm-managed repos (e.g. ~/.config / Reliquary) have no in-tree
+# `.git`. Byte-identical DREAM.md files (e.g. submodule-aspect fleets) are flagged as
+# one logical template.
+#
+# Read-only and side-effect-free. The output is a candidate list for a human to confirm,
+# not an authority — vendor repos that slip a `.claude/` past the prune list can appear.
+#
+# Usage:
+#   discover-template-targets [ROOT ...]
+#   discover-template-targets --help
+#
+# ROOT defaults to ~/Developer and ~/.config. Pass roots to narrow or widen the net.
+
+set -u
+
+usage() {
+	sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+	exit "${1:-0}"
+}
+
+case "${1:-}" in
+	-h|--help) usage 0 ;;
+esac
+
+roots=()
+for arg in "$@"; do
+	case "$arg" in
+		-*) printf 'unknown option: %s\n\n' "$arg" >&2; usage 2 ;;
+		*)  roots+=("$arg") ;;
+	esac
+done
+if [ "${#roots[@]}" -eq 0 ]; then
+	roots=("$HOME/Developer" "$HOME/.config")
+fi
+
+# Keep only roots that exist, so a missing default doesn't abort the scan.
+existing=()
+for r in "${roots[@]}"; do
+	[ -d "$r" ] && existing+=("$r")
+done
+if [ "${#existing[@]}" -eq 0 ]; then
+	echo "no search roots exist: ${roots[*]}" >&2
+	exit 2
+fi
+roots=("${existing[@]}")
+
+# Directory names pruned anywhere in the tree: vendor/dependency caches, system lanes,
+# git internals, and managed worktrees (separate checkouts of a project we already list).
+prune_names=(.git node_modules vendor .cargo .rustup .clc .npm .cache Caches \
+             Library .local .Trash OrbStack worktrees)
+
+prune_expr=()
+for n in "${prune_names[@]}"; do
+	prune_expr+=(-name "$n" -o)
+done
+unset 'prune_expr[${#prune_expr[@]}-1]'  # drop trailing -o
+
+# Brain roots: parents of a `.claude/` directory (don't descend into `.claude` itself).
+brain_roots=()
+while IFS= read -r d; do
+	brain_roots+=("$(dirname "$d")")
+done < <(find "${roots[@]}" \
+	\( -type d \( "${prune_expr[@]}" \) \) -prune -o \
+	-type d -name .claude -prune -print 2>/dev/null | sort -u)
+
+if [ "${#brain_roots[@]}" -eq 0 ]; then
+	echo "no .claude-bearing projects found under: ${roots[*]}"
+	exit 0
+fi
+
+# The template bank itself is the hub, never a target — exclude its own files from the
+# scan so it doesn't appear as its own spoke. Resolved from this script's location
+# (bank = the parent of bin/).
+bank="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)"
+
+# All DREAM.md files in scope, minus any inside the bank.
+dreams=()
+while IFS= read -r f; do
+	[ -n "$bank" ] && case "$f" in "$bank"/*) continue ;; esac
+	dreams+=("$f")
+done < <(find "${roots[@]}" \
+	\( -type d \( "${prune_expr[@]}" \) \) -prune -o \
+	-type f -name DREAM.md -print 2>/dev/null | sort)
+
+# Content signature per DREAM (POSIX cksum: "crc size"), to flag clone groups.
+declare -A dream_sig
+declare -A sig_count
+for f in "${dreams[@]}"; do
+	sig="$(cksum < "$f")"
+	dream_sig["$f"]="$sig"
+	sig_count["$sig"]=$(( ${sig_count["$sig"]:-0} + 1 ))
+done
+# Assign a stable group number to each signature shared by >1 file.
+declare -A sig_group
+group_n=0
+for f in "${dreams[@]}"; do
+	sig="${dream_sig[$f]}"
+	if [ "${sig_count[$sig]}" -gt 1 ] && [ -z "${sig_group[$sig]:-}" ]; then
+		group_n=$(( group_n + 1 ))
+		sig_group["$sig"]=$group_n
+	fi
+done
+
+# Assign each DREAM to its nearest enclosing brain root (longest matching prefix).
+nearest_root() {
+	local path="$1" best="" r
+	for r in "${brain_roots[@]}"; do
+		case "$path" in
+			"$r"/*) [ "${#r}" -gt "${#best}" ] && best="$r" ;;
+		esac
+	done
+	printf '%s' "$best"
+}
+declare -A root_dreams
+for f in "${dreams[@]}"; do
+	r="$(nearest_root "$f")"
+	[ -n "$r" ] && root_dreams["$r"]+="$f"$'\n'
+done
+
+tilde() { printf '%s' "${1/#$HOME/\~}"; }
+
+# Emit, sorted by project path; skip roots with neither a root CLAUDE.md nor a DREAM.
+printf '# Agentic-template targets (roots: %s)\n\n' "$(for r in "${roots[@]}"; do tilde "$r"; printf ' '; done)"
+listed=0
+while IFS= read -r root; do
+	has_claude=0; [ -f "$root/CLAUDE.md" ] && has_claude=1
+	root_dream_list="${root_dreams[$root]:-}"
+	[ "$has_claude" -eq 0 ] && [ -z "$root_dream_list" ] && continue
+	listed=$(( listed + 1 ))
+
+	printf '%s\n' "$(tilde "$root")"
+	if [ "$has_claude" -eq 1 ]; then
+		lines=$(wc -l < "$root/CLAUDE.md" | tr -d ' ')
+		printf '  root CLAUDE.md : yes (%s lines)\n' "$lines"
+	else
+		printf '  root CLAUDE.md : no\n'
+	fi
+	if [ -n "$root_dream_list" ]; then
+		while IFS= read -r f; do
+			[ -z "$f" ] && continue
+			rel="${f#$root/}"
+			sig="${dream_sig[$f]}"
+			grp="${sig_group[$sig]:-}"
+			if [ -n "$grp" ]; then
+				printf '  DREAM.md       : %s   [clone group %s]\n' "$rel" "$grp"
+			else
+				printf '  DREAM.md       : %s\n' "$rel"
+			fi
+		done <<< "$root_dream_list"
+	else
+		printf '  DREAM.md       : none\n'
+	fi
+	printf '\n'
+done < <(printf '%s\n' "${brain_roots[@]}" | sort -u)
+
+# Legend for clone groups, if any.
+if [ "$group_n" -gt 0 ]; then
+	printf '# Clone groups: DREAM.md files sharing a group number are byte-identical —\n'
+	printf '# one logical template. Harmonize the group once, then fan the result out.\n\n'
+fi
+
+printf '# %s project(s) listed. Read-only enumeration; confirm targets before propagating.\n' "$listed"

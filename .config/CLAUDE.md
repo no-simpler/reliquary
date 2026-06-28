@@ -129,7 +129,11 @@ Personal CLI utils have a three-stage lifecycle. A **relic** is a personal tool 
 
 The `relic` CLI (`relic list|status|publish|test|update|scaffold|registry|migrate|doctor`) is the user-facing surface over all of this — see `GRADUATION.md`. `scaffold <name>` promotes a Stage-1 `~/.config/bin` util (or a fresh idea) into a Stage-2 relic — infers RUNTIME from the script's shebang (or `-r/--runtime`), publishes, and stages the result in yadm. `registry` takes `--migrate`/`--prune`; `doctor` is a read-only registry ↔ PATH ↔ entrypoints health check.
 
-`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), and deferred-work handoffs (`design/`: `relic graduate`).
+`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton), and deferred-work handoffs (`design/`: `relic graduate`).
+
+### Agentic templates (`~/.config/reliquary/templates/`)
+
+Canonical bank of reusable templates for recurring agentic project patterns — the hub that pattern knowledge flows out of and back into, so per-project second brains stop drifting laterally. Each template is a **menu with a spine**: `[CORE]` directives every project keeps, `[OPTIONAL — <when>]` modules a project keeps only if applicable; instantiate by subtraction. Public-repo rule: templates are 100% domain-free (source projects are idea-sources only). Members: `DREAM.md` (dreaming procedure), `ROOT-CLAUDE.md` (root standing directives + satellites; `ROOT-` prefix prevents auto-load), `PROPAGATE.md` (centralized fan-out runbook) + `bin/discover-template-targets` (read-only target enumeration). Usage and governance live in `templates/CLAUDE.md`.
 
 `~/.config/attic/` is the **private relic lane** — the whole subtree is encrypted (the `.config/attic/**` pattern in `~/.config/yadm/encrypt`). Same anatomy inside as public relics.
 
