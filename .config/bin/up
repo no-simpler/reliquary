@@ -32,6 +32,9 @@ export GIT_HTTP_LOW_SPEED_LIMIT="${GIT_HTTP_LOW_SPEED_LIMIT:-1000}"
 export GIT_HTTP_LOW_SPEED_TIME="${GIT_HTTP_LOW_SPEED_TIME:-30}"
 # Bound SSH-based git (git@github …) connection setup and notice dead links.
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o ConnectTimeout=15 -o ServerAliveInterval=10 -o ServerAliveCountMax=3}"
+# `up` is hands-off: never let a git subcommand (a pull changelog, a diff) page
+# into `less` and grab the tty. Covers every git-invoking step below.
+export GIT_PAGER=cat
 # Homebrew + cargo: retry transient download failures (the exact class of error
 # crates.io throws over a flaky VPN). cargo uses the git CLI so it also inherits
 # the limits above.
@@ -243,8 +246,12 @@ update_zinit() {
     local ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
     [ -d "$ZINIT_HOME" ] || { echo "zinit is not installed. Skipping."; return 3; }
 
+    # zinit 3.15.0+ pipes the self-update changelog through its own pager
+    # (.zinit-pager -> less/more), which grabs the tty and hangs a hands-off
+    # run until the user quits it. ZINIT[NO_PAGER]=1 is zinit's first-class
+    # opt-out: the changelog is still printed in full, just via `cat`.
     local rc=0
-    net_timeout 900 zsh -c "source '$ZINIT_HOME/zinit.zsh'; zinit self-update; zinit update --all" || rc=1
+    net_timeout 900 zsh -c "source '$ZINIT_HOME/zinit.zsh'; ZINIT[NO_PAGER]=1; zinit self-update; zinit update --all" || rc=1
 
     # Clean up broken completion symlinks left by removed upstream completions.
     local completions_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/completions"
