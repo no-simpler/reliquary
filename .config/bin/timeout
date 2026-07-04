@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Bare `timeout` on macOS. GNU coreutils installs it PATH-prefixed as `gtimeout`
+# (to avoid shadowing BSD tools); there is no BSD `timeout` at all. This wrapper
+# exposes the familiar name. gtimeout is resolved via PATH so it works on any
+# Homebrew prefix (arm64 /opt/homebrew, x86_64 /usr/local) — no hardcoded path.
+
+if ! command -v gtimeout &>/dev/null; then
+    echo "timeout: gtimeout not found; install GNU coreutils (brew install coreutils)." >&2
+    exit 127
+fi
+
+exec gtimeout "$@"

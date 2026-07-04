@@ -18,6 +18,7 @@ brew "tmux"
 brew "fzf"
 
 # System
+brew "coreutils"     # GNU coreutils; provides gtimeout (bare `timeout` via ~/.config/bin wrapper)
 brew "gnupg"
 brew "htop"
 brew "tree"
