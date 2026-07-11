@@ -129,7 +129,15 @@ update_brew() {
     local rc=0
     net_timeout 1200 brew update        || rc=1
     net_timeout 1800 brew upgrade        || rc=1
-    net_timeout 1800 brew upgrade --cask || rc=1
+    # --force so the cask upgrade overwrites an app that's already in place.
+    # Self-updating casks (auto_updates true — WhatsApp, browsers, …) update
+    # themselves on disk, so brew's recorded version drifts behind both the disk
+    # app and the upstream cask. When the cask then bumps, brew flags the cask
+    # outdated, stages the new app, and — without --force — refuses to replace
+    # the app it didn't place ("It seems there is already an App at …"), failing
+    # the whole step. --force adopts/overwrites the existing app, reconciling the
+    # drift instead of erroring. It only touches casks already deemed outdated.
+    net_timeout 1800 brew upgrade --cask --force || rc=1
     brew cleanup    || true
     brew doctor     || true   # advisory only — never fail the step on this
     return "$rc"
