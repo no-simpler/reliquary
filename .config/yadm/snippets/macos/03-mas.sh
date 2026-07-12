@@ -27,6 +27,14 @@ if command -v mas &>/dev/null; then
     else
         print_info "Ulysses app is already installed."
     fi
+
+    # Install  'iA Writer' app from Mac App Store.
+    if ! [[ -d "/Applications/iA Writer.app" ]]; then
+        print_bold "Installing iA Writer app..."
+        mas install 775737590
+    else
+        print_info "iA Writer app is already installed."
+    fi
 else
     print_error -ad "Cannot install Mac App Store apps: mas command not found."
 fi
