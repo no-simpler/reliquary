@@ -151,7 +151,9 @@ install_on_path() {
     # other file on $PATH (e.g. a Homebrew binary). Our own target resolving
     # back to itself is fine.
     local resolved
-    resolved="$(command -v "$name" 2>/dev/null)"
+    # `|| true`: a brand-new name isn't on $PATH yet, so command -v exits
+    # non-zero; without this the assignment would trip a caller's `set -e`.
+    resolved="$(command -v "$name" 2>/dev/null || true)"
     if [[ -n "$resolved" && "$resolved" == /* && "$resolved" != "$target" ]]; then
         printf 'install_on_path: name collision: %s already resolves on $PATH at %s.\n' "$name" "$resolved" >&2
         printf '    PATH names must be unique — choose a different name or remove the conflicting file.\n' >&2
