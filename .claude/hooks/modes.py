@@ -89,7 +89,7 @@ _PREAMBLE = (
 
 def main():
     data = json.loads(sys.stdin.read())
-    prompt = data.get("user_prompt") or ""
+    prompt = data.get("prompt") or ""
     names = _tokens_from_prompt(prompt)
     if not names:
         return
