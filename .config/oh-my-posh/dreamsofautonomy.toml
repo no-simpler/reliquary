@@ -36,22 +36,21 @@ final_space = true
   overflow = 'hidden'
 
   # ske: show the Touch-ID window whenever one is open, and nothing otherwise.
-  # A forgotten open window is the realistic risk (anyone who could abuse it is
-  # already running as you), so visibility beats hardening the socket.
+  # A forgotten open window is the realistic risk here (anyone who could abuse the
+  # socket is already running as you), so visibility beats hardening it.
   #
-  # Delegated to a script rather than inlined: oh-my-posh's command segment gives
-  # `||`/`&&` its own meaning and mangles a chained predicate. ~10ms per render;
-  # silent, and renders nothing at all, when no window is open.
+  # $SKE_WINDOW is refreshed before each render by _ske_window in
+  # shell/interactive.d/050-prompt.{zsh,bash} and fish/conf.d/050-prompt.fish.
+  #
+  # NOT an oh-my-posh `command` segment: that type was REMOVED upstream (v29's
+  # schema has no such type and silently renders nothing — it does not error). A
+  # text segment over .Env is the supported way to surface external state.
   [[blocks.segments]]
-    template = '🗝 {{ .Output }}'
+    template = '{{ if .Env.SKE_WINDOW }}🗝 {{ .Env.SKE_WINDOW }}{{ end }}'
     foreground = 'red'
     background = 'transparent'
-    type = 'command'
+    type = 'text'
     style = 'plain'
-
-    [blocks.segments.properties]
-      shell = 'sh'
-      command = '~/.config/bin/ske-prompt'
 
   [[blocks.segments]]
     template = '{{ .FormattedMs }}'
