@@ -317,6 +317,25 @@ _doctor_run() {
         _doctor_skip "skipped — run 'yadm doctor --full' for the Touch-ID deep check"
     fi
 
+    # 8. ske wiring (Touch-ID suppression). Detect-only and Touch-ID-free: `ske
+    #    doctor` is read-only and never opens a window. Skips cleanly when the
+    #    attic is not decrypted, so a fresh machine does not fail here.
+    _doctor_head "ske wiring (Touch-ID window)"
+    if ! command -v ske >/dev/null 2>&1; then
+        _doctor_skip "ske not published (attic decrypted? bootstrap publishes relics)"
+    else
+        local sout src
+        sout=$(ske doctor 2>&1); src=$?
+        if [ "$src" -eq 0 ]; then
+            _doctor_ok "registry, ssh routing and git signing wired"
+        else
+            # A broken gpg.ssh.program shim breaks EVERY commit, so this is a
+            # failure, not a warning.
+            _doctor_fail "ske reports problems:"
+            printf '%s\n' "$sout" | grep '✗' | sed 's/^/    /'
+        fi
+    fi
+
     # Summary
     if [ "$DOCTOR_FAILS" -eq 0 ] && [ "$DOCTOR_WARNS" -eq 0 ]; then
         printf '\n\033[1;32m==> healthy\033[0m — all checks passed\n'

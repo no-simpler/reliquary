@@ -52,7 +52,9 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 
 **Path availability.** `yadm` is on `$PATH` in non-interactive bash and zsh: `~/.zshenv` and `~/.bash_env` (via `$BASH_ENV`) source the `env.d/*.sh` files, which put both Homebrew and `~/.config/bin` on `$PATH`. Crucially, `env.d/999-path.sh` runs **last** (highest-numbered) and forces `~/.config/bin` **ahead** of Homebrew — it has to come after 040-env's own gcloud/cargo/OrbStack prepends and after any pre-polluted inherited `$PATH`, which previously demoted it. `~/.config/bin/yadm` is a symlink to the wrapper — so bare `yadm <cmd>` resolves to the **wrapper** (not brew's yadm) in *every* shell, interactive or not, including wrapper-only subcommands (`check`/`verify`/`update`/`own`/`disown`/`ls-all`). No alias and no explicit `~/.config/bin/yadm-wrapper` path are needed anymore. (The wrapper finds the real yadm by scanning `$PATH` outside `~/.config/bin`, so it never recurses.)
 
-**Authorization.** `yadm commit` and `yadm push` are pre-approved — run them yourself; never ask first and never hand the commit/push off to the user to run. Be aware that **`yadm commit` triggers a Touch ID prompt** — commits are SSH-signed through 1Password (`op-ssh-sign`, per the global git config) — as does `yadm encrypt`. If the user is AFK the prompt times out and the command fails; that just means the user is away, not a real error. Surface it plainly and let them retry when back — don't thrash, retry in a loop, or try to work around the signing.
+**Authorization.** `yadm commit` and `yadm push` are pre-approved — run them yourself; never ask first and never hand the commit/push off to the user to run. Be aware that **`yadm commit` triggers a Touch ID prompt** — commits are SSH-signed through 1Password — as does `yadm encrypt`. If the user is AFK the prompt times out and the command fails; that just means the user is away, not a real error. Surface it plainly and let them retry when back — don't thrash, retry in a loop, or try to work around the signing.
+
+**Unless a `ske` window is open** (see "Touch ID window" below): while one is, commit/push/encrypt run silently and the AFK failure disappears. Check with bare `ske`. You cannot open one yourself — `ske <duration>` needs a Touch ID, by design.
 
 ## Repository structure
 
@@ -101,7 +103,8 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `pb` - lists personal bin executables, shows which are yadm-managed
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm); writes timestamp to `~/.local/state/up/last_upped_at`
 - `check-shell-parity` - detects POSIX↔fish alias/abbr/function name drift across the paired `shell/interactive.d/*.sh` ↔ `fish/conf.d/*.fish` files; exits non-zero on drift (run by the dream procedure in `~/.config/.claude/DREAM.md`)
-- `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt
+- `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt; tries `ske read` first, falls back to `op read` (never hard-depend — it decrypts the attic `ske` lives in)
+- `ske-prompt` - prints the open `ske` Touch ID window for the oh-my-posh right prompt; silent when closed (`sh`, not bash: `$BASH_ENV` would cost ~230ms per render)
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below); also reachable as `yadm` via the `~/.config/bin/yadm` symlink (shadows brew's yadm — see "Path availability")
 - Additional encrypted scripts may exist (see `~/.config/yadm/encrypt`)
 
@@ -130,6 +133,58 @@ Personal CLI utils have a three-stage lifecycle. A **relic** is a personal tool 
 The `relic` CLI (`relic list|status|publish|test|update|scaffold|registry|migrate|doctor`) is the user-facing surface over all of this — see `GRADUATION.md`. `scaffold <name>` promotes a Stage-1 `~/.config/bin` util (or a fresh idea) into a Stage-2 relic — infers RUNTIME from the script's shebang (or `-r/--runtime`), publishes, and stages the result in yadm. `registry` takes `--migrate`/`--prune`; `doctor` is a read-only registry ↔ PATH ↔ entrypoints health check.
 
 `~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton), and deferred-work handoffs (`design/`: `relic graduate`).
+
+### Touch ID window (`ske`)
+
+`ske` ("skeleton key") opens a **time-boxed window** in which 1Password Touch ID prompts are
+suppressed for dev operations, then closes it automatically. It exists so long agentic
+sessions stop needing a human at the fingerprint sensor. Attic relic (`~/.config/attic/ske/`);
+full reference in its `CLAUDE.md`.
+
+```
+ske              window state      ske 1h    open (or re-arm to) 1 hour
+ske off          close now         ske doctor  wiring + registry health
+```
+
+`ske <duration>` is **absolute** — it always means "end at `now + duration`", never "extend
+by". Capped at 8h (`--force` exceeds). **Re-arming costs one Touch ID**, which is what keeps
+window extension human-only: an agentic session cannot silently extend itself, because its
+no-TTY shell always prompts.
+
+**Why it sidesteps rather than relaxes:** 1Password's lock policy and `sshAgent.sshSessionDuration`
+live in an HMAC-authenticated `settings.json` (hand-edits are rejected), `agent.toml` has no
+authorization fields, there is no programmatic unlock, and service accounts can't reach the
+`Private` vault. All verified — don't re-litigate. ske does one Touch ID-gated extraction into
+its **own** ssh-agent (`ssh-add -t`) plus a memory-only broker, both expiring on a monotonic clock.
+
+**The crux:** `op`'s own biometric cache is scoped **per TTY session**. Agentic shells have no
+TTY, and neither do backgrounded post-commit hooks — so op's cache helps exactly the cases ske
+exists for *not at all*.
+
+**The roof.** `~/.config/attic/ske/ske.conf` is the authoritative inventory of every Touch ID
+vector (`[keys]`, `[secrets]`, `[unwired]` — the last records vectors deliberately *not* routed
+through ske, so a decision is recorded rather than forgotten). `ske read <op-ref>` is the single
+sanctioned way anything gets a 1Password secret: integrating a future use-case is one word at
+the call site (`op read` → `ske read`) plus a line in the registry. `ske doctor` sweeps for
+`op://` refs that bypass ske and flags them, so a new vector can't hide; it's wired into
+`yadm doctor`.
+
+SSH needs no per-vector work: `~/.ssh/config` (host-scoped `Match exec`, predicate `ssh-add -l`)
+and `gpg.ssh.program` → `ske-sign` cover every present and future SSH vector.
+
+**Fail-closed by construction.** The window's authority is the agent's own key set — expiry, a
+dead agent, or a stale socket all route back to 1Password. There is deliberately **no
+`expires_at` file**; `grant.json` is display-only. Nothing to revert, nothing to corrupt.
+
+**Costs, so they're not a surprise:** the `Match exec` block adds ~280ms per *git-host* SSH
+connection, forever, window or not (non-git hosts pay 0ms — that's why it's host-scoped).
+
+**Security.** While open, anything running as you can sign with your git keys and read the
+brokered secrets with no prompt. Keys are never exported (ssh-agent grants *use*, not
+possession). The realistic threat is a **forgotten window**, not an attacker — hence bare `ske`
+status and the append-only log at `~/.local/state/ske/log`. `ske off` cannot flush 1Password's
+own ~10-min per-TTY cache and says so. **ske is an interactive convenience, never an
+unattended/CI auth path.**
 
 ### Agentic templates (`~/.config/reliquary/templates/`)
 

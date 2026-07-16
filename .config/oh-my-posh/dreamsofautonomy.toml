@@ -35,6 +35,24 @@ final_space = true
   type = 'rprompt'
   overflow = 'hidden'
 
+  # ske: show the Touch-ID window whenever one is open, and nothing otherwise.
+  # A forgotten open window is the realistic risk (anyone who could abuse it is
+  # already running as you), so visibility beats hardening the socket.
+  #
+  # Delegated to a script rather than inlined: oh-my-posh's command segment gives
+  # `||`/`&&` its own meaning and mangles a chained predicate. ~10ms per render;
+  # silent, and renders nothing at all, when no window is open.
+  [[blocks.segments]]
+    template = '🗝 {{ .Output }}'
+    foreground = 'red'
+    background = 'transparent'
+    type = 'command'
+    style = 'plain'
+
+    [blocks.segments.properties]
+      shell = 'sh'
+      command = '~/.config/bin/ske-prompt'
+
   [[blocks.segments]]
     template = '{{ .FormattedMs }}'
     foreground = 'yellow'

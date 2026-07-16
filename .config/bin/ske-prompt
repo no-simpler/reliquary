@@ -1,0 +1,34 @@
+#!/bin/sh
+#
+# ske-prompt — print the open ske Touch-ID window for the prompt, or nothing.
+#
+# Called from ~/.config/oh-my-posh/dreamsofautonomy.toml on EVERY prompt render,
+# so it must stay cheap and silent. Two deliberate choices:
+#
+#   /bin/sh, not bash — BASH_ENV is exported and sources all of shell/env.d/*.sh,
+#   which costs ~230ms. This is ~10ms.
+#
+#   The predicate asks the AGENT (`ssh-add -l`), not a state file: it exits 0 only
+#   if the agent is live AND still holds keys, so an expired, dropped or dead
+#   window goes quiet by itself with nothing to keep in sync. grant.json supplies
+#   only the countdown and is explicitly non-authoritative.
+#
+# A forgotten open window is the realistic risk here — anyone who could abuse the
+# socket is already running as you — so this exists to make one impossible to miss.
+#
+# Lives in ~/.config/bin (plaintext) rather than the encrypted relic: oh-my-posh
+# must reach it in shells started before the attic is decrypted, and a missing
+# script simply renders nothing. Discloses ske's name only, never its refs.
+
+S="${SKE_STATE:-$HOME/.local/state/ske}"
+
+SSH_AUTH_SOCK="$S/agent.sock" ssh-add -l >/dev/null 2>&1 || exit 0
+
+awk -v n="$(date +%s)" '
+  match($0, /"expires_at":[ ]*[0-9.]+/) {
+    v = substr($0, RSTART + 13, RLENGTH - 13) + 0
+    m = int((v - n) / 60)
+    if (m > 0) printf "ske %dm", m
+    else       printf "ske <1m"
+    exit
+  }' "$S/grant.json" 2>/dev/null
