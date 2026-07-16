@@ -1,16 +1,4 @@
 {
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$HOME/.claude/hooks/modes.py\""
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "Bash(docker compose up -d:*)",
@@ -25,6 +13,18 @@
       "Bash(composer:*)"
     ],
     "defaultMode": "default"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/modes.py\""
+          }
+        ]
+      }
+    ]
   },
   "defaultShell": "bash",
   "enabledPlugins": {

@@ -1,17 +1,25 @@
 ---
-description: Hands-off session — commit unsigned, emit a re-sign replay at the end
+description: Hands-off session
 disable-model-invocation: true
 ---
 
-# AFK
+# AFK mode
 
-The user is away this session. Work hands-off; never block on anything that needs them present.
+The user goes AFK for the rest of this session.
+If you are in plan mode, assume the user will defer going AFK until after they’ve approved your plan.
+Stop at **penultimate state** and wait for user to come back.
+Penultimate state is intended as **short clean-up & close-out**, not continuation of long tasks.
 
-- Expect the commit-signing prompt (GPG, or SSH via Touch ID) to fail with the user gone. Commit
-  sign-less instead: `git -c commit.gpgsign=false commit …`. Keep committing stable state on the
-  normal cadence — the pre-commit verification still runs; do not skip it.
-- Record every unsigned commit you create — keep a running list of the short SHAs this session.
-- Close with a replay: end your final summary with one copy-pasteable command that re-signs exactly
-  those commits — rebasing from the parent of the first unsigned commit, re-amending each with
-  signing on and `--no-verify` (verification already passed at first commit, so the hook need not
-  re-run). Compute the concrete command with the real SHAs at session end.
+Until penultimate state, be autonomous.
+As long as your actions are reversible or pre-authorized, prioritize delivering *something*.
+For human-gated work prefer self-handoffs under `.claude/handoffs/`.
+Alternatively, defer small human tasks to penultimate state.
+
+Access to SSH and GPG keys on this machine is human-gated by 1Password via Touch ID prompts.
+This affects Git commits, fetches, and pushes.
+Commit with `gpgsign=false`; defer Git operations that touch remote.
+In penultimate summary, include a **replay command** for user to copy-paste.
+Replay command should replay unsigned commits for signature, without re-verifying.
+Prefer to not leave uncommitted changes by penultimate state (we can adjust later).
+
+User may still chime into session (e.g., from mobile) — that doesn’t mean that they are not AFK.
