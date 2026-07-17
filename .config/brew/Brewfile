@@ -35,6 +35,7 @@ brew "bat"
 brew "just"
 brew "shellcheck"
 brew "node"
+brew "redis"          # for redis-cli; server ships along but is never started as a service
 
 # Python (system-wide; one latest Python 3 + uv toolchain)
 brew "python"         # bedrock
