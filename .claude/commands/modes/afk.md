@@ -1,12 +1,12 @@
 ---
-description: Hands-off session
+description: AFK mode
 disable-model-invocation: true
 ---
 
 # AFK mode
 
-The user goes AFK for the rest of this session.
-If you are in plan mode, assume the user will defer going AFK until after they’ve approved your plan.
+User goes AFK for the rest of this session.
+If you are in plan mode, assume user will defer going AFK until after they’ve approved your plan.
 Stop at **penultimate state** and wait for user to come back.
 Penultimate state is intended as **short clean-up & close-out**, not continuation of long tasks.
 

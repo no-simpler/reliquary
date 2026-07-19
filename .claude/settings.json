@@ -12,7 +12,7 @@
       "Bash(php:*)",
       "Bash(composer:*)"
     ],
-    "defaultMode": "default"
+    "defaultMode": "auto"
   },
   "hooks": {
     "UserPromptSubmit": [
