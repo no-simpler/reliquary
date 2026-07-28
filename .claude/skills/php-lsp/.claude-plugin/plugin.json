@@ -1,0 +1,14 @@
+{
+  "name": "php-lsp",
+  "description": "PHP language server (Intelephense, premium)",
+  "version": "1.0.0",
+  "lspServers": {
+    "intelephense": {
+      "command": "intelephense",
+      "args": ["--stdio"],
+      "extensionToLanguage": { ".php": "php" },
+      "startupTimeout": 120000,
+      "diagnostics": false
+    }
+  }
+}

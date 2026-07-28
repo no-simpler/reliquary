@@ -228,6 +228,41 @@ Util snippets: print helpers, copy helpers, symlink helpers.
 - Some scoped files are tracked publicly, others are encrypted (see `~/.config/yadm/encrypt`)
 - `Brewfile*.lock.json` - **deliberately not tracked** (never `yadm add`-ed; yadm's whitelist keeps them out by default — no gitignore needed). Homebrew is rolling-release, so pinned bottle SHAs expire and aren't reinstallable, while the lock churns on every `brew upgrade`. The Brewfiles are the source of truth (track-latest intent); locks are regenerated locally by `brew bundle`/`bbs`.
 
+### Non-brew package manifests
+
+Two lanes parallel to the Brewfiles, same shape — a committed manifest, restored at bootstrap,
+refreshed by `up`. One entry per line; `#` comments and blanks ignored:
+
+- `~/.config/cargo/crates.txt` → `yadm/snippets/shared/13-cargo-bins.sh`; `up` runs `cargo install-update -a`
+- `~/.config/npm/globals.txt` → `yadm/snippets/shared/14-npm-globals.sh`; `up` runs a blanket `npm update -g`
+
+Bootstrap is the only thing that *installs* from these manifests — `up` merely upgrades what is
+already present. So a package added to a manifest on a running machine must also be installed by
+hand once; the manifest is what makes it reproducible on the *next* machine.
+
+Reach for a manifest lane only when Homebrew has no formula. `node` itself is a brew formula, and
+because brew's node sets npm's global prefix to `/opt/homebrew`, npm globals land in
+`/opt/homebrew/lib/node_modules/` with a shim in `/opt/homebrew/bin/` — they look brew-installed
+but are not, and `brew list` will not show them.
+
+### PHP language server
+
+Intelephense (npm global, premium tier) is registered for **every** project as a Claude Code LSP
+plugin at `~/.claude/skills/php-lsp/` — a directory under `~/.claude/skills/` auto-loads as a
+user-level plugin (`php-lsp@skills-dir`), so no install command and no `enabledPlugins` entry are
+needed. The same directory carries a `SKILL.md`, because the `LSP` tool is *deferred* and the
+server starts lazily: without something announcing it, agents do not go looking and the server
+never launches at all. Both files are deliberately free of secrets and of `$HOME`-absolute paths,
+so they stay publicly trackable and pass the `pre_commit` identity guard.
+
+That is possible because the manifest omits `licenceKey` and `storagePath` entirely and lets
+intelephense use its own defaults, which resolve under `$XDG_CONFIG_HOME` (unset here, so
+`~/.config/intelephense/`): `global/` for the licence, `workspace/` for the per-project index. The
+index is a regenerable cache — cold build is seconds, and yadm's whitelist keeps it untracked with
+no gitignore needed. `global/` also accumulates a machine-specific activation cache whose
+*filename embeds the key*, which is why that directory is `0700` and why the encrypt pattern names
+a single file rather than globbing the directory.
+
 ### Other tracked configs
 
 - `ghostty` - terminal emulator config

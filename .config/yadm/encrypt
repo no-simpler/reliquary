@@ -18,6 +18,7 @@
 .config/git/allowed_signers
 .config/git/config
 .config/git/config@benefactor
+.config/intelephense/global/licence.txt
 .config/mm/env/.env.local@*
 .config/mm/vpn/*.ovpn
 .config/phpstorm/*.xml

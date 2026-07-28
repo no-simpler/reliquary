@@ -6,3 +6,7 @@
 # Query Markup Documents — on-device markdown search; used by wiki-style
 # projects (e.g. ~/Developer/bb/wiki) via the `qmd` Claude skill.
 @tobilu/qmd
+
+# PHP language server; premium tier. Registered for every PHP project as a
+# Claude Code LSP plugin at ~/.claude/skills/php-lsp/. No brew formula exists.
+intelephense
