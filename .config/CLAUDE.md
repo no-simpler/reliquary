@@ -132,7 +132,7 @@ Personal CLI utils have a three-stage lifecycle. A **relic** is a personal tool 
 
 The `relic` CLI (`relic list|status|publish|test|update|scaffold|registry|migrate|doctor`) is the user-facing surface over all of this — see `GRADUATION.md`. `scaffold <name>` promotes a Stage-1 `~/.config/bin` util (or a fresh idea) into a Stage-2 relic — infers RUNTIME from the script's shebang (or `-r/--runtime`), publishes, and stages the result in yadm. `registry` takes `--migrate`/`--prune`; `doctor` is a read-only registry ↔ PATH ↔ entrypoints health check.
 
-`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton), and deferred-work handoffs (`design/`: `relic graduate`).
+`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`, `AGENTIC-TOOLING.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton), and deferred-work handoffs (`design/`: `relic graduate`).
 
 ### Touch ID window (`ske`)
 
@@ -246,6 +246,9 @@ because brew's node sets npm's global prefix to `/opt/homebrew`, npm globals lan
 but are not, and `brew list` will not show them.
 
 ### PHP language server
+
+The first tool admitted under `~/.config/reliquary/AGENTIC-TOOLING.md` — the bar and registration
+protocol for third-party tools exposed machine-wide for agents to reach for.
 
 Intelephense (npm global, premium tier) is registered for **every** project as a Claude Code LSP
 plugin at `~/.claude/skills/php-lsp/` — a directory under `~/.claude/skills/` auto-loads as a

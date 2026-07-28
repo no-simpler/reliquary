@@ -1,0 +1,107 @@
+# Agentic tooling — the admission bar
+
+Reliquary is the machine-wide owner of tools that outlive any single repository. This document
+governs one narrow class of them: third-party tools put on `$PATH` (or wired into the harness)
+**for agents to reach for**, across every project on the machine.
+
+It is a judging aid. `GRADUATION.md` covers relics the author writes; `BEDROCK.md` covers the
+guaranteed substrate. This covers what gets exposed to an agent and why.
+
+## The posture
+
+Expose, do not prescribe. The point is to widen the set of small iteration loops an agent *can*
+reach for when a task calls for one — never to mandate a tool, and never to route work through it
+by default. A tool that only pays off when something forces its use has not earned admission.
+
+## The bar
+
+A candidate clears **all five** or it is not admitted.
+
+1. **Otherwise unreachable.** Not already a dependency of the project's own image. A dockerized
+   project keeps its container up during normal work, and a round-trip into a running container
+   costs on the order of 100 ms — so for anything the project already ships, PATH availability buys
+   back the exec hop and nothing else. *This is the gate most candidates fail.*
+2. **Project-agnostic.** No per-project config, no package-manager autoloader, no compiled
+   container, no generated artifact. It reads source and nothing else. A tool that needs the
+   project's own build state is a project tool wearing a global costume.
+3. **Host-shaped.** It must genuinely want to be a host process — persistent and stateful (a
+   language server), a harness integration point (a plugin, an MCP server, a hook), or needed while
+   the container is down. A one-shot batch tool is not host-shaped; `exec` expresses it fine.
+4. **Reliquary-ownable.** Restorable on a fresh machine from a tracked manifest, with nothing
+   secret and no absolute home path in any trackable file.
+5. **Carries no new runtime.** Per `BEDROCK.md`: when a tool needs more than bedrock, it dockerizes
+   rather than growing bedrock. A candidate that drags a language runtime onto the host must
+   justify that runtime on its own terms, not on the tool's.
+
+## Announce, do not prescribe
+
+Every admitted tool gets a skill under `~/.claude/skills/<name>/`, and that skill's entire job is
+**discoverability**. Harness tools such as `LSP` are *deferred*: their schemas do not load unless
+the model goes looking, so an unannounced tool is not merely underused — it never starts at all.
+That was measured: a silently-installed language server saw **0/10 adoption**, never launching once,
+including in a run that made 31 tool calls. A single line naming it flipped that reliably.
+
+So the rule is: **one line stating the tool exists; never a directive to use it.**
+`~/.claude/skills/php-lsp/SKILL.md` is the reference length — frontmatter `description` plus one
+sentence. Resist the urge to explain when to reach for it; that is the agent's call.
+
+## Registration protocol
+
+The language-server admission is the reference implementation. Five steps:
+
+1. **Manifest entry**, so a fresh machine restores it — `~/.config/brew/Brewfile*`,
+   `~/.config/npm/globals.txt`, `~/.config/cargo/crates.txt`, or a relic under `~/.config/relics/`.
+   Reach for a non-brew lane only when no formula exists. Note that **bootstrap is the only thing
+   that installs** from the non-brew manifests; `up` merely upgrades what is already present, so a
+   package added on a running machine must also be installed by hand once.
+2. **`~/.claude/skills/<name>/SKILL.md`** — terse, per the rule above. A directory under
+   `~/.claude/skills/` auto-loads as a user-level plugin (`<name>@skills-dir`); there is no install
+   command and no `enabledPlugins` entry to add.
+3. **`.claude-plugin/plugin.json`** — only when the harness needs wiring (a language server, a
+   hook). Omit the file entirely otherwise.
+4. **An ownership entry in `~/.config/CLAUDE.md`**, and **never** one in a project's `CLAUDE.md`.
+   Reliquary records what it owns; projects stay unaware. That is also what keeps a global tool out
+   of repositories whose public edge would leak it.
+5. **`yadm add` every new path explicitly.** yadm is whitelist-based — a new file is untracked
+   until named, and there is no usable blanket add. Verify with `yadm ls-files <path>`.
+
+## Ledger
+
+One entry per judged candidate, so the next session does not re-derive the verdict.
+
+### Intelephense (PHP language server) — admitted
+
+Clears all five: absent from project images, indexes source with no project state, must be held
+open as a stdio server by the harness, restorable from `npm/globals.txt`, and adds no runtime
+(Node is already present). Registration is the reference implementation — manifest entry plus
+`~/.claude/skills/php-lsp/` carrying both `SKILL.md` and `plugin.json`.
+
+Note the deliberate restraint in its manifest: it omits `licenceKey` and `storagePath` so the tool
+resolves its own defaults, which is what lets both files stay publicly trackable.
+
+### PHPStan — rejected for now
+
+Fails gate 1 outright, and gates 2 and 5 besides.
+
+- **Gate 1.** A PHP project that runs static analysis already ships it. Measured against a running
+  container: `docker compose exec -T app php -v` round-trips in **0.09–0.13 s**. That is the entire
+  prize.
+- **Gate 2.** It needs the project's `vendor/` autoloader, its own config, and — with the framework
+  extension — a compiled container XML that only the container generates. Its result cache is
+  repo-relative and bind-mounted, so host and container runs see different absolute paths for the
+  same files and invalidate each other on every alternation.
+- **Gate 5.** It would put a full PHP runtime on the host to save the exec hop.
+
+There is also direct evidence against the loop it would serve: a benchmark of static analysis on
+every edit measured **106% wall clock and 104% cost** versus baseline, and placed 3rd of 5 on the
+one task seeded specifically to favour it. Earlier feedback did not repay the per-edit round trip.
+
+**This is a verdict on present evidence, not a closed door.** Circumstances move, and any of these
+would reopen it:
+
+- projects stop keeping a container up during normal work, or exec latency stops being negligible;
+- PHPStan gains a genuinely project-agnostic mode needing neither installed dependencies nor a
+  compiled container;
+- a host PHP earns its place for an unrelated reason, so the runtime cost is already sunk;
+- the benchmark is re-run under *interactive* rather than headless conditions — the one follow-up
+  its own report recommends — and measures a real win.
