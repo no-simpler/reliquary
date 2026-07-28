@@ -105,3 +105,29 @@ would reopen it:
 - a host PHP earns its place for an unrelated reason, so the runtime cost is already sunk;
 - the benchmark is re-run under *interactive* rather than headless conditions — the one follow-up
   its own report recommends — and measures a real win.
+
+### caveman — package rejected, ruleset adopted
+
+Not a tool at all. `JuliusBrussee/caveman` is a prose ruleset wrapped in a `curl | bash` installer,
+two Node hooks, a statusline, slash commands, subagents, an MCP server, and classical-Chinese
+flavors. The ruleset is genuinely good — it forbids invented abbreviations and arrows because they
+measure zero saving under the tokenizer, which is the mark of an honest one. The packaging exists
+for a single reason: its `SessionStart` hook force-injects the rules so the model cannot drift back
+to verbose. That enforcement is machine-wide and always-on, which is exactly the posture this
+document forbids.
+
+Its own `docs/HONEST-NUMBERS.md` argues the rest: output falls 65% on average, input falls 0%, the
+skill *adds* ~1–1.5k input tokens, and whole-session savings land at 14–21% on output-heavy work and
+go negative on terse work. Paying that on every repo to buy a register that fits in thirty lines is
+a bad trade.
+
+So the ruleset was distilled into `~/.claude/commands/modes/terse.md` and reaches sessions through
+the `+token` mode framework, which is opt-in per session and costs nothing when unused
+(`disable-model-invocation: true` keeps a mode out of model context entirely). Nothing from the
+upstream repository is installed.
+
+Two harness facts that constrain any future register work, both verified against the current
+reference: an output style reaches the main loop only — a subagent runs its own system prompt, and
+only a `fork` inherits the parent's. `CLAUDE.md`, by contrast, loads into every non-fork subagent,
+with the built-in `Explore` and `Plan` agents the sole exceptions and no setting to change that. A
+register that must reach delegated work therefore belongs in `CLAUDE.md`, not in a style or a mode.
