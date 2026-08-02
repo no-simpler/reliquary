@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Bedrock post-check: once everything is installed, assert the bedrock contract
-# holds (bash >=5, python3, uv, docker, git, curl — present, configured,
+# holds (bash >=5, python3, uv, docker, git, curl, just — present, configured,
 # PATH-accessible). Loud on a hard miss so a broken bootstrap is obvious, but
 # non-fatal — never exits the run. See ~/.config/reliquary/BEDROCK.md.
 

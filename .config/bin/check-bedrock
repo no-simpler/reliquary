@@ -6,7 +6,7 @@
 # philosophy and contract.
 #
 # Bedrock members (v1): bash (>=5 on PATH), python3 (latest, unpinned), uv,
-# docker (full API), git, curl.
+# docker (full API), git, curl, just.
 #
 # Verification only — installation is the base Brewfile's job on macOS (and a
 # future Linux path). The check is cross-platform pure shell, so on a machine
@@ -46,7 +46,7 @@ done
 # --- Members ---------------------------------------------------------------
 # Each must resolve on PATH (hard requirement). Per-member version / sub-API
 # probes live in the check_<name> functions below.
-MEMBERS="bash python3 uv docker git curl"
+MEMBERS="bash python3 uv docker git curl just"
 
 # Expected, benign secondary copies per member: the OS baseline that bedrock
 # deliberately shadows by PATH order (cannot be expunged). Their mere presence
@@ -132,6 +132,19 @@ check_docker() {
     fi
 }
 
+# just: presence is the whole contract (no sub-API, no version floor — brew
+# tracks latest, same self-healing model as python3). Version is shown because
+# recipe syntax has evolved and a surprising version is worth seeing.
+check_just() {
+    local w="$1" ver
+    ver="$("$w" --version 2>/dev/null)"
+    if [ -z "$ver" ]; then
+        fail "just — '$w' failed to run"
+        return
+    fi
+    ok "just ${ver#just } — $w"
+}
+
 # git / curl: presence is the whole contract — no sub-API to verify.
 check_plain() { ok "$1 — $2"; }
 
@@ -174,6 +187,7 @@ check_member() {
         python3) check_python3 "$winner" ;;
         uv)      check_uv "$winner" ;;
         docker)  check_docker "$winner" ;;
+        just)    check_just "$winner" ;;
         *)       check_plain "$m" "$winner" ;;
     esac
     check_shadows "$m" "$winner" "$hits"

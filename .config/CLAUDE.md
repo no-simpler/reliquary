@@ -15,7 +15,9 @@ repo the author owns may assume it without re-checking. When a tool needs more, 
 than growing bedrock. Members (v1): **bash** (>=5 on PATH — macOS `/bin/bash` 3.2 is shadowed, not
 used), **python3** (latest, *never* minor-pinned; brew owns the interpreter and self-heals on `brew
 upgrade`; uv supplements it but doesn't own it; per-app floors live in relic manifests' `MIN_RUNTIME_VERSION`),
-**uv** (+`uvx`), **docker** (full API: CLI +`compose`+`buildx`; any impl), **git**, **curl**.
+**uv** (+`uvx`), **docker** (full API: CLI +`compose`+`buildx`; any impl), **git**, **curl**, **just**
+(latest, never pinned — the host-side task entrypoint into every repo, and the ignition for the
+docker-isolated ones).
 
 - **Install:** base `brew/Brewfile`, members tagged `# bedrock` (macOS only for now; Linux is a TODO).
 - **Verify:** `bin/check-bedrock` (cross-platform, offline, side-effect-free; exit 0/1/2).

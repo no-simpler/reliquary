@@ -27,6 +27,7 @@ re-installing or re-checking it in every project would be absurd," not "useful t
 | **docker**  | CLI present, implementing the **full docker API** (any impl — OrbStack here, engine on Linux) | `docker compose`, `docker buildx` |
 | **git**     | present (yadm *is* git; everything assumes it) | — |
 | **curl**    | present (the bootstrap entrypoint) | — |
+| **just**    | present; **latest, never pinned** — the host-side task entrypoint into every repo | — |
 
 ### bash
 macOS freezes `/bin/bash` at 3.2 (GPLv3 licensing); countless scripts target `#!/usr/bin/env bash`
@@ -59,11 +60,28 @@ colima elsewhere — bedrock probes `docker` generically, never assumes the vend
 is runtime state (OrbStack auto-starts on demand), not part of the install contract, so the checker
 does not probe it by default (doing so could auto-launch OrbStack or hang an unattended run).
 
+### just
+A `justfile` is the author's cross-repo convention for a project's task surface: the one place both
+humans and agents look to learn what a repo can do (`just --list`) and to actually do it. That makes
+`just` an **invocation-layer** dependency — without it on the host, a repo's entire task surface is
+unreachable, and the miss surfaces as "command not found" in whatever tries to drive the repo rather
+than as a legible setup error.
+
+It is specifically the **host-side counterpart to docker**. The "when a tool needs more than bedrock,
+it dockerizes" rule means the interesting work happens inside containers — but *something* on the
+host has to drive them, and in practice every such repo's justfile is exactly that shim (recipes that
+wrap `docker compose exec`). Bedrock guaranteeing docker but not `just` would guarantee the engine
+and not the ignition.
+
+Contract is presence only: no sub-API, and **no version floor** — brew tracks latest and self-heals
+on `brew upgrade`, the same ownership model as python3. A repo needing newer recipe syntax than the
+host has is a floor to declare in that repo, not a reason to pin the system.
+
 ## Where each concern lives
 
 | Concern | Owner |
 |---------|-------|
-| **Install** (macOS) | base `brew/Brewfile` — members tagged with a trailing `# bedrock` marker. `git`, `bash`, `curl`, `python`, `uv` + the `orbstack` cask. Applied by `yadm/snippets/macos/02-brewfile.sh`; bash is front-run by `macos/02-bash.sh`. |
+| **Install** (macOS) | base `brew/Brewfile` — members tagged with a trailing `# bedrock` marker. `git`, `bash`, `curl`, `python`, `uv`, `just` + the `orbstack` cask. Applied by `yadm/snippets/macos/02-brewfile.sh`; bash is front-run by `macos/02-bash.sh`. |
 | **Install** (Linux/WSL) | **not yet implemented** — see the TODO queue. Verification already runs and fails loud there. |
 | **Verify** | `bin/check-bedrock` — cross-platform, side-effect-free, offline. Presence + version/sub-API probes + a shadow/duplicate scan. Exit `0` satisfied / `1` warnings / `2` incomplete. |
 | **Enforce** | `yadm doctor` runs `check-bedrock` (so the dream pre-pass and `yadm update --quiet` both cover it); `yadm/snippets/shared/98-bedrock.sh` re-asserts it loudly at the end of bootstrap. |

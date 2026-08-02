@@ -32,7 +32,7 @@ brew "vim"
 brew "jq"
 brew "yq"
 brew "bat"
-brew "just"
+brew "just"           # bedrock
 brew "shellcheck"
 brew "node"
 brew "redis"          # for redis-cli; server ships along but is never started as a service
