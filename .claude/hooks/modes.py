@@ -3,8 +3,10 @@
 
 A mode is a native slash-command file under `commands/modes/` (home or, for
 project-specific modes, `$CLAUDE_PROJECT_DIR/.claude/commands/modes/`). Typing
-`+afk` at the start of any prompt line appends that mode's directives to turn-1
-context, so modes ride along with the opening prompt in a single message.
+`+afk` at the start of any prompt line appends that mode's directives to *that
+turn's* context. The hook runs on every prompt submission, not just the first, so
+a mode can ride along with the opening prompt in a single message, or be switched
+on by any later message just the same.
 
 Boundaries baked in by design:
   - The hook can only *append* context; it cannot edit/strip the prompt. The
@@ -16,6 +18,9 @@ Boundaries baked in by design:
     `/afk` and `+afk` always resolve the same file.
   - Fail-open: any error, or nothing to do, exits 0 with no output. The prompt is
     never affected by this hook.
+  - Prompt submissions only. Text typed to *reject* a plan or a tool-permission
+    prompt reaches the model as a `tool_result`, not a prompt, so this hook never
+    sees it — a `+token` there cannot newly activate a mode.
 
 See `~/.claude/hooks/modes.md` for the framework and the mode-file format.
 """
