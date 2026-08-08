@@ -5,13 +5,14 @@ use std::collections::BTreeMap;
 
 use anyhow::{Result, bail};
 
-use crate::aggregate::Report;
+use crate::aggregate::{CohortReport, LanguageReport, Report};
 use crate::span::{Counts, Unit};
+use crate::walk::Provenance;
 
 use super::{percent, percent_delta, signed, thousands};
 
-/// Per-file movers shown before the rest are summarised away.
-const FILE_ROWS: usize = 20;
+/// Movers shown before the rest are summarised away.
+const ROWS: usize = 20;
 
 pub fn render(before: &Report, after: &Report) -> Result<String> {
     if before.unit != after.unit {
@@ -25,42 +26,49 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
     let mut out = String::new();
 
     let (b, a) = (before.headline(), after.headline());
-    let prose_delta = a.map_or(0, |c| c.counts.prose(unit) as i64)
-        - b.map_or(0, |c| c.counts.prose(unit) as i64);
-    out.push_str(&format!(
-        "prose density  {} -> {}   ({} pp,  prose {} {})\n",
-        percent(b.and_then(|c| c.density)),
-        percent(a.and_then(|c| c.density)),
-        percent_delta(b.and_then(|c| c.density), a.and_then(|c| c.density)),
-        signed(prose_delta),
-        unit.label(),
-    ));
+    if b.is_none() && a.is_none() {
+        // A zero source delta beside a moving docs table reads as a bug.
+        out.push_str("prose density  n/a   (nothing in the source cohort)\n");
+    } else {
+        let prose_delta = a.map_or(0, |c| c.counts.prose(unit) as i64)
+            - b.map_or(0, |c| c.counts.prose(unit) as i64);
+        out.push_str(&format!(
+            "prose density  {} -> {}   ({} pp,  prose {} {})\n",
+            percent(b.and_then(|c| c.density)),
+            percent(a.and_then(|c| c.density)),
+            percent_delta(b.and_then(|c| c.density), a.and_then(|c| c.density)),
+            signed(prose_delta),
+            unit.label(),
+        ));
+    }
 
-    // Cohorts and languages present in either snapshot: something that
-    // disappeared entirely is exactly the kind of movement worth seeing.
-    let cohorts: Vec<&String> = union(
-        before.cohorts.iter().map(|c| &c.cohort),
-        after.cohorts.iter().map(|c| &c.cohort),
+    // Cohorts, provenances and languages present in either snapshot: something
+    // that disappeared entirely is exactly the kind of movement worth seeing.
+    let cohorts = union(
+        before.cohorts.iter().map(|c| c.cohort.clone()),
+        after.cohorts.iter().map(|c| c.cohort.clone()),
     );
 
     for cohort in cohorts {
-        let b = before.cohorts.iter().find(|c| &c.cohort == cohort);
-        let a = after.cohorts.iter().find(|c| &c.cohort == cohort);
+        let b = before.cohorts.iter().find(|c| c.cohort == cohort);
+        let a = after.cohorts.iter().find(|c| c.cohort == cohort);
         out.push('\n');
         out.push_str(&format!(
-            "  {:<10} {:>9} {:>9} {:>12} {:>12}\n",
+            "  {:<20} {:>9} {:>9} {:>12} {:>12}\n",
             cohort, "density", "delta", "prose", "delta"
         ));
 
-        let languages: Vec<&String> = union(
-            b.into_iter().flat_map(|c| c.languages.iter().map(|l| &l.language)),
-            a.into_iter().flat_map(|c| c.languages.iter().map(|l| &l.language)),
+        let rows = union(
+            b.into_iter()
+                .flat_map(|c| c.languages.iter().map(|l| (l.provenance, l.language.clone()))),
+            a.into_iter()
+                .flat_map(|c| c.languages.iter().map(|l| (l.provenance, l.language.clone()))),
         );
-        for language in languages {
-            let lb = b.and_then(|c| c.languages.iter().find(|l| &l.language == language));
-            let la = a.and_then(|c| c.languages.iter().find(|l| &l.language == language));
+        for (provenance, language) in rows {
+            let lb = language_row(b, provenance, &language);
+            let la = language_row(a, provenance, &language);
             out.push_str(&row(
-                language,
+                &label(&language, provenance),
                 la.and_then(|l| l.density),
                 lb.and_then(|l| l.density),
                 la.map_or(Counts::default(), |l| l.counts),
@@ -78,49 +86,91 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
         ));
     }
 
-    if let (Some(bf), Some(af)) = (&before.files, &after.files) {
-        let mut moved: BTreeMap<&str, (i64, Option<f64>)> = BTreeMap::new();
-        for file in bf {
-            moved.insert(file.path.as_str(), (-(file.counts.prose(unit) as i64), None));
-        }
-        for file in af {
-            let entry = moved.entry(file.path.as_str()).or_insert((0, None));
-            entry.0 += file.counts.prose(unit) as i64;
-            entry.1 = file.density;
-        }
-        let mut rows: Vec<(&str, i64, Option<f64>)> = moved
-            .into_iter()
-            .filter(|(_, (delta, _))| *delta != 0)
-            .map(|(path, (delta, density))| (path, delta, density))
-            .collect();
-        rows.sort_by(|x, y| y.1.abs().cmp(&x.1.abs()).then_with(|| x.0.cmp(y.0)));
+    match (&before.files, &after.files) {
+        (Some(bf), Some(af)) => out.push_str(&movers(
+            "file",
+            bf.iter().map(|f| (f.path.clone(), f.counts.prose(unit), f.density)),
+            af.iter().map(|f| (f.path.clone(), f.counts.prose(unit), f.density)),
+        )),
+        _ => out.push_str("\n  per-file movement needs both snapshots taken with --by file\n"),
+    }
 
-        if !rows.is_empty() {
-            out.push('\n');
-            out.push_str(&format!(
-                "  {:>12} {:>9}  {}\n",
-                "prose delta", "density", "file"
-            ));
-            for (path, delta, density) in rows.iter().take(FILE_ROWS) {
-                out.push_str(&format!(
-                    "  {:>12} {:>9}  {}\n",
-                    signed(*delta),
-                    percent(*density),
-                    path
-                ));
-            }
-            if rows.len() > FILE_ROWS {
-                out.push_str(&format!(
-                    "  … {} more files moved\n",
-                    thousands((rows.len() - FILE_ROWS) as u64)
-                ));
-            }
-        }
-    } else {
-        out.push_str("\n  per-file movement needs both snapshots taken with --by-file\n");
+    if let (Some(bs), Some(as_)) = (&before.sections, &after.sections) {
+        let key = |path: &str, section: &str| format!("{path}#{section}");
+        out.push_str(&movers(
+            "section",
+            bs.iter()
+                .map(|s| (key(&s.path, &s.section), s.counts.prose(unit), s.density)),
+            as_.iter()
+                .map(|s| (key(&s.path, &s.section), s.counts.prose(unit), s.density)),
+        ));
     }
 
     Ok(out)
+}
+
+/// A language row is only comparable within its provenance: local prose and
+/// shared prose move for different reasons.
+fn label(language: &str, provenance: Provenance) -> String {
+    format!("{language} {}", provenance.label())
+}
+
+fn language_row<'a>(
+    cohort: Option<&'a CohortReport>,
+    provenance: Provenance,
+    language: &str,
+) -> Option<&'a LanguageReport> {
+    cohort.and_then(|c| {
+        c.languages
+            .iter()
+            .find(|l| l.provenance == provenance && l.language == language)
+    })
+}
+
+/// Rows whose prose moved, most movement first. A key present in only one
+/// snapshot still shows, with its whole weight as the delta.
+fn movers(
+    noun: &str,
+    before: impl Iterator<Item = (String, u64, Option<f64>)>,
+    after: impl Iterator<Item = (String, u64, Option<f64>)>,
+) -> String {
+    let mut moved: BTreeMap<String, (i64, Option<f64>)> = BTreeMap::new();
+    for (key, prose, _) in before {
+        moved.entry(key).or_insert((0, None)).0 -= prose as i64;
+    }
+    for (key, prose, density) in after {
+        let entry = moved.entry(key).or_insert((0, None));
+        entry.0 += prose as i64;
+        entry.1 = density;
+    }
+    let mut rows: Vec<(String, i64, Option<f64>)> = moved
+        .into_iter()
+        .filter(|(_, (delta, _))| *delta != 0)
+        .map(|(key, (delta, density))| (key, delta, density))
+        .collect();
+    rows.sort_by(|x, y| y.1.abs().cmp(&x.1.abs()).then_with(|| x.0.cmp(&y.0)));
+
+    if rows.is_empty() {
+        return String::new();
+    }
+
+    let mut out = format!("\n  {:>12} {:>9}  {}\n", "prose delta", "density", noun);
+    for (key, delta, density) in rows.iter().take(ROWS) {
+        out.push_str(&format!(
+            "  {:>12} {:>9}  {}\n",
+            signed(*delta),
+            percent(*density),
+            key
+        ));
+    }
+    if rows.len() > ROWS {
+        out.push_str(&format!(
+            "  … {} more {}s moved\n",
+            thousands((rows.len() - ROWS) as u64),
+            noun
+        ));
+    }
+    out
 }
 
 fn row(
@@ -132,7 +182,7 @@ fn row(
     unit: Unit,
 ) -> String {
     format!(
-        "  {:<10} {:>9} {:>9} {:>12} {:>12}\n",
+        "  {:<20} {:>9} {:>9} {:>12} {:>12}\n",
         label,
         percent(after),
         percent_delta(before, after),
@@ -142,11 +192,8 @@ fn row(
 }
 
 /// Ordered union of two key sequences, so a key in only one snapshot still shows.
-fn union<'a>(
-    left: impl Iterator<Item = &'a String>,
-    right: impl Iterator<Item = &'a String>,
-) -> Vec<&'a String> {
-    let mut keys: Vec<&String> = left.chain(right).collect();
+fn union<T: Ord>(left: impl Iterator<Item = T>, right: impl Iterator<Item = T>) -> Vec<T> {
+    let mut keys: Vec<T> = left.chain(right).collect();
     keys.sort();
     keys.dedup();
     keys

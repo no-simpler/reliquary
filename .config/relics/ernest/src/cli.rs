@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+use ernest::aggregate::Views;
 use ernest::span::Unit;
+use ernest::walk::Scope;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -44,9 +46,9 @@ pub struct Measure {
     #[arg(long)]
     pub json: bool,
 
-    /// Include per-file rows, most prose first.
-    #[arg(long)]
-    pub by_file: bool,
+    /// Extra rows to carry, most prose first. Sections are a documentation view.
+    #[arg(long, value_enum, value_delimiter = ',', value_name = "VIEW")]
+    pub by: Vec<ViewArg>,
 
     /// What to count. Characters are canonical; lines are the familiar proxy.
     #[arg(long, value_enum, default_value_t = UnitArg::Chars)]
@@ -56,13 +58,23 @@ pub struct Measure {
     #[arg(long)]
     pub lang: Option<String>,
 
-    /// Walk everything: ignore .gitignore and the built-in directory excludes.
-    #[arg(long)]
-    pub no_ignore: bool,
+    /// How far to reach. Dependency and build directories are excluded at every
+    /// level.
+    #[arg(long, value_enum, default_value_t = ScopeArg::Local, value_name = "LEVEL")]
+    pub scope: ScopeArg,
 
     /// Exit 1 when density exceeds this percentage. A convenience, not a gate.
     #[arg(long, value_name = "PCT")]
     pub max_density: Option<f64>,
+}
+
+impl Measure {
+    pub fn views(&self) -> Views {
+        Views {
+            by_file: self.by.contains(&ViewArg::File),
+            by_section: self.by.contains(&ViewArg::Section),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -76,6 +88,34 @@ impl From<UnitArg> for Unit {
         match value {
             UnitArg::Chars => Unit::Chars,
             UnitArg::Lines => Unit::Lines,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ViewArg {
+    /// One row per file.
+    File,
+    /// One row per innermost heading of a document.
+    Section,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ScopeArg {
+    /// Only what a fresh clone would see.
+    Shared,
+    /// Plus files excluded on this machine alone — the second brain.
+    Local,
+    /// Plus gitignored files.
+    All,
+}
+
+impl From<ScopeArg> for Scope {
+    fn from(value: ScopeArg) -> Self {
+        match value {
+            ScopeArg::Shared => Scope::Shared,
+            ScopeArg::Local => Scope::Local,
+            ScopeArg::All => Scope::All,
         }
     }
 }

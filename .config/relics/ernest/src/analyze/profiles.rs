@@ -14,9 +14,6 @@ use crate::span::Class;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Cohort {
     Source,
-    // Unused until the first documentation profile lands; the split has to
-    // exist before it is needed, or the headline silently absorbs prose.
-    #[allow(dead_code)]
     Docs,
 }
 
@@ -41,6 +38,9 @@ pub struct Profile {
     pub default_class: Class,
     /// tree-sitter node kinds holding prose.
     pub prose_nodes: &'static [&'static str],
+    /// tree-sitter node kinds holding code. What a documentation format names,
+    /// its default class being `Prose`.
+    pub code_nodes: &'static [&'static str],
     /// tree-sitter node kinds that are unavoidable given the file exists —
     /// counted toward neither side of the ratio.
     pub ignored_nodes: &'static [&'static str],
@@ -51,6 +51,10 @@ pub struct Profile {
     /// Body prefixes marking a machine-consumed annotation. Such a line is
     /// avoidable but is not prose, so it re-classifies to code.
     pub annotation_line: &'static [&'static str],
+    /// Pragma bodies opening and closing a region a tool writes and rewrites.
+    /// The pair and everything between it is uninteresting whatever it holds,
+    /// because nobody authored it.
+    pub generated_regions: &'static [(&'static str, &'static str)],
 }
 
 /// Comment bodies opening with one of these are tooling directives, not prose:
@@ -73,6 +77,14 @@ pub const PRAGMA_PREFIXES: &[&str] = &[
     "editorconfig-checker-",
     "prettier-ignore",
     "eslint-disable",
+    "TOC",
+    "/TOC",
+    "rumdl-disable",
+    "rumdl-enable",
+    "markdownlint-disable",
+    "markdownlint-enable",
+    "vale off",
+    "vale on",
 ];
 
 pub static PHP: Profile = Profile {
@@ -84,9 +96,11 @@ pub static PHP: Profile = Profile {
     default_class: Class::Code,
     // One `comment` kind covers //, #, /* */ and /** */ alike.
     prose_nodes: &["comment"],
+    code_nodes: &[],
     ignored_nodes: &["php_tag", "php_end_tag"],
     comment_frame: &["/**", "*/", "/*", "//", "*", "#"],
     annotation_line: &["@"],
+    generated_regions: &[],
 };
 
 pub static YAML: Profile = Profile {
@@ -97,13 +111,51 @@ pub static YAML: Profile = Profile {
     cohort: Cohort::Source,
     default_class: Class::Code,
     prose_nodes: &["comment"],
+    code_nodes: &[],
     // Document markers are structure you cannot write your way out of.
     ignored_nodes: &["---", "..."],
     comment_frame: &["#"],
     annotation_line: &[],
+    generated_regions: &[],
 };
 
-pub static PROFILES: &[&Profile] = &[&PHP, &YAML];
+/// The polarity inverts here: prose is the default and code is what gets named.
+///
+/// The line between prose and code runs through structure, not around it.
+/// Structure that scales with the construct bills as code — a wide table's
+/// pipes are mass that is not text, the way braces are. A one-off frame bills
+/// as prose, the way comment delimiters do: a heading's `#` exists only because
+/// the heading does.
+pub static MARKDOWN: Profile = Profile {
+    language: "markdown",
+    language_fn: tree_sitter_md::LANGUAGE,
+    extensions: &["md", "markdown", "mdown", "mkd", "mkdn"],
+    filenames: &[],
+    cohort: Cohort::Docs,
+    default_class: Class::Prose,
+    prose_nodes: &[],
+    code_nodes: &[
+        "code_fence_content",
+        "indented_code_block",
+        "html_block",
+        "pipe_table_delimiter_row",
+        "|",
+    ],
+    // A fence is unavoidable once a block exists, and front-matter is machine
+    // configuration rather than the document's text.
+    ignored_nodes: &[
+        "fenced_code_block_delimiter",
+        "info_string",
+        "minus_metadata",
+        "plus_metadata",
+        "thematic_break",
+    ],
+    comment_frame: &["<!--", "-->"],
+    annotation_line: &[],
+    generated_regions: &[("TOC", "/TOC")],
+};
+
+pub static PROFILES: &[&Profile] = &[&PHP, &YAML, &MARKDOWN];
 
 /// Strip comment sigils and surrounding whitespace to expose a line's body,
 /// so pragma and annotation prefixes can be tested against real content.

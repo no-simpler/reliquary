@@ -38,12 +38,9 @@ fn run(cli: Cli) -> Result<i32> {
     }
 
     let unit = options.unit.into();
-    let (candidates, skipped) = walk::collect(
-        &options.paths,
-        !options.no_ignore,
-        options.lang.as_deref(),
-    );
-    let report = aggregate::run(&candidates, unit, skipped, options.by_file);
+    let (candidates, skipped) =
+        walk::collect(&options.paths, options.scope.into(), options.lang.as_deref());
+    let report = aggregate::run(&candidates, unit, skipped, options.views());
 
     if options.json {
         println!("{}", report::json::render(&report)?);

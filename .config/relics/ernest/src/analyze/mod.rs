@@ -1,30 +1,50 @@
 //! Turning a file into classified byte spans.
 
 pub mod profiles;
+pub mod sections;
 
 use anyhow::{Context, Result};
-use tree_sitter::{Node, Parser};
+use tree_sitter::{Node, Parser, Tree};
 
-use crate::span::{Class, Counts, Span, measure};
+use crate::span::{Class, Counts, Span, measure, measure_range};
 use profiles::{PRAGMA_PREFIXES, Profile, comment_body};
 
 /// Classify `src` under `profile` and roll the result up into counts.
 pub fn analyze_file(src: &str, profile: &Profile) -> Result<Counts> {
-    let spans = classify(src, profile)?;
+    let tree = parse(src, profile)?;
+    let spans = classify(&tree, src, profile);
     Ok(measure(src, &spans, profile.default_class))
 }
 
-/// Ordered, non-overlapping spans for everything the profile can name.
-/// Bytes no span covers belong to `profile.default_class`.
-pub fn classify(src: &str, profile: &Profile) -> Result<Vec<Span>> {
+/// As `analyze_file`, plus one row per innermost section of the document.
+/// Sections that measure to nothing are dropped rather than reported as `n/a`.
+pub fn analyze_sections(src: &str, profile: &Profile) -> Result<(Counts, Vec<(String, Counts)>)> {
+    let tree = parse(src, profile)?;
+    let spans = classify(&tree, src, profile);
+    let rows = sections::of(tree.root_node(), src)
+        .into_iter()
+        .map(|section| {
+            let counts = measure_range(src, &spans, profile.default_class, section.start, section.end);
+            (section.label, counts)
+        })
+        .filter(|(_, c)| c.prose_chars + c.code_chars + c.ignored_chars > 0)
+        .collect();
+    Ok((measure(src, &spans, profile.default_class), rows))
+}
+
+fn parse(src: &str, profile: &Profile) -> Result<Tree> {
     let mut parser = Parser::new();
     parser
         .set_language(&profile.language_fn.into())
         .with_context(|| format!("loading the {} grammar", profile.language))?;
-    let tree = parser
+    parser
         .parse(src, None)
-        .with_context(|| format!("parsing as {}", profile.language))?;
+        .with_context(|| format!("parsing as {}", profile.language))
+}
 
+/// Ordered, non-overlapping spans for everything the profile can name.
+/// Bytes no span covers belong to `profile.default_class`.
+fn classify(tree: &Tree, src: &str, profile: &Profile) -> Vec<Span> {
     let mut spans = Vec::new();
     collect(tree.root_node(), profile, src, &mut spans);
 
@@ -38,7 +58,8 @@ pub fn classify(src: &str, profile: &Profile) -> Result<Vec<Span>> {
         }
     }
 
-    Ok(spans)
+    fold_generated_regions(&mut spans, profile, src);
+    spans
 }
 
 /// Walk the tree, taking the outermost node that matches a rule and never
@@ -46,14 +67,15 @@ pub fn classify(src: &str, profile: &Profile) -> Result<Vec<Span>> {
 fn collect(node: Node, profile: &Profile, src: &str, out: &mut Vec<Span>) {
     let kind = node.kind();
 
-    if profile.ignored_nodes.contains(&kind) {
-        out.push(Span::new(node.start_byte(), node.end_byte(), Class::Ignored));
-        return;
-    }
-
-    if profile.prose_nodes.contains(&kind) {
-        push_prose(node.start_byte(), node.end_byte(), profile, src, out);
-        return;
+    for (class, kinds) in [
+        (Class::Ignored, profile.ignored_nodes),
+        (Class::Code, profile.code_nodes),
+        (Class::Prose, profile.prose_nodes),
+    ] {
+        if kinds.contains(&kind) {
+            push_recognised(class, node.start_byte(), node.end_byte(), profile, src, out);
+            return;
+        }
     }
 
     let mut cursor = node.walk();
@@ -62,19 +84,28 @@ fn collect(node: Node, profile: &Profile, src: &str, out: &mut Vec<Span>) {
     }
 }
 
-/// Split a recognised comment into what it actually contains: a tooling
-/// directive is uninteresting whole, an annotation line is code, and the rest
-/// is prose — delimiters included.
-fn push_prose(start: usize, end: usize, profile: &Profile, src: &str, out: &mut Vec<Span>) {
+/// Split a recognised node into what it actually contains: a tooling directive
+/// is uninteresting whole, an annotation line is code, and prose keeps its
+/// delimiters.
+fn push_recognised(
+    class: Class,
+    start: usize,
+    end: usize,
+    profile: &Profile,
+    src: &str,
+    out: &mut Vec<Span>,
+) {
     let text = &src[start..end];
 
-    if is_pragma(text, profile) {
+    // Ahead of the class branch, so a directive is uninteresting whether it
+    // arrived as a comment or as raw markup.
+    if class != Class::Ignored && is_pragma(text, profile) {
         out.push(Span::new(start, end, Class::Ignored));
         return;
     }
 
-    if profile.annotation_line.is_empty() {
-        out.push(Span::new(start, end, Class::Prose));
+    if class != Class::Prose || profile.annotation_line.is_empty() {
+        out.push(Span::new(start, end, class));
         return;
     }
 
@@ -106,6 +137,45 @@ fn push_prose(start: usize, end: usize, profile: &Profile, src: &str, out: &mut 
     if let Some(span) = pending {
         out.push(span);
     }
+}
+
+/// Collapse each opener/closer pair and everything between it into one
+/// uninteresting span. Content a tool rewrites is not the author's to cut, and
+/// the region's interior may hold no spans of its own — hence a post-pass over
+/// the span list rather than a rule in the walk.
+fn fold_generated_regions(spans: &mut Vec<Span>, profile: &Profile, src: &str) {
+    if profile.generated_regions.is_empty() {
+        return;
+    }
+    let mut at = 0usize;
+    while at < spans.len() {
+        let opened = profile
+            .generated_regions
+            .iter()
+            .find(|(open, _)| marker(&spans[at], profile, src).starts_with(open));
+        let Some((_, close)) = opened else {
+            at += 1;
+            continue;
+        };
+        // An unclosed opener leaves the rest of the file alone; a later pair
+        // still folds.
+        let closed = (at + 1..spans.len())
+            .find(|&i| marker(&spans[i], profile, src).starts_with(close));
+        let Some(end) = closed else {
+            at += 1;
+            continue;
+        };
+        let region = Span::new(spans[at].start, spans[end].end, Class::Ignored);
+        spans.splice(at..=end, [region]);
+        at += 1;
+    }
+}
+
+/// A span's first line, stripped to its comment body, so region markers are
+/// tested against real content.
+fn marker<'a>(span: &Span, profile: &Profile, src: &'a str) -> &'a str {
+    let text = &src[span.start..span.end];
+    comment_body(text.lines().next().unwrap_or(""), profile.comment_frame)
 }
 
 /// True when the comment opens with a machine-consumed directive.
@@ -143,7 +213,7 @@ fn line_offsets(text: &str) -> impl Iterator<Item = (usize, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use profiles::{PHP, YAML};
+    use profiles::{MARKDOWN, PHP, YAML};
 
     fn counts(src: &str, profile: &Profile) -> Counts {
         analyze_file(src, profile).unwrap()
@@ -220,6 +290,75 @@ mod tests {
         let c = counts("key: 1  # why this value\n", &YAML);
         assert_eq!(c.code_chars, 5); // "key:1"
         assert_eq!(c.prose_chars, 13); // "#whythisvalue"
+    }
+
+    #[test]
+    fn a_fence_is_uninteresting_and_what_it_holds_is_code() {
+        let c = counts("# H\n\n```php\n$x = 1;\n```\n", &MARKDOWN);
+        assert_eq!(c.prose_chars, "#H".len() as u64);
+        assert_eq!(c.code_chars, "$x=1;".len() as u64);
+        // Both delimiters and the info string.
+        assert_eq!(c.ignored_chars, "``````php".len() as u64);
+    }
+
+    #[test]
+    fn a_hash_inside_a_code_span_is_not_a_heading() {
+        let c = counts("A paragraph naming `# not a heading` in passing.\n", &MARKDOWN);
+        assert_eq!(c.code_chars, 0);
+        assert_eq!(c.ignored_chars, 0);
+        assert!(c.prose_chars > 0);
+    }
+
+    #[test]
+    fn front_matter_is_uninteresting() {
+        let c = counts("---\nkey: value\n---\n\n# H\n", &MARKDOWN);
+        assert_eq!(c.ignored_chars, "---key:value---".len() as u64);
+        assert_eq!(c.prose_chars, "#H".len() as u64);
+    }
+
+    #[test]
+    fn table_cells_are_prose_and_the_structure_holding_them_is_code() {
+        let c = counts("| a | b |\n| - | - |\n| c | d |\n", &MARKDOWN);
+        assert_eq!(c.prose_chars, "abcd".len() as u64);
+        // Six pipes framing the two content rows, and the delimiter row whole.
+        assert_eq!(c.code_chars, "||||||".len() as u64 + "|-|-|".len() as u64);
+    }
+
+    #[test]
+    fn a_generated_region_is_uninteresting_whole() {
+        let c = counts("<!-- TOC -->\n\n- [a](#a)\n\n<!-- /TOC -->\n", &MARKDOWN);
+        assert_eq!(c.prose_chars, 0);
+        assert_eq!(c.code_chars, 0);
+    }
+
+    #[test]
+    fn raw_markup_is_code_but_a_directive_is_uninteresting() {
+        let c = counts("<!-- rumdl-disable MD033 -->\n\n<div>x</div>\n", &MARKDOWN);
+        assert_eq!(c.prose_chars, 0);
+        assert_eq!(c.code_chars, "<div>x</div>".len() as u64);
+        assert_eq!(c.ignored_chars, "<!--rumdl-disableMD033-->".len() as u64);
+    }
+
+    fn labels(src: &str) -> Vec<String> {
+        analyze_sections(src, &MARKDOWN)
+            .unwrap()
+            .1
+            .into_iter()
+            .map(|(label, _)| label)
+            .collect()
+    }
+
+    #[test]
+    fn a_section_label_is_the_heading_path_that_reaches_it() {
+        assert_eq!(
+            labels("# One\n\ntext\n\n## Two\n\ntext\n\n### Three\n\ntext\n"),
+            ["One", "One > Two", "One > Two > Three"]
+        );
+    }
+
+    #[test]
+    fn text_before_the_first_heading_is_its_own_section() {
+        assert_eq!(labels("Opening text.\n\n# One\n\ntext\n"), ["(preamble)", "One"]);
     }
 
     #[test]

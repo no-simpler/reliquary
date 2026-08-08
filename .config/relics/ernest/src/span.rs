@@ -141,6 +141,18 @@ fn cover(spans: &[Span], len: usize, default: Class) -> Vec<Span> {
 ///
 /// `spans` must be ordered and non-overlapping; `analyze` guarantees that.
 pub fn measure(src: &str, spans: &[Span], default: Class) -> Counts {
+    measure_range(src, spans, default, 0, src.len())
+}
+
+/// `measure`, restricted to `from..to`. Spans keep their absolute offsets, so a
+/// section is measured against the same classification as the whole file.
+pub fn measure_range(
+    src: &str,
+    spans: &[Span],
+    default: Class,
+    from: usize,
+    to: usize,
+) -> Counts {
     let coverage = cover(spans, src.len(), default);
 
     let mut totals = [0u64; 3];
@@ -170,7 +182,7 @@ pub fn measure(src: &str, spans: &[Span], default: Class) -> Counts {
         *line = [0u64; 3];
     };
 
-    for (offset, ch) in src.char_indices() {
+    for (offset, ch) in src[from..to].char_indices().map(|(i, c)| (i + from, c)) {
         if ch == '\n' {
             flush_line(&mut line, &mut counts);
             continue;
