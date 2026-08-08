@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=./schema.json
+---
+# A leading comment about the document.
+name: pipeline
+
+quoted: "value # not a comment"
+single: 'also # not a comment'
+
+block: |
+  # not a comment, this is content
+  plain text
+
+folded: >
+  # also content
+  more text
+
+steps:
+  - run: build    # why this step exists
+  - run: test
+...
