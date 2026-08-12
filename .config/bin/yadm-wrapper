@@ -291,7 +291,28 @@ _doctor_run() {
         _doctor_warn "check-bedrock not found — skipped"
     fi
 
-    # 6. Encrypted-archive drift (SHA compare; no Touch ID)
+    # 6. Homebrew package health (deprecations, orphaned kegs, rotted Brewfiles)
+    _doctor_head "Homebrew package health"
+    local brewhealth="$HOME/.config/bin/check-brew-health"
+    if [ -x "$brewhealth" ]; then
+        local hout hrc
+        hout=$("$brewhealth" 2>&1); hrc=$?
+        if [ "$hrc" -eq 0 ]; then
+            _doctor_ok "nothing deprecated, orphaned or unresolvable"
+        elif [ "$hrc" -eq 1 ]; then
+            _doctor_warn "packages on a clock:"
+            printf '%s\n' "$hout" | sed 's/^/      /'
+        else
+            # An unresolvable Brewfile entry or an orphaned keg means the machine
+            # is no longer reproducible from the repo — a failure, not a nag.
+            _doctor_fail "packages no longer reproducible:"
+            printf '%s\n' "$hout" | sed 's/^/      /'
+        fi
+    else
+        _doctor_warn "check-brew-health not found — skipped"
+    fi
+
+    # 7. Encrypted-archive drift (SHA compare; no Touch ID)
     _doctor_head "encrypted archive drift"
     local drift
     drift=$(check_yadm_encrypted_files 2>&1)
@@ -302,7 +323,7 @@ _doctor_run() {
         printf '%s\n' "$drift" | sed 's/^/      /'
     fi
 
-    # 7. Archive vs disk verification (Touch ID) — opt-in
+    # 8. Archive vs disk verification (Touch ID) — opt-in
     _doctor_head "archive vs disk verification"
     if $full; then
         local vout vrc
@@ -317,7 +338,7 @@ _doctor_run() {
         _doctor_skip "skipped — run 'yadm doctor --full' for the Touch-ID deep check"
     fi
 
-    # 8. ske wiring (Touch-ID suppression). Detect-only and Touch-ID-free: `ske
+    # 9. ske wiring (Touch-ID suppression). Detect-only and Touch-ID-free: `ske
     #    doctor` is read-only and never opens a window. Skips cleanly when the
     #    attic is not decrypted, so a fresh machine does not fail here.
     _doctor_head "ske wiring (Touch-ID window)"

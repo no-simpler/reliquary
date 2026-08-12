@@ -105,6 +105,7 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `pb` - lists personal bin executables, shows which are yadm-managed
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm); writes timestamp to `~/.local/state/up/last_upped_at`
 - `check-shell-parity` - detects POSIX↔fish alias/abbr/function name drift across the paired `shell/interactive.d/*.sh` ↔ `fish/conf.d/*.fish` files; exits non-zero on drift (run by the dream procedure in `~/.config/.claude/DREAM.md`)
+- `check-brew-health` - detects Homebrew rot: installed formulae/casks deprecated or disabled upstream (warn), kegs orphaned by a formula's removal, and Brewfile entries that no longer resolve (fail). Tap-aware, offline, side-effect-free; exit 0/1/2 like `check-bedrock`. Wired into `yadm doctor` and, advisory-only, into `up`
 - `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt; tries `ske read` first, falls back to `op read` (never hard-depend — it decrypts the attic `ske` lives in)
 - `ske-prompt` - prints the open `ske` Touch ID window for the oh-my-posh right prompt; silent when closed (`sh`, not bash: `$BASH_ENV` would cost ~230ms per render)
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below); also reachable as `yadm` via the `~/.config/bin/yadm` symlink (shadows brew's yadm — see "Path availability")
@@ -208,7 +209,7 @@ Reachable as `yadm` in **every** shell — `~/.config/bin/yadm` is a symlink to 
 - `yadm check` - compares archive SHA256 to detect drift
 - `yadm verify` - decrypts archive to tmpdir and diffs against disk
 - `yadm ls-all` - complete tracked set: `yadm ls-files` (plaintext) + archive listing (`decrypt -l`, Touch ID)
-- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, archive drift); detect-only, Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
+- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, bedrock, Homebrew package health, archive drift, ske wiring); detect-only, Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
 - `yadm update` - `pull --ff-only`, then `doctor --quiet` (silent when healthy; surfaces drift/regressions the pull introduced — the quiet doctor already covers the encrypted-archive check)
 - All other commands pass through to real yadm, followed by an encrypted-files check
 
@@ -229,6 +230,10 @@ Util snippets: print helpers, copy helpers, symlink helpers.
 - `Brewfile@<scope>` - optional scopes applied interactively via `bbs`
 - Some scoped files are tracked publicly, others are encrypted (see `~/.config/yadm/encrypt`)
 - `Brewfile*.lock.json` - **deliberately not tracked** (never `yadm add`-ed; yadm's whitelist keeps them out by default — no gitignore needed). Homebrew is rolling-release, so pinned bottle SHAs expire and aren't reinstallable, while the lock churns on every `brew upgrade`. The Brewfiles are the source of truth (track-latest intent); locks are regenerated locally by `brew bundle`/`bbs`.
+
+**When a formula disappears upstream, look for a cask before dropping the tool.** homebrew-core carries only OSI-licensed software, so a relicensing upstream gets the formula deprecated and then deleted, and homebrew-cask picks up the vendor's prebuilt binary. `tap_migrations.json` in homebrew-core records the redirect. `sentry-cli` is the worked example: it relicensed to FSL-1.1-MIT at 2.58.3, so both benefactor Brewfiles declare `cask "sentry-cli"`. A cask entry keeps automatic updates — `up`'s `brew upgrade --cask --force` pass covers it — so this stays inside Homebrew rather than falling back to the npm or cargo manifest lanes. Casks ship only the binary, so any shell completions the formula used to install must be regenerated into the tracked completion dirs (`zsh/completion/`, `fish/completions/`).
+
+`bin/check-brew-health` guards the whole class: it fails on an entry that stopped resolving and warns on one that is deprecated, so this is caught in `yadm doctor` rather than on the next machine's bootstrap.
 
 ### Non-brew package manifests
 
