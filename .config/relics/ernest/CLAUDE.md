@@ -267,11 +267,15 @@ cargo run --example kinds -- path/to/sample          # profile by extension
 cargo run --example kinds -- --lang toml some-file   # or forced
 ```
 
-## Tests
+## Verification
 
 ```
-scripts/test.sh          # cargo nextest, falling back to cargo test
+scripts/test.sh          # fmt, clippy, then the suite — fail-fast
 ```
+
+One command for humans and agents; `relic test ernest` runs the same file. Stock
+rustfmt — the empty `rustfmt.toml` says so deliberately — and clippy at
+`-D warnings`. No flag drops a station; `cargo fmt --all` fixes the first one.
 
 Unit tests in `src/` pin each rule's exact semantics. `tests/golden.rs` guards
 the rules working together against blessed expectations, and adds three

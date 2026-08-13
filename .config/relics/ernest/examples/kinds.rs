@@ -47,7 +47,10 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn dump(node: Node, src: &str, depth: usize) {
-    let text: String = src[node.start_byte()..node.end_byte()].chars().take(48).collect();
+    let text: String = src[node.start_byte()..node.end_byte()]
+        .chars()
+        .take(48)
+        .collect();
     println!(
         "{}{}{} {:?}",
         "  ".repeat(depth),

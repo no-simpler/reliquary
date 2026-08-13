@@ -158,7 +158,9 @@ pub fn render(report: &Report) -> String {
     out.push_str(&unsupported_line(report));
 
     for path in &report.ernestignore {
-        out.push_str(&format!("  {path} applied — a declared corpus is not measured\n"));
+        out.push_str(&format!(
+            "  {path} applied — a declared corpus is not measured\n"
+        ));
     }
 
     if unit == Unit::Lines {
@@ -185,7 +187,10 @@ fn unsupported_line(report: &Report) -> String {
         .collect();
     let mut line = format!("  unsupported: {}", named.join(", "));
     if gaps.len() > GAPS {
-        line.push_str(&format!(", and {} more", thousands((gaps.len() - GAPS) as u64)));
+        line.push_str(&format!(
+            ", and {} more",
+            thousands((gaps.len() - GAPS) as u64)
+        ));
     }
     line.push('\n');
     line

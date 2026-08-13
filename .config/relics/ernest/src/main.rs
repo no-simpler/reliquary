@@ -38,7 +38,11 @@ fn run(cli: Cli) -> Result<i32> {
     }
 
     let unit = options.unit.into();
-    let survey = walk::collect(&options.paths, options.scope.into(), options.lang.as_deref());
+    let survey = walk::collect(
+        &options.paths,
+        options.scope.into(),
+        options.lang.as_deref(),
+    );
     let report = aggregate::run(&survey, unit, options.views());
 
     if options.json {

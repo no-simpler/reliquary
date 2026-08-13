@@ -83,10 +83,16 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
         );
 
         let rows = union(
-            b.into_iter()
-                .flat_map(|c| c.languages.iter().map(|l| (l.language.clone(), l.provenance))),
-            a.into_iter()
-                .flat_map(|c| c.languages.iter().map(|l| (l.language.clone(), l.provenance))),
+            b.into_iter().flat_map(|c| {
+                c.languages
+                    .iter()
+                    .map(|l| (l.language.clone(), l.provenance))
+            }),
+            a.into_iter().flat_map(|c| {
+                c.languages
+                    .iter()
+                    .map(|l| (l.language.clone(), l.provenance))
+            }),
         );
         for (language, provenance) in rows {
             let lb = language_row(b, provenance, &language);
@@ -111,8 +117,10 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
     match (&before.files, &after.files) {
         (Some(bf), Some(af)) => out.push_str(&movers(
             "file",
-            bf.iter().map(|f| (f.path.clone(), f.counts.prose(unit), f.density)),
-            af.iter().map(|f| (f.path.clone(), f.counts.prose(unit), f.density)),
+            bf.iter()
+                .map(|f| (f.path.clone(), f.counts.prose(unit), f.density)),
+            af.iter()
+                .map(|f| (f.path.clone(), f.counts.prose(unit), f.density)),
         )),
         _ => out.push_str("\n  per-file movement needs both snapshots taken with --by file\n"),
     }

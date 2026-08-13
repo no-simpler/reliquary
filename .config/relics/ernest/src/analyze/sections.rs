@@ -67,7 +67,11 @@ fn heading(node: Node, src: &str) -> String {
             let mut cursor = head.walk();
             head.children(&mut cursor)
                 .find(|child| child.kind() == "inline" || child.kind() == "paragraph")
-                .map(|inline| src[inline.start_byte()..inline.end_byte()].trim().to_string())
+                .map(|inline| {
+                    src[inline.start_byte()..inline.end_byte()]
+                        .trim()
+                        .to_string()
+                })
         });
     match text {
         Some(text) if !text.is_empty() => text,

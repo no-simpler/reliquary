@@ -24,7 +24,13 @@ pub fn analyze_sections(src: &str, profile: &Profile) -> Result<(Counts, Vec<(St
     let rows = sections::of(tree.root_node(), src)
         .into_iter()
         .map(|section| {
-            let counts = measure_range(src, &spans, profile.default_class, section.start, section.end);
+            let counts = measure_range(
+                src,
+                &spans,
+                profile.default_class,
+                section.start,
+                section.end,
+            );
             (section.label, counts)
         })
         .filter(|(_, c)| c.prose_chars + c.code_chars + c.ignored_chars > 0)
@@ -164,8 +170,8 @@ fn fold_generated_regions(spans: &mut Vec<Span>, profile: &Profile, src: &str) {
         };
         // An unclosed opener leaves the rest of the file alone; a later pair
         // still folds.
-        let closed = (at + 1..spans.len())
-            .find(|&i| marker(&spans[i], profile, src).starts_with(close));
+        let closed =
+            (at + 1..spans.len()).find(|&i| marker(&spans[i], profile, src).starts_with(close));
         let Some(end) = closed else {
             at += 1;
             continue;
@@ -241,9 +247,15 @@ mod tests {
         let src = "<?php\n/**\n * Resolves a tenant.\n * @param int $id\n */\n$x = 1;\n";
         let c = counts(src, &PHP);
         // "/**", "* Resolves a tenant." and "*/" stay prose, delimiters included.
-        assert_eq!(c.prose_chars, "/**".len() as u64 + "*Resolvesatenant.".len() as u64 + 2);
+        assert_eq!(
+            c.prose_chars,
+            "/**".len() as u64 + "*Resolvesatenant.".len() as u64 + 2
+        );
         // The annotation line reclassifies whole, frame and all.
-        assert_eq!(c.code_chars, "*@paramint$id".len() as u64 + "$x=1;".len() as u64);
+        assert_eq!(
+            c.code_chars,
+            "*@paramint$id".len() as u64 + "$x=1;".len() as u64
+        );
     }
 
     #[test]
@@ -452,7 +464,10 @@ mod tests {
 
     #[test]
     fn a_hash_inside_a_code_span_is_not_a_heading() {
-        let c = counts("A paragraph naming `# not a heading` in passing.\n", &MARKDOWN);
+        let c = counts(
+            "A paragraph naming `# not a heading` in passing.\n",
+            &MARKDOWN,
+        );
         assert_eq!(c.code_chars, 0);
         assert_eq!(c.ignored_chars, 0);
         assert!(c.prose_chars > 0);
@@ -507,7 +522,10 @@ mod tests {
 
     #[test]
     fn text_before_the_first_heading_is_its_own_section() {
-        assert_eq!(labels("Opening text.\n\n# One\n\ntext\n"), ["(preamble)", "One"]);
+        assert_eq!(
+            labels("Opening text.\n\n# One\n\ntext\n"),
+            ["(preamble)", "One"]
+        );
     }
 
     #[test]

@@ -132,7 +132,10 @@ mod tests {
         assert_eq!(interpreter("#!/bin/sh"), Some("sh"));
         assert_eq!(interpreter("#!/bin/bash -e"), Some("bash"));
         assert_eq!(interpreter("#!/usr/bin/env bash"), Some("bash"));
-        assert_eq!(interpreter("#!/usr/bin/env -S bash -euo pipefail"), Some("bash"));
+        assert_eq!(
+            interpreter("#!/usr/bin/env -S bash -euo pipefail"),
+            Some("bash")
+        );
         assert_eq!(interpreter("#!/usr/bin/env FOO=1 python3"), Some("python3"));
         assert_eq!(interpreter("#!/usr/bin/env php"), Some("php"));
     }

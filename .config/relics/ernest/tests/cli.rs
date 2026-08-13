@@ -44,7 +44,10 @@ fn reports_and_exits_clean() {
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.starts_with("prose density"), "{text}");
     for language in fixture_languages() {
-        assert!(text.contains(&language), "{language} is missing from:\n{text}");
+        assert!(
+            text.contains(&language),
+            "{language} is missing from:\n{text}"
+        );
     }
 }
 
@@ -71,7 +74,10 @@ fn the_table_rolls_up_from_languages_through_cohorts_to_the_total() {
         .take_while(|l| l.starts_with("  "))
         .map(|l| {
             let label = l.trim_start();
-            ((l.len() - label.len()) / 2, label.split(' ').next().unwrap())
+            (
+                (l.len() - label.len()) / 2,
+                label.split(' ').next().unwrap(),
+            )
         })
         .collect();
 
@@ -110,7 +116,11 @@ fn the_table_rolls_up_from_languages_through_cohorts_to_the_total() {
 fn an_unreadable_path_is_an_error_not_a_verdict() {
     let out = ernest(&["/nonexistent-path-for-ernest-tests"]);
     assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8(out.stderr).unwrap().contains("no such path"));
+    assert!(
+        String::from_utf8(out.stderr)
+            .unwrap()
+            .contains("no such path")
+    );
 }
 
 #[test]
@@ -134,8 +144,7 @@ fn the_threshold_separates_exceeded_from_broken() {
 fn json_carries_a_versioned_schema_that_reconciles() {
     let out = ernest(&[fixtures().to_str().unwrap(), "--json", "--by", "file"]);
     assert_eq!(out.status.code(), Some(0));
-    let report: serde_json::Value =
-        serde_json::from_slice(&out.stdout).expect("json parses");
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json parses");
 
     assert_eq!(report["schema_version"], 3);
     assert_eq!(report["tool"], "ernest");
@@ -179,8 +188,7 @@ fn json_carries_a_versioned_schema_that_reconciles() {
         .sum();
     assert_eq!(report["total"]["prose_chars"].as_u64().unwrap(), across);
     assert!(
-        report["total"]["prose_chars"].as_u64().unwrap()
-            > cohort["prose_chars"].as_u64().unwrap(),
+        report["total"]["prose_chars"].as_u64().unwrap() > cohort["prose_chars"].as_u64().unwrap(),
         "docs prose must reach the total, not stop at the source cohort"
     );
 }
@@ -203,11 +211,7 @@ fn diff_reports_the_prose_a_change_removed() {
     let out = ernest(&[dir.to_str().unwrap(), "--json", "--by", "file"]);
     std::fs::write(&after, &out.stdout).unwrap();
 
-    let out = ernest(&[
-        "diff",
-        before.to_str().unwrap(),
-        after.to_str().unwrap(),
-    ]);
+    let out = ernest(&["diff", before.to_str().unwrap(), after.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8(out.stdout).unwrap();
 
@@ -218,7 +222,10 @@ fn diff_reports_the_prose_a_change_removed() {
         text.contains(&format!("-{removed}")),
         "expected a -{removed} prose delta in:\n{text}"
     );
-    assert!(text.contains("0.0%"), "density should land at zero:\n{text}");
+    assert!(
+        text.contains("0.0%"),
+        "density should land at zero:\n{text}"
+    );
     assert!(text.contains("sample.php"), "should name the file:\n{text}");
 }
 
@@ -284,7 +291,10 @@ fn relocating_prose_into_a_document_does_not_move_the_headline() {
         "no code was touched"
     );
 
-    let (total_before, total_after) = (density(&before_json["total"]), density(&after_json["total"]));
+    let (total_before, total_after) = (
+        density(&before_json["total"]),
+        density(&after_json["total"]),
+    );
     assert!(
         (total_after - total_before).abs() < 0.005,
         "headline moved on a pure relocation: {total_before} -> {total_after}"
@@ -355,7 +365,10 @@ fn an_ernestignore_excludes_a_declared_corpus_and_says_so() {
     for scope in ["shared", "local", "all"] {
         let out = ernest(&[dir.to_str().unwrap(), "--scope", scope, "--json"]);
         let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-        assert_eq!(report["files_scanned"], 1, "corpus leaked at --scope {scope}");
+        assert_eq!(
+            report["files_scanned"], 1,
+            "corpus leaked at --scope {scope}"
+        );
     }
 }
 
@@ -387,7 +400,11 @@ fn scope_separates_the_second_brain_from_the_noise() {
     std::fs::write(dir.join(".git/info/exclude"), "NOTES.md\n").unwrap();
     std::fs::write(dir.join("README.md"), "# Shared\n\nShared prose.\n").unwrap();
     std::fs::write(dir.join("NOTES.md"), "# Local\n\nLocal prose.\n").unwrap();
-    std::fs::write(dir.join("cache/GENERATED.md"), "# Noise\n\nGenerated prose.\n").unwrap();
+    std::fs::write(
+        dir.join("cache/GENERATED.md"),
+        "# Noise\n\nGenerated prose.\n",
+    )
+    .unwrap();
 
     let paths = |args: &[&str]| {
         let mut argv = vec![dir.to_str().unwrap(), "--json", "--by", "file"];
@@ -461,7 +478,11 @@ fn gitignore_beats_a_local_exclude() {
 
     std::fs::write(dir.join(".git/info/exclude"), "/notes/\n").unwrap();
     std::fs::write(dir.join("notes/.gitignore"), "*\n").unwrap();
-    std::fs::write(dir.join("notes/EPHEMERAL.md"), "# Gone\n\nEphemeral prose.\n").unwrap();
+    std::fs::write(
+        dir.join("notes/EPHEMERAL.md"),
+        "# Gone\n\nEphemeral prose.\n",
+    )
+    .unwrap();
     std::fs::write(dir.join("notes/KEPT.md"), "# Kept\n\nDurable prose.\n").unwrap();
 
     let out = ernest(&[dir.to_str().unwrap(), "--json", "--by", "file"]);
@@ -503,7 +524,10 @@ fn an_extensionless_script_is_measured_by_its_shebang() {
     assert_eq!(report["files_skipped"], 1);
     assert_eq!(report["files"][0]["language"], "shell");
     // The shebang is uninteresting; only the comment counts as prose.
-    assert_eq!(report["files"][0]["prose_chars"], "#Whythisexists.".len() as u64);
+    assert_eq!(
+        report["files"][0]["prose_chars"],
+        "#Whythisexists.".len() as u64
+    );
 }
 
 #[test]
@@ -511,5 +535,8 @@ fn lang_narrows_the_measurement() {
     let out = ernest(&[fixtures().to_str().unwrap(), "--lang", "yaml"]);
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("yaml"), "{text}");
-    assert!(!text.contains("php"), "php should have been excluded:\n{text}");
+    assert!(
+        !text.contains("php"),
+        "php should have been excluded:\n{text}"
+    );
 }

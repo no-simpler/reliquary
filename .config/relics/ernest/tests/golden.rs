@@ -19,7 +19,9 @@ fn fixtures() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let mut found = Vec::new();
     for language in std::fs::read_dir(&root).expect("fixtures directory") {
-        let language = language.expect("readable fixture language directory").path();
+        let language = language
+            .expect("readable fixture language directory")
+            .path();
         if !language.is_dir() {
             continue;
         }

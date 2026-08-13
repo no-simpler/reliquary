@@ -146,13 +146,7 @@ pub fn measure(src: &str, spans: &[Span], default: Class) -> Counts {
 
 /// `measure`, restricted to `from..to`. Spans keep their absolute offsets, so a
 /// section is measured against the same classification as the whole file.
-pub fn measure_range(
-    src: &str,
-    spans: &[Span],
-    default: Class,
-    from: usize,
-    to: usize,
-) -> Counts {
+pub fn measure_range(src: &str, spans: &[Span], default: Class, from: usize, to: usize) -> Counts {
     let coverage = cover(spans, src.len(), default);
 
     let mut totals = [0u64; 3];
