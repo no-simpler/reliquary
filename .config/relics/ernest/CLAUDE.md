@@ -137,6 +137,20 @@ because the heading does, so it bills as prose along with list markers and
 blockquote markers. Table cells stay prose, which leaves turning a paragraph
 into a table rewarded by the characters it saves and by nothing else.
 
+### Prose about the code, not text in general
+
+JSX text — the `Hello world` in `<p>Hello world</p>` — is **code**. It needs no
+rule to make it so: nothing names it, so it falls to the source default, which
+is the wanted answer. Interface copy is the product rather than a description of
+it. It is not re-derivable on demand, it is not paid for on a context load in
+the way an explanation is, and it sits on the same side of the line as any other
+string literal. A comment *inside* the markup arrives as an ordinary `comment`
+and is prose like any other.
+
+This is the same line the Markdown table runs along, and the same line that
+makes a wiki a category error for the headline: ernest measures prose *about*
+code, not text as such.
+
 ## Architecture
 
 Byte-span classification, not line bucketing — which is what tree-sitter hands
@@ -181,8 +195,29 @@ a path, `.gitignore` wins and the file is noise.
 --scope all      plus gitignored files
 ```
 
-Dependency and build directories are excluded at every level, so widening the
-scope cannot drag `vendor/` back in.
+**Dependency and build output is the repository's declaration to make, not
+ernest's to assume.** `node_modules`, `vendor` and `target` are not named
+anywhere in the walk; `.gitignore` is what excludes them, which is what it is
+for. A second, hidden list would answer a question the repository has already
+answered, and would make `--scope all` quietly not do what it says.
+
+So `--scope all` means all. On a PHP repository with `vendor/` on disk that is
+67,989 files rather than 3,022, and a figure dominated by code nobody here
+wrote. The levers for not wanting that are the default scope and a declared
+`.ernestignore` — both of them visible.
+
+Two consequences worth holding on to:
+
+- **The walk sets `require_git(false)`.** Left at the crate's default, a
+  `.gitignore` with no `.git` beside it is inert — and that is exactly the shape
+  of a yadm-managed tree, where the work tree is `$HOME` and the git dir lives
+  elsewhere. This repository is one, so its own `/target` rule would have gone
+  unread and the delegation would have failed in the tree ernest was written in.
+- **The VCS directory is the one exclusion that cannot be delegated.** git keeps
+  `.git` out structurally rather than by rule — `git check-ignore .git` says
+  nothing — and the walk sets `hidden(false)` on purpose, because dotfiles are
+  the subject here. Without `VCS_DIRS`, a repository's `.git/hooks/post-commit`
+  reads as ordinary shell source.
 
 ### `.ernestignore`
 
@@ -233,8 +268,16 @@ pub static YAML: Profile = Profile {
     comment_frame: &["#"],
     annotation_line: &[],
     generated_regions: &[],
+    pragma_prefixes: &["yaml-language-server:", "yamllint ", "prettier-ignore"],
 };
 ```
+
+`pragma_prefixes` holds the directives that language's toolchain produces. They
+belong to the profile rather than to a global, so one language's linter cannot
+reclassify another language's comment — a YAML file mentioning `phpcs:` is
+talking about PHP, not obeying it. Only what genuinely reaches every format —
+an SPDX identifier, an editor modeline — goes in `UNIVERSAL_PRAGMA_PREFIXES`,
+and that list is closed.
 
 `interpreters` names the shebang basenames identifying a script that carries no
 extension. A file that has one is never second-guessed: an extension is the
@@ -256,6 +299,21 @@ Then add the grammar crate to `Cargo.toml`, and a fixture under
 `tests/fixtures/<language>/` with the adversarial cases for that format — the
 strings a regex-based classifier would misread. Write a bespoke `Analyzer` only
 when a profile genuinely cannot express the format.
+
+### One language may own more than one profile
+
+`language` is what the table reports, not what the registry is keyed on. When a
+dialect needs a second grammar but is not a second language, give both profiles
+the same `language` and let `aggregate.rs` fold them into one row — it keys on
+that string. `TYPESCRIPT` and `TSX` are the case: tree-sitter ships two grammars
+because `<T>x` is a type assertion in TypeScript and an element in TSX, and
+forcing the `.tsx` fixture through the plain grammar produces 17 `ERROR` nodes.
+That is a fact about parsers, not a distinction a reader of the breakdown wants.
+
+Lookups by extension stay unambiguous. Lookups by *name* — `--lang`, and the
+`kinds` example's `--lang` — take the first profile carrying it, so list the
+dialect that needs no special grammar first in `PROFILES`, and give `kinds` a
+path rather than a `--lang` when the extension can choose.
 
 To find a grammar's node kinds, print the tree for a sample; the kinds are
 whatever `Node::kind()` returns, anonymous tokens (`---`) included. The kinds a
@@ -305,7 +363,10 @@ wrong answer is still wrong.
   denominator and pulls the figure toward whichever cohort *is* covered — a
   repository whose only covered format is Markdown reads as
   documentation-dominated, not as unmeasured. Writing the rust and toml
-  profiles moved this repository from 82.5% to 34.3% with no text changing. The
+  profiles moved this repository from 82.5% to 34.3% with no text changing, and
+  the javascript and typescript profiles took an Angular front-end from 6.3% to
+  0.3% — the first figure was the density of the 46,425 characters of Markdown
+  and YAML that survived the gap, in a repository holding 6.5 million. The
   report tallies skipped files by extension so the gap is visible and names the
   profile to write next; the format roadmap in `TODO.md` is the queue for
   closing it.
@@ -317,6 +378,13 @@ wrong answer is still wrong.
   reaching it is not worth losing the pragma rule that listing buys.
 - An annotation line carrying trailing prose (`@deprecated Use Foo instead.`) is
   billed wholly as code. Splitting mid-line is possible; it was not worth v1.
+- A pragma is recognised from a comment's **first non-empty line only**, and it
+  then reclassifies the node whole. So `// @ts-expect-error` is uninteresting,
+  while the same directive buried mid-docblock stays code. Both readings are
+  defensible and the first line is where these are actually written.
+- JavaScript's Annex B `<!--` line comment is named as prose but cannot appear
+  in a fixture: it is script-only syntax, so it errors beside an `export`. The
+  unit test carries it instead.
 - A fully annotated docblock slightly *dilutes* density, since annotations count
   as code. The alternative makes the metric fight PHPStan.
 - Density does not compare across languages — brace-heavy languages read lower.

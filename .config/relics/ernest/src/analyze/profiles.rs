@@ -59,58 +59,27 @@ pub struct Profile {
     /// The pair and everything between it is uninteresting whatever it holds,
     /// because nobody authored it.
     pub generated_regions: &'static [(&'static str, &'static str)],
+    /// Bodies opening with one of these are this language's tooling directives:
+    /// machine-consumed, and unavoidable once you want the tooling. The whole
+    /// node becomes uninteresting.
+    ///
+    /// A language's directives belong to its language. Held flat and global,
+    /// Rust attribute syntax only Rust can produce would be matched against a
+    /// YAML comment, and the list only grows — every added format brings its
+    /// linters with it. `UNIVERSAL_PRAGMA_PREFIXES` carries the few that really
+    /// are everyone's.
+    pub pragma_prefixes: &'static [&'static str],
 }
 
-/// Bodies opening with one of these are tooling directives, not prose:
-/// machine-consumed, and unavoidable once you want the tooling. The whole node
-/// becomes uninteresting.
+/// The directives that belong to no single language, because the tool consuming
+/// them reads every file regardless of format: a licence identifier, an editor
+/// modeline, an editorconfig-checker directive. Tested for every profile,
+/// alongside whatever that profile declares for itself.
 ///
-/// Most arrive as a comment. Rust spells the same thing as syntax, which is why
-/// the attribute kinds are named in `RUST.code_nodes` — a directive is the same
-/// directive whichever vehicle a language gives it.
-pub const PRAGMA_PREFIXES: &[&str] = &[
-    "yaml-language-server:",
-    "yamllint ",
-    "phpcs:",
-    "phpstan-",
-    "psalm-",
-    "@phpcs",
-    "@phpstan-",
-    "@psalm-",
-    "noqa",
-    "shellcheck ",
-    "SPDX-License-Identifier:",
-    "vim:",
-    "type:",
-    "editorconfig-checker-",
-    "prettier-ignore",
-    "eslint-disable",
-    "TOC",
-    "/TOC",
-    "rumdl-disable",
-    "rumdl-enable",
-    "markdownlint-disable",
-    "markdownlint-enable",
-    "vale off",
-    "vale on",
-    ":schema",
-    // Rust lint and format attributes. `cfg_attr` is deliberately absent:
-    // `#![cfg_attr(test, deny(warnings))]` is a lint directive and
-    // `#![cfg_attr(docsrs, feature(doc_cfg))]` is a feature gate, and a prefix
-    // cannot tell them apart — so both stay code.
-    "#[allow(",
-    "#![allow(",
-    "#[expect(",
-    "#![expect(",
-    "#[deny(",
-    "#![deny(",
-    "#[warn(",
-    "#![warn(",
-    "#[forbid(",
-    "#![forbid(",
-    "#[rustfmt::skip",
-    "#![rustfmt::skip",
-];
+/// Keep this list closed. Anything a particular language's toolchain produces
+/// goes on that language's profile, where it cannot reach a comment in another.
+pub const UNIVERSAL_PRAGMA_PREFIXES: &[&str] =
+    &["SPDX-License-Identifier:", "vim:", "editorconfig-checker-"];
 
 pub static PHP: Profile = Profile {
     language: "php",
@@ -127,6 +96,16 @@ pub static PHP: Profile = Profile {
     comment_frame: &["/**", "*/", "/*", "//", "*", "#"],
     annotation_line: &["@"],
     generated_regions: &[],
+    // The static analysers, in both the vehicles PHP gives them: a plain
+    // comment and an annotation inside a docblock.
+    pragma_prefixes: &[
+        "phpcs:",
+        "phpstan-",
+        "psalm-",
+        "@phpcs",
+        "@phpstan-",
+        "@psalm-",
+    ],
 };
 
 pub static YAML: Profile = Profile {
@@ -144,6 +123,7 @@ pub static YAML: Profile = Profile {
     comment_frame: &["#"],
     annotation_line: &[],
     generated_regions: &[],
+    pragma_prefixes: &["yaml-language-server:", "yamllint ", "prettier-ignore"],
 };
 
 /// POSIX sh and bash, which is what tree-sitter-bash declares and parses
@@ -178,6 +158,7 @@ pub static SHELL: Profile = Profile {
     comment_frame: &["#"],
     annotation_line: &[],
     generated_regions: &[],
+    pragma_prefixes: &["shellcheck "],
 };
 
 /// There is no plain `comment` kind here. The grammar defines one, but `extras`
@@ -211,6 +192,27 @@ pub static RUST: Profile = Profile {
     comment_frame: &["///", "//!", "//", "/**", "/*!", "/*", "*/", "*"],
     annotation_line: &[],
     generated_regions: &[],
+    // Lint and format attributes — syntax rather than comments, which is why
+    // the attribute kinds are named as `code_nodes` above: a directive is the
+    // same directive whichever vehicle a language gives it.
+    //
+    // `cfg_attr` is deliberately absent: `#![cfg_attr(test, deny(warnings))]`
+    // is a lint directive and `#![cfg_attr(docsrs, feature(doc_cfg))]` is a
+    // feature gate, and a prefix cannot tell them apart — so both stay code.
+    pragma_prefixes: &[
+        "#[allow(",
+        "#![allow(",
+        "#[expect(",
+        "#![expect(",
+        "#[deny(",
+        "#![deny(",
+        "#[warn(",
+        "#![warn(",
+        "#[forbid(",
+        "#![forbid(",
+        "#[rustfmt::skip",
+        "#![rustfmt::skip",
+    ],
 };
 
 /// One `comment` kind, reachable anywhere the grammar allows an extra —
@@ -240,6 +242,122 @@ pub static TOML: Profile = Profile {
     comment_frame: &["#"],
     annotation_line: &[],
     generated_regions: &[],
+    pragma_prefixes: &[":schema"],
+};
+
+/// Shared by the three ECMAScript profiles, which differ only in the grammar
+/// they load. Longest first, as in `RUST`: `//` ahead of `///` would leave a
+/// slash behind on a triple-slash directive.
+///
+/// `#` must stay out of it. JavaScript has no `#` comment — what it has is a
+/// private class field, and stripping `#` would read `this.#count` as a body.
+const WEB_COMMENT_FRAME: &[&str] = &["///", "/**", "//", "/*", "*/", "*"];
+const WEB_PROSE_NODES: &[&str] = &["comment", "html_comment"];
+
+/// The toolchain directives every ECMAScript dialect shares, since the linters,
+/// formatters and bundlers do not distinguish between them either.
+///
+/// Deliberately absent: eslint's `/* global foo */` and `/* globals foo */`. A
+/// prefix that short would swallow any comment opening with the English word.
+const WEB_PRAGMA_PREFIXES: &[&str] = &[
+    // Covers -disable, -disable-next-line, -disable-line, -enable and -env.
+    "eslint-",
+    // Covers -ignore, -expect-error, -nocheck and -check. Reached before
+    // `annotation_line` sees the leading `@`, so it lands as a directive
+    // rather than as an annotation.
+    "@ts-",
+    // A triple-slash compiler directive, once the frame has stripped the `///`.
+    "<reference",
+    "prettier-ignore",
+    "biome-ignore",
+    "tslint:",
+    "istanbul ignore",
+    "c8 ignore",
+    "v8 ignore",
+    "webpackChunkName:",
+    "@vite-ignore",
+];
+
+/// One `comment` kind carries `//`, `/* */` and `/** */` alike, so a JSDoc block
+/// is counted whole exactly as a PHP docblock is. `html_comment` is the Annex B
+/// `<!--` line comment — rare, but genuinely a comment, and naming it costs one
+/// word against a false negative.
+///
+/// JSDoc's `@param` is PHPDoc's convention verbatim, so `annotation_line`
+/// transfers unchanged. Decorators are untouched by it: they are syntax rather
+/// than comment bodies, and the rule only runs inside a prose node.
+///
+/// Nothing is uninteresting by node kind — there is no counterpart to `<?php`,
+/// and the `hash_bang_line` a `#!/usr/bin/env node` produces is handled for
+/// every language in `analyze::classify`.
+pub static JAVASCRIPT: Profile = Profile {
+    language: "javascript",
+    language_fn: tree_sitter_javascript::LANGUAGE,
+    // JSX needs no second grammar here: this one carries it natively, which is
+    // what separates JavaScript from TypeScript below.
+    extensions: &["js", "mjs", "cjs", "jsx"],
+    filenames: &[],
+    interpreters: &["node", "bun"],
+    cohort: Cohort::Source,
+    default_class: Class::Code,
+    prose_nodes: WEB_PROSE_NODES,
+    code_nodes: &[],
+    ignored_nodes: &[],
+    comment_frame: WEB_COMMENT_FRAME,
+    annotation_line: &["@"],
+    generated_regions: &[],
+    pragma_prefixes: WEB_PRAGMA_PREFIXES,
+};
+
+/// TypeScript without JSX. The grammar rejects it deliberately, because `<T>x`
+/// is a type assertion here — which is why tree-sitter ships two, and why `TSX`
+/// below exists at all.
+pub static TYPESCRIPT: Profile = Profile {
+    language: "typescript",
+    language_fn: tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
+    extensions: &["ts", "mts", "cts"],
+    filenames: &[],
+    // None, and that is a rule rather than an omission: `ts-node` and `tsx`
+    // pick their loader from the file extension, so an extensionless
+    // TypeScript file is not a thing that runs.
+    interpreters: &[],
+    cohort: Cohort::Source,
+    default_class: Class::Code,
+    prose_nodes: WEB_PROSE_NODES,
+    code_nodes: &[],
+    ignored_nodes: &[],
+    comment_frame: WEB_COMMENT_FRAME,
+    annotation_line: &["@"],
+    generated_regions: &[],
+    pragma_prefixes: WEB_PRAGMA_PREFIXES,
+};
+
+/// The same language as `TYPESCRIPT` and it reports as such — `language` is
+/// deliberately shared, because the split is an artifact of needing a second
+/// grammar and not a distinction the table should carry. `aggregate.rs` keys
+/// its rows on `language`, so the two fold into one row.
+///
+/// `jsx_text` — the `Hello world` in `<p>Hello world</p>` — is named by no rule
+/// and so falls to `default_class`, which is `Code`. That is the wanted answer.
+/// Interface copy is the product, not prose describing code: it is not
+/// re-derivable on demand, and it sits on the same side of the line as any
+/// other string literal. A comment *inside* JSX arrives as an ordinary
+/// `comment` under a `jsx_expression`, and is prose like any other.
+pub static TSX: Profile = Profile {
+    language: "typescript",
+    language_fn: tree_sitter_typescript::LANGUAGE_TSX,
+    extensions: &["tsx"],
+    filenames: &[],
+    interpreters: &[],
+    cohort: Cohort::Source,
+    default_class: Class::Code,
+    prose_nodes: WEB_PROSE_NODES,
+    code_nodes: &[],
+    ignored_nodes: &[],
+    comment_frame: WEB_COMMENT_FRAME,
+    annotation_line: &["@"],
+    generated_regions: &[],
+    pragma_prefixes: WEB_PRAGMA_PREFIXES,
 };
 
 /// The polarity inverts here: prose is the default and code is what gets named.
@@ -277,9 +395,36 @@ pub static MARKDOWN: Profile = Profile {
     comment_frame: &["<!--", "-->"],
     annotation_line: &[],
     generated_regions: &[("TOC", "/TOC")],
+    // The prose linters, plus the region markers themselves: an opener that
+    // finds no closer still has to read as a directive rather than as prose.
+    pragma_prefixes: &[
+        "TOC",
+        "/TOC",
+        "rumdl-disable",
+        "rumdl-enable",
+        "markdownlint-disable",
+        "markdownlint-enable",
+        "vale off",
+        "vale on",
+        "prettier-ignore",
+    ],
 };
 
-pub static PROFILES: &[&Profile] = &[&PHP, &RUST, &SHELL, &TOML, &YAML, &MARKDOWN];
+/// Every profile, in the order a lookup by name resolves them — which is why
+/// `TYPESCRIPT` leads `TSX` despite sharing a `language`: a search for the name
+/// should land on the dialect that does not need the JSX grammar. Lookups by
+/// extension are unambiguous either way.
+pub static PROFILES: &[&Profile] = &[
+    &JAVASCRIPT,
+    &PHP,
+    &RUST,
+    &SHELL,
+    &TOML,
+    &TYPESCRIPT,
+    &TSX,
+    &YAML,
+    &MARKDOWN,
+];
 
 /// Strip comment sigils and surrounding whitespace to expose a line's body,
 /// so pragma and annotation prefixes can be tested against real content.

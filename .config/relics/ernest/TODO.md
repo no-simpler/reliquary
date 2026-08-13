@@ -14,8 +14,13 @@ The headline sums every cohort, so a language ernest cannot read does not
 abstain from the figure — it skews it, by dropping out of the denominator while
 the covered cohorts keep their weight. Adding rust and toml moved this
 repository from 82.5% to 34.3% without a character changing; the first figure
-was measuring the Markdown that survived the gap. Coverage is therefore
-load-bearing, not garnish.
+was measuring the Markdown that survived the gap. Adding javascript and
+typescript took an Angular front-end from 6.3% to 0.3% — 99.3% of that
+repository had been invisible. Coverage is therefore load-bearing, not garnish.
+
+A census is a snapshot and ages badly: this file rated javascript/typescript
+Tier 2 on a count of **7 files**, against the ~7,000 that were actually there.
+Re-count before trusting an ordering below.
 
 Adding one is a `Profile` constant in `src/analyze/profiles.rs` listed in
 `PROFILES`, the grammar crate in `Cargo.toml`, and a fixture under
@@ -53,10 +58,13 @@ tracked set — evidence for the ordering, not targets.
   So it needs position, not kind — first statement of a module or of a
   `function_definition` / `class_definition` body — which is a rule the
   `Profile` shape cannot express and the first real case for a bespoke
-  `Analyzer`. `#` comments and the `noqa` pragma already work; `# type:` is
-  already a pragma prefix. Type annotations and decorators are code.
-- **html** (20), **css** / **scss** (11), **javascript** / **typescript** (7,
-  plus the benefactor front-ends).
+  `Analyzer`. `#` comments work already; `noqa` and `type:` are the profile's
+  `pragma_prefixes` when it lands, having come out of the old global list with
+  nowhere to go. Type annotations and decorators are code.
+- **html** (307 in one Angular front-end alone) and **css** / **scss** (286
+  there). Both raise the question the JSX text answered — body copy in an
+  `.html` file is the product, not prose about code — and html has a second one
+  the others do not: whether it belongs in `Docs` or `Source`.
 - **neon** (5) — PHPStan configuration. YAML-adjacent; check whether the YAML
   grammar reads it acceptably before reaching for another crate.
 
@@ -118,14 +126,13 @@ every profile that borrows a neighbouring dialect's grammar. The report already
 tallies files it could not *identify*; it should also tally files it could not
 *read*.
 
-## Per-profile pragma prefixes
-
-`PRAGMA_PREFIXES` is a flat global that now carries Rust attribute syntax only
-Rust can produce, alongside `phpcs:`, `shellcheck ` and `yaml-language-server:`.
-Nothing collides today and the cross-language matching is harmless, but the list
-is the wrong shape: a language's directives belong to its profile. Moving them
-is mechanical, and the moment to do it is when a prefix in one language would
-misread a comment in another.
+Swept by hand once, when `tree-sitter-typescript` went in a release behind its
+JavaScript sibling and the lag looked like a risk: **0 of 7,048** hand-written
+files across the benefactor front-ends produced an `ERROR` node. The only eight
+that did were minified vendor bundles, every one of them already gitignored and
+so out of scope by the project's own declaration. Good news, and an argument for
+the feature rather than against it — that took a shell loop over
+`cargo run --example kinds`, which is not something anyone will do twice.
 
 ---
 

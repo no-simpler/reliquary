@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use tree_sitter::{Node, Parser, Tree};
 
 use crate::span::{Class, Counts, Span, measure, measure_range};
-use profiles::{PRAGMA_PREFIXES, Profile, comment_body};
+use profiles::{Profile, UNIVERSAL_PRAGMA_PREFIXES, comment_body};
 
 /// Classify `src` under `profile` and roll the result up into counts.
 pub fn analyze_file(src: &str, profile: &Profile) -> Result<Counts> {
@@ -189,7 +189,9 @@ fn marker<'a>(span: &Span, profile: &Profile, src: &'a str) -> &'a str {
     comment_body(text.lines().next().unwrap_or(""), profile.comment_frame)
 }
 
-/// True when the comment opens with a machine-consumed directive.
+/// True when the comment opens with a machine-consumed directive — one the
+/// profile declares for its own language, or one of the few that belong to
+/// every language alike.
 fn is_pragma(text: &str, profile: &Profile) -> bool {
     let Some(first) = line_offsets(text)
         .map(|(_, line)| comment_body(line, profile.comment_frame))
@@ -197,8 +199,9 @@ fn is_pragma(text: &str, profile: &Profile) -> bool {
     else {
         return false;
     };
-    PRAGMA_PREFIXES
+    UNIVERSAL_PRAGMA_PREFIXES
         .iter()
+        .chain(profile.pragma_prefixes)
         .any(|prefix| first.starts_with(prefix))
 }
 
@@ -224,7 +227,7 @@ fn line_offsets(text: &str) -> impl Iterator<Item = (usize, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use profiles::{MARKDOWN, PHP, RUST, SHELL, TOML, YAML};
+    use profiles::{JAVASCRIPT, MARKDOWN, PHP, RUST, SHELL, TOML, TSX, TYPESCRIPT, YAML};
 
     fn counts(src: &str, profile: &Profile) -> Counts {
         analyze_file(src, profile).unwrap()
@@ -397,6 +400,103 @@ mod tests {
     }
 
     #[test]
+    fn slashes_that_are_javascript_syntax_are_not_comments() {
+        for src in [
+            "const u = \"http://example.com/#frag\";\n",
+            "const t = `${x} // not a comment`;\n",
+            "const n = `outer ${`inner /* nope */`} done`;\n",
+            "const r = /https?:\\/\\/e\\.com\\/[*]/;\n",
+            "const c = /[/*]+/g;\n",
+            "const q = a / b / c;\n",
+            "const e = \"escaped \\\" then // not a comment\";\n",
+        ] {
+            assert_eq!(counts(src, &JAVASCRIPT).prose_chars, 0, "{src}");
+        }
+    }
+
+    /// A private field opens with `#` and is not a comment, which is why `#` is
+    /// kept out of the comment frame.
+    #[test]
+    fn a_private_class_field_is_not_a_comment() {
+        let c = counts("class C {\n    #count = 0; // a note\n}\n", &JAVASCRIPT);
+        assert_eq!(c.prose_chars, "//anote".len() as u64);
+        assert_eq!(c.code_chars, "classC{#count=0;}".len() as u64);
+    }
+
+    /// JSDoc is PHPDoc's convention in another language, so the annotation rule
+    /// transfers verbatim.
+    #[test]
+    fn a_jsdoc_annotation_line_is_code_and_its_description_is_prose() {
+        let src = "/**\n * Resolves a tenant.\n * @param {number} id\n */\nconst x = 1;\n";
+        let c = counts(src, &JAVASCRIPT);
+        assert_eq!(
+            c.prose_chars,
+            "/**".len() as u64 + "*Resolvesatenant.".len() as u64 + "*/".len() as u64
+        );
+        assert_eq!(
+            c.code_chars,
+            "*@param{number}id".len() as u64 + "constx=1;".len() as u64
+        );
+    }
+
+    /// The Annex B line comment. It is script-only syntax, so it cannot sit in
+    /// a fixture beside an `export` — but it is a comment, and it is named.
+    #[test]
+    fn an_annex_b_html_comment_is_prose() {
+        let c = counts("<!-- a legacy comment\nvar x = 1;\n", &JAVASCRIPT);
+        assert_eq!(c.prose_chars, "<!--alegacycomment".len() as u64);
+        assert_eq!(c.code_chars, "varx=1;".len() as u64);
+    }
+
+    #[test]
+    fn a_javascript_tooling_directive_is_uninteresting_not_prose() {
+        let eslint = counts("// eslint-disable-next-line no-undef\nx();\n", &JAVASCRIPT);
+        assert_eq!(eslint.prose_chars, 0);
+        assert_eq!(
+            eslint.ignored_chars,
+            "//eslint-disable-next-lineno-undef".len() as u64
+        );
+
+        let coverage = counts("/* istanbul ignore next */\nfunction f() {}\n", &JAVASCRIPT);
+        assert_eq!(coverage.prose_chars, 0);
+    }
+
+    /// `@ts-` reaches the pragma rule ahead of the annotation rule, so a
+    /// compiler directive is uninteresting rather than code.
+    #[test]
+    fn a_typescript_directive_is_uninteresting_not_prose() {
+        let ignore = counts(
+            "// @ts-expect-error checked at runtime\nx();\n",
+            &TYPESCRIPT,
+        );
+        assert_eq!(ignore.prose_chars, 0);
+        assert_eq!(ignore.code_chars, "x();".len() as u64);
+
+        // The triple-slash form, which is why `///` leads the comment frame.
+        let reference = counts(
+            "/// <reference types=\"node\" />\nconst x = 1;\n",
+            &TYPESCRIPT,
+        );
+        assert_eq!(reference.prose_chars, 0);
+        assert_eq!(
+            reference.ignored_chars,
+            "///<referencetypes=\"node\"/>".len() as u64
+        );
+    }
+
+    /// Interface copy is the product, not prose describing code — so it lands
+    /// on the same side of the line as any other string literal. A comment
+    /// inside the markup is still a comment.
+    #[test]
+    fn jsx_text_is_code_and_a_comment_inside_jsx_is_prose() {
+        let copy = counts("const A = () => <p>Reticulating splines</p>;\n", &TSX);
+        assert_eq!(copy.prose_chars, 0);
+
+        let commented = counts("const A = () => <p>{/* note */}text</p>;\n", &TSX);
+        assert_eq!(commented.prose_chars, "/*note*/".len() as u64);
+    }
+
+    #[test]
     fn hashes_inside_toml_strings_are_not_comments() {
         for src in [
             "url = \"https://e.com/#frag\"\n",
@@ -442,6 +542,41 @@ mod tests {
         let c = counts("# yaml-language-server: $schema=./x.json\nkey: 1\n", &YAML);
         assert_eq!(c.prose_chars, 0);
         assert_eq!(c.ignored_chars, 38);
+    }
+
+    /// The point of moving the prefixes onto the profile: one language's
+    /// directives cannot reach another language's comments. A YAML file
+    /// mentioning `phpcs:` is talking about PHP, not obeying it.
+    #[test]
+    fn one_languages_directive_is_another_languages_prose() {
+        let borrowed = counts("# phpcs:disable is a PHP thing\nkey: 1\n", &YAML);
+        assert_eq!(borrowed.ignored_chars, 0);
+        assert!(borrowed.prose_chars > 0);
+
+        // And the reverse: YAML's own directive still lands.
+        let owned = counts("# yaml-language-server: $schema=./x.json\nkey: 1\n", &YAML);
+        assert_eq!(owned.prose_chars, 0);
+        assert!(owned.ignored_chars > 0);
+    }
+
+    /// The few that really do belong to every language keep working everywhere,
+    /// which is what earns them a place outside any one profile.
+    #[test]
+    fn a_universal_directive_is_uninteresting_in_every_language() {
+        let yaml = counts("# SPDX-License-Identifier: MIT\nkey: 1\n", &YAML);
+        assert_eq!(
+            yaml.ignored_chars,
+            "#SPDX-License-Identifier:MIT".len() as u64
+        );
+
+        let shell = counts("# SPDX-License-Identifier: MIT\nx=1\n", &SHELL);
+        assert_eq!(
+            shell.ignored_chars,
+            "#SPDX-License-Identifier:MIT".len() as u64
+        );
+
+        let toml = counts("# vim: set ft=toml:\nkey = 1\n", &TOML);
+        assert_eq!(toml.ignored_chars, "#vim:setft=toml:".len() as u64);
     }
 
     #[test]

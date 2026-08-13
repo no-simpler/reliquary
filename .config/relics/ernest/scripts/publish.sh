@@ -6,7 +6,7 @@
 # it is built. The entrypoint points into target/release/, which is absent on a
 # fresh machine, and relic::publish guards each entrypoint with [[ -e ]] — the
 # dangling link would be skipped and bootstrap would report "no entrypoints
-# published". So: build if needed, wire the entrypoint, then publish.
+# published". So: build, wire the entrypoint, then publish.
 #
 # The entrypoint is deliberately not version-controlled. It names a build
 # artifact, so it belongs with target/ — and a symlink resolving to a compiled
@@ -17,10 +17,12 @@ set -euo pipefail
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 binary="$dir/target/release/ernest"
 
-if [[ ! -x "$binary" ]]; then
-    printf 'relic[ernest]: building %s\n' "$binary"
-    ( cd "$dir" && cargo build --release --quiet )
-fi
+# Unconditionally, not only when the binary is missing. Guarding on absence
+# publishes whatever was built last — a source change then ships as a stale
+# binary that reports the old feature set, which is silent and wrong. cargo is
+# incremental, so an up-to-date tree makes this a no-op.
+printf 'relic[ernest]: building %s\n' "$binary"
+( cd "$dir" && cargo build --release --quiet )
 
 mkdir -p "$dir/entrypoints"
 ln -sfn ../target/release/ernest "$dir/entrypoints/ernest"

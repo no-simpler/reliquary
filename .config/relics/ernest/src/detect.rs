@@ -108,6 +108,29 @@ mod tests {
         assert_eq!(language_of("stubs/redis.phpstub"), Some("php"));
     }
 
+    /// TSX is TypeScript and reports as such — the second grammar is an
+    /// artifact of JSX and the angle-bracket type assertion being unable to
+    /// share one, not a distinction the breakdown should carry.
+    #[test]
+    fn recognises_the_ecmascript_extensions() {
+        for path in ["app.js", "app.mjs", "app.cjs", "Banner.jsx"] {
+            assert_eq!(language_of(path), Some("javascript"), "{path}");
+        }
+        for path in ["app.ts", "app.mts", "app.cts", "Panel.tsx", "types.d.ts"] {
+            assert_eq!(language_of(path), Some("typescript"), "{path}");
+        }
+    }
+
+    /// The two grammars are not interchangeable, which is what makes the split
+    /// necessary rather than tidy.
+    #[test]
+    fn tsx_and_typescript_resolve_to_different_grammars() {
+        let ts = profile_for(Path::new("app.ts")).unwrap();
+        let tsx = profile_for(Path::new("app.tsx")).unwrap();
+        assert_eq!(ts.language, tsx.language);
+        assert!(!std::ptr::eq(ts, tsx));
+    }
+
     /// A shell dotfile carries neither an extension nor a shebang, so its name
     /// is the only thing left to go on.
     #[test]

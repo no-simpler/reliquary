@@ -199,6 +199,79 @@ fn the_adversarial_toml_fixture_finds_prose_without_false_positives() {
 }
 
 #[test]
+fn the_adversarial_javascript_fixture_finds_prose_without_false_positives() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/javascript/adversarial.js");
+    let (_, src, counts) = measure(&path);
+
+    for decoy in [
+        "\"http://not-a-comment/#frag\"",
+        "\"/* not a comment */\"",
+        "`${id} // not a comment`",
+        "/https?:\\/\\/example\\.com\\/[*]/",
+        "/[/*]+/g",
+        "id / 2 / 3",
+        "this.#count",
+    ] {
+        assert!(src.contains(decoy), "fixture lost its decoy: {decoy}");
+    }
+    assert!(counts.prose_chars > 0, "found no prose at all");
+    // The shebang, the SPDX identifier, `@ts-check`, and the three linter and
+    // coverage directives.
+    assert_eq!(counts.ignored_lines, 6);
+}
+
+/// JSX text is the interface's copy rather than prose about the code, so it
+/// bills as code — and a comment inside the markup still bills as prose.
+///
+/// Asserted by shortening the copy rather than by a fixed number: what has to
+/// hold is that the characters move the *code* bucket and leave prose alone,
+/// and that survives every later edit to the fixture.
+#[test]
+fn the_adversarial_jsx_fixture_bills_markup_copy_as_code() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/javascript/adversarial.jsx");
+    let (profile, src, counts) = measure(&path);
+
+    let copy = "<h1>Reticulating splines</h1>";
+    assert!(src.contains(copy), "fixture lost its markup copy");
+    assert!(counts.prose_chars > 0, "the JSX comment is prose");
+
+    let shortened = src.replace(copy, "<h1>x</h1>");
+    let after = analyze_file(&shortened, profile).expect("analyzes");
+    assert_eq!(
+        counts.prose_chars, after.prose_chars,
+        "interface copy reached the prose bucket"
+    );
+    assert_eq!(
+        counts.code_chars - after.code_chars,
+        ("ReticulatingSplines".len() - 1) as u64,
+        "interface copy should bill as code, character for character"
+    );
+}
+
+#[test]
+fn the_adversarial_typescript_fixture_finds_prose_without_false_positives() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/typescript/adversarial.ts");
+    let (_, src, counts) = measure(&path);
+
+    for decoy in [
+        "\"http://not-a-comment/#frag\"",
+        "`${id} // not a comment`",
+        "/\\/\\*[^*]*\\*\\//g",
+        "id / 2 / 3",
+        "<string>(<unknown>await readFile(url, \"utf8\"))",
+        "`tenant-${string}`",
+    ] {
+        assert!(src.contains(decoy), "fixture lost its decoy: {decoy}");
+    }
+    assert!(counts.prose_chars > 0, "found no prose at all");
+    // The triple-slash reference, the SPDX identifier and `@ts-expect-error`.
+    assert_eq!(counts.ignored_lines, 3);
+}
+
+#[test]
 fn the_adversarial_shell_fixture_finds_prose_without_false_positives() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/shell/adversarial.sh");
     let (_, src, counts) = measure(&path);
