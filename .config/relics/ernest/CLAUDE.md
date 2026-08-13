@@ -131,7 +131,7 @@ src/
   detect.rs           path -> profile
   walk.rs             scope, provenance, ignore::WalkBuilder, default excludes
   aggregate.rs        file -> (cohort, provenance, language) -> report
-  report/             human, json, diff
+  report/             table, human, json, diff
 ```
 
 `Cohort` splits `Source` from `Docs` and the two are never summed; the headline

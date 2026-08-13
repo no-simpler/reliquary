@@ -3,6 +3,7 @@
 use crate::aggregate::{HEADLINE_COHORT, Report};
 use crate::span::Unit;
 
+use super::table::{Column, Table};
 use super::{percent, thousands};
 
 /// Rows shown before the rest are summarised away.
@@ -36,54 +37,61 @@ pub fn render(report: &Report) -> String {
     }
 
     out.push('\n');
-    out.push_str(&format!(
-        "  {:<7} {:<11} {:<10} {:>9} {:>12} {:>12} {:>7}\n",
-        "cohort", "provenance", "language", "density", "prose", "code", "files"
-    ));
+    let mut breakdown = Table::new(vec![
+        Column::left("cohort / language"),
+        Column::left("provenance"),
+        Column::right("density"),
+        Column::right("prose"),
+        Column::right("code"),
+        Column::right("files"),
+    ]);
     for cohort in &report.cohorts {
-        for language in &cohort.languages {
-            out.push_str(&format!(
-                "  {:<7} {:<11} {:<10} {:>9} {:>12} {:>12} {:>7}\n",
-                cohort.cohort,
-                language.provenance.label(),
-                language.language,
-                percent(language.density),
-                thousands(language.counts.prose(unit)),
-                thousands(language.counts.code(unit)),
-                thousands(language.files),
-            ));
-        }
-        if cohort.languages.len() > 1 {
-            out.push_str(&format!(
-                "  {:<7} {:<11} {:<10} {:>9} {:>12} {:>12} {:>7}\n",
-                cohort.cohort,
-                "total",
-                "",
+        // The roll-up leads its group and the languages indent under it, so the
+        // sum is never mistaken for one more row of the breakdown.
+        breakdown.push(
+            0,
+            vec![
+                cohort.cohort.clone(),
+                String::new(),
                 percent(cohort.density),
                 thousands(cohort.counts.prose(unit)),
                 thousands(cohort.counts.code(unit)),
                 thousands(cohort.files),
-            ));
+            ],
+        );
+        for language in &cohort.languages {
+            breakdown.push(
+                1,
+                vec![
+                    language.language.clone(),
+                    language.provenance.label().to_string(),
+                    percent(language.density),
+                    thousands(language.counts.prose(unit)),
+                    thousands(language.counts.code(unit)),
+                    thousands(language.files),
+                ],
+            );
         }
     }
+    out.push_str(&breakdown.render());
 
     out.push_str(&docs_line(report));
 
     if let Some(files) = &report.files {
         out.push('\n');
-        out.push_str(&format!(
-            "  {:<9} {:>10} {:>12}  {}\n",
-            "density", "prose", "code", "file"
-        ));
+        let mut table = rows_table("file");
         for file in files.iter().take(ROWS) {
-            out.push_str(&format!(
-                "  {:<9} {:>10} {:>12}  {}\n",
-                percent(file.density),
-                thousands(file.counts.prose(unit)),
-                thousands(file.counts.code(unit)),
-                file.path,
-            ));
+            table.push(
+                0,
+                vec![
+                    percent(file.density),
+                    thousands(file.counts.prose(unit)),
+                    thousands(file.counts.code(unit)),
+                    file.path.clone(),
+                ],
+            );
         }
+        out.push_str(&table.render());
         // Say what was left out; a truncated list that looks complete is worse
         // than no list.
         if files.len() > ROWS {
@@ -96,20 +104,19 @@ pub fn render(report: &Report) -> String {
 
     if let Some(sections) = &report.sections {
         out.push('\n');
-        out.push_str(&format!(
-            "  {:<9} {:>10} {:>12}  {}\n",
-            "density", "prose", "code", "section"
-        ));
+        let mut table = rows_table("section");
         for section in sections.iter().take(ROWS) {
-            out.push_str(&format!(
-                "  {:<9} {:>10} {:>12}  {}#{}\n",
-                percent(section.density),
-                thousands(section.counts.prose(unit)),
-                thousands(section.counts.code(unit)),
-                section.path,
-                section.section,
-            ));
+            table.push(
+                0,
+                vec![
+                    percent(section.density),
+                    thousands(section.counts.prose(unit)),
+                    thousands(section.counts.code(unit)),
+                    format!("{}#{}", section.path, section.section),
+                ],
+            );
         }
+        out.push_str(&table.render());
         if sections.len() > ROWS {
             out.push_str(&format!(
                 "  … {} more sections, ordered by prose; --json carries them all\n",
@@ -142,6 +149,17 @@ pub fn render(report: &Report) -> String {
     }
 
     out
+}
+
+/// The shape both drill-down views share: measurements first, then the key,
+/// which is long and of no fixed width.
+fn rows_table(key: &'static str) -> Table {
+    Table::new(vec![
+        Column::right("density"),
+        Column::right("prose"),
+        Column::right("code"),
+        Column::left(key),
+    ])
 }
 
 /// Documentation prose against the code it documents. A comparator for the

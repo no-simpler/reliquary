@@ -92,8 +92,9 @@ pub struct Views {
     pub by_section: bool,
 }
 
-/// Accumulated counts and file tally for one `(provenance, language)` row.
-type Rows = BTreeMap<(Provenance, &'static str), (Counts, u64)>;
+/// Accumulated counts and file tally for one `(language, provenance)` row,
+/// keyed in the order the report's columns read.
+type Rows = BTreeMap<(&'static str, Provenance), (Counts, u64)>;
 
 struct Outcome {
     path: PathBuf,
@@ -141,7 +142,7 @@ pub fn run(candidates: &[Candidate], unit: Unit, skipped: u64, views: Views) -> 
         let entry = by_cohort
             .entry(outcome.cohort)
             .or_default()
-            .entry((outcome.provenance, outcome.language))
+            .entry((outcome.language, outcome.provenance))
             .or_insert((Counts::default(), 0));
         entry.0.add(&outcome.counts);
         entry.1 += 1;
@@ -154,7 +155,7 @@ pub fn run(candidates: &[Candidate], unit: Unit, skipped: u64, views: Views) -> 
             let mut files = 0u64;
             let languages: Vec<LanguageReport> = rows
                 .into_iter()
-                .map(|((provenance, language), (counts, count))| {
+                .map(|((language, provenance), (counts, count))| {
                     totals.add(&counts);
                     files += count;
                     LanguageReport {

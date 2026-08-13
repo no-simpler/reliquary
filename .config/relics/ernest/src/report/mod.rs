@@ -1,9 +1,10 @@
 //! Presentation. `human` prints a report, `json` serialises one, `diff`
-//! compares two.
+//! compares two; `table` lays out the rows all of them share.
 
 pub mod diff;
 pub mod human;
 pub mod json;
+pub mod table;
 
 /// Thousands-separated integer, so six-figure character counts stay readable.
 pub fn thousands(n: u64) -> String {

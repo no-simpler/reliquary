@@ -32,6 +32,26 @@ fn reports_and_exits_clean() {
     assert!(text.contains("yaml"), "{text}");
 }
 
+/// A roll-up is a sum, not one more row of the breakdown, so it leads its group
+/// and the rows it sums indent under it.
+#[test]
+fn a_cohort_rolls_up_above_its_indented_languages() {
+    let out = ernest(&[fixtures().to_str().unwrap()]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+
+    let cohort = lines
+        .iter()
+        .position(|l| l.starts_with("  source"))
+        .unwrap_or_else(|| panic!("no source roll-up in:\n{text}"));
+    assert!(lines[cohort + 1].starts_with("    php"), "{text}");
+    assert!(lines[cohort + 2].starts_with("    yaml"), "{text}");
+    assert!(
+        !text.contains("total"),
+        "the roll-up no longer needs a label:\n{text}"
+    );
+}
+
 #[test]
 fn an_unreadable_path_is_an_error_not_a_verdict() {
     let out = ernest(&["/nonexistent-path-for-ernest-tests"]);
