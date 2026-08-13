@@ -1,0 +1,40 @@
+#:schema https://json.schemastore.org/cargo.json
+# Every `#` below that is not a comment. A `#` in a bare key is invalid TOML,
+# so there is deliberately none.
+
+title = "value # not a comment"
+hash = "#not a comment"
+url = "https://example.com/page#section"
+lit = 'C:\path\#raw'
+escaped = "a \" quote then # not a comment"
+"quoted#key" = 1
+'lit#key' = 2
+
+multi = """
+line with # inside
+and "quotes" too
+"""
+
+multilit = '''
+# also not a comment
+'''
+
+[package]
+# Between the header and its first pair.
+edition = "2024"                  # why this value
+when = 1979-05-27T07:32:00-08:00  # a real comment after an atomic token
+# And after the last pair.
+
+[palette]
+phys.color = "#ff0000"
+inline = { a = "x#y", b = 2 }
+arr = [
+  "a", # inside an array
+  "b#c",
+]
+
+[[products]]
+name = "one"
+
+[[products]]
+name = "two"

@@ -109,6 +109,12 @@ the file exists at all: `<?php`, a shebang, a YAML document marker, a tooling
 pragma. An annotation such as `@param` is avoidable (delete the docblock), and
 it is not prose, so it is **code**.
 
+A pragma is unavoidable *once you want the tooling*, and that holds whichever
+vehicle a language gives it. `# shellcheck disable=…`, `// phpcs:disable` and
+`#[allow(dead_code)]` are one rule, not two, so a Rust lint or format attribute
+is uninteresting while `#[derive]`, `#[cfg]` and `#[serde]` carry meaning and
+are code.
+
 ### Delimiters
 
 tree-sitter puts a comment's delimiters inside its node span, and they stay
@@ -234,6 +240,12 @@ pub static YAML: Profile = Profile {
 extension. A file that has one is never second-guessed: an extension is the
 author's declaration of format, and only its absence justifies opening the file.
 
+Opening with `#!` is not what makes a shebang — naming an interpreter by
+absolute path is, which is why `detect::shebang_len` is the predicate and not a
+string test. Rust spells an inner attribute `#![deny(missing_docs)]`, the most
+common first line in the language, and writing that off as an unavoidable header
+would be silent and wrong.
+
 `generated_regions` pairs the pragma bodies that open and close a region a tool
 rewrites — `<!-- TOC -->` and `<!-- /TOC -->`. The pair and everything between it
 is uninteresting whatever it holds, because nobody authored it. The rule is a
@@ -245,8 +257,15 @@ Then add the grammar crate to `Cargo.toml`, and a fixture under
 strings a regex-based classifier would misread. Write a bespoke `Analyzer` only
 when a profile genuinely cannot express the format.
 
-To find a grammar's node kinds, parse a sample and print the tree; the kinds are
-whatever `Node::kind()` returns, anonymous tokens (`---`) included.
+To find a grammar's node kinds, print the tree for a sample; the kinds are
+whatever `Node::kind()` returns, anonymous tokens (`---`) included. The kinds a
+grammar's `grammar.js` suggests are not always the kinds it produces — Rust
+defines a `comment` rule that is unreachable — so read the tree, not the source:
+
+```
+cargo run --example kinds -- path/to/sample          # profile by extension
+cargo run --example kinds -- --lang toml some-file   # or forced
+```
 
 ## Tests
 
@@ -255,12 +274,21 @@ scripts/test.sh          # cargo nextest, falling back to cargo test
 ```
 
 Unit tests in `src/` pin each rule's exact semantics. `tests/golden.rs` guards
-the rules working together against blessed expectations, and adds two invariants
-that hold whatever the rules decide — so they catch span bugs the expectations
-would absorb:
+the rules working together against blessed expectations, and adds three
+invariants that hold whatever the rules decide — so they catch bugs the
+expectations would absorb:
 
 - every non-whitespace character is bucketed exactly once;
-- no line is counted twice.
+- no line is counted twice;
+- no fixture parses to an `ERROR` node. A grammar that cannot read a file still
+  returns a tree, and the rules still classify it, so this is the only thing
+  standing between a borrowed grammar and a blessed wrong answer. It is what
+  decides the open zsh question in `TODO.md`.
+
+The `tests/fixtures/<language>/` directory name must equal `profile.language`:
+`tests/cli.rs` derives the languages it expects in the breakdown from those
+names, so a new fixture is covered the day it lands rather than the day someone
+widens a list.
 
 Regenerate expectations after a deliberate change with
 `ERNEST_BLESS=1 cargo test --test golden`, then **read the diff** — a blessed
@@ -270,10 +298,19 @@ wrong answer is still wrong.
 
 - **An unwritten profile skews the headline rather than abstaining from it.**
   Because every cohort is summed, a language ernest cannot read drops out of the
-  denominator and pulls the figure toward whichever cohort *is* covered — a Rust
-  repository reads as documentation-dominated, not as unmeasured. The report
-  tallies skipped files by extension so the gap is visible and names the profile
-  to write next; the format roadmap in `TODO.md` is the queue for closing it.
+  denominator and pulls the figure toward whichever cohort *is* covered — a
+  repository whose only covered format is Markdown reads as
+  documentation-dominated, not as unmeasured. Writing the rust and toml
+  profiles moved this repository from 82.5% to 34.3% with no text changing. The
+  report tallies skipped files by extension so the gap is visible and names the
+  profile to write next; the format roadmap in `TODO.md` is the queue for
+  closing it.
+- A doctest fence inside a Rust doc comment counts as prose, code and all. It is
+  compiled, runnable code, and the general fix is the fence injection queued in
+  `TODO.md` rather than a Rust-only second parse.
+- A comment inside an attribute (`#[derive(\n // note\n Debug)]`) counts as
+  code, because the walk stops at `attribute_item`. Legal, and rare enough that
+  reaching it is not worth losing the pragma rule that listing buys.
 - An annotation line carrying trailing prose (`@deprecated Use Foo instead.`) is
   billed wholly as code. Splitting mid-line is possible; it was not worth v1.
 - A fully annotated docblock slightly *dilutes* density, since annotations count

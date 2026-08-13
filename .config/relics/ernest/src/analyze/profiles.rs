@@ -61,9 +61,13 @@ pub struct Profile {
     pub generated_regions: &'static [(&'static str, &'static str)],
 }
 
-/// Comment bodies opening with one of these are tooling directives, not prose:
-/// machine-consumed, and unavoidable once you want the tooling. The whole
-/// comment becomes uninteresting.
+/// Bodies opening with one of these are tooling directives, not prose:
+/// machine-consumed, and unavoidable once you want the tooling. The whole node
+/// becomes uninteresting.
+///
+/// Most arrive as a comment. Rust spells the same thing as syntax, which is why
+/// the attribute kinds are named in `RUST.code_nodes` — a directive is the same
+/// directive whichever vehicle a language gives it.
 pub const PRAGMA_PREFIXES: &[&str] = &[
     "yaml-language-server:",
     "yamllint ",
@@ -89,12 +93,29 @@ pub const PRAGMA_PREFIXES: &[&str] = &[
     "markdownlint-enable",
     "vale off",
     "vale on",
+    ":schema",
+    // Rust lint and format attributes. `cfg_attr` is deliberately absent:
+    // `#![cfg_attr(test, deny(warnings))]` is a lint directive and
+    // `#![cfg_attr(docsrs, feature(doc_cfg))]` is a feature gate, and a prefix
+    // cannot tell them apart — so both stay code.
+    "#[allow(",
+    "#![allow(",
+    "#[expect(",
+    "#![expect(",
+    "#[deny(",
+    "#![deny(",
+    "#[warn(",
+    "#![warn(",
+    "#[forbid(",
+    "#![forbid(",
+    "#[rustfmt::skip",
+    "#![rustfmt::skip",
 ];
 
 pub static PHP: Profile = Profile {
     language: "php",
     language_fn: tree_sitter_php::LANGUAGE_PHP,
-    extensions: &["php", "phtml", "php4", "php5", "php7", "phps"],
+    extensions: &["php", "phtml", "php4", "php5", "php7", "phps", "phpstub"],
     filenames: &[],
     interpreters: &["php"],
     cohort: Cohort::Source,
@@ -159,6 +180,68 @@ pub static SHELL: Profile = Profile {
     generated_regions: &[],
 };
 
+/// There is no plain `comment` kind here. The grammar defines one, but `extras`
+/// names `line_comment` and `block_comment` directly and the rule is
+/// unreachable, so those two are what a walk ever sees — and between them they
+/// carry `//`, `///`, `//!`, `////`, `/* */`, `/** */` and `/*! */` alike.
+///
+/// A doc comment's markers are *children* of those kinds, so naming the parents
+/// counts the comment whole, sigils included, exactly as a PHP docblock is
+/// counted. Splitting `///` from `//` would mean naming the children instead,
+/// which loses `//` entirely — it has none.
+///
+/// Nothing is uninteresting by node kind: Rust has no counterpart to `<?php`,
+/// and its `shebang` is handled for every language in `analyze::classify`.
+/// The attribute kinds are named as code, which is what they already were by
+/// default — listing them is what lets the pragma rule see a `#[allow(…)]`.
+pub static RUST: Profile = Profile {
+    language: "rust",
+    language_fn: tree_sitter_rust::LANGUAGE,
+    extensions: &["rs"],
+    filenames: &[],
+    interpreters: &[],
+    cohort: Cohort::Source,
+    default_class: Class::Code,
+    prose_nodes: &["line_comment", "block_comment"],
+    code_nodes: &["attribute_item", "inner_attribute_item"],
+    ignored_nodes: &[],
+    // Longest first: `comment_body` strips the first sigil that matches, so
+    // `//` ahead of `///` would leave a slash behind. `#` must stay out of it,
+    // or `#[allow(` would strip to `[allow(` and match no pragma prefix.
+    comment_frame: &["///", "//!", "//", "/**", "/*!", "/*", "*/", "*"],
+    annotation_line: &[],
+    generated_regions: &[],
+};
+
+/// One `comment` kind, reachable anywhere the grammar allows an extra —
+/// including between a table header and its first pair, and inside an array.
+///
+/// Nothing is uninteresting here. The bracket tokens would work mechanically,
+/// but `[section]` scales with the tables you chose to write, which puts it on
+/// the code side of the same line braces fall on; YAML's `---` frames a
+/// document once and does not.
+///
+/// Do not reach for `table` or `table_array_element` to name a header: those
+/// nodes span the whole section, `pair` children included, and the walk stops
+/// at the outermost match.
+pub static TOML: Profile = Profile {
+    language: "toml",
+    language_fn: tree_sitter_toml_ng::LANGUAGE,
+    extensions: &["toml"],
+    // No `Cargo.lock`. It is TOML, and it is also generated, so leaving it on
+    // its own extension keeps it out of the measurement.
+    filenames: &[],
+    interpreters: &[],
+    cohort: Cohort::Source,
+    default_class: Class::Code,
+    prose_nodes: &["comment"],
+    code_nodes: &[],
+    ignored_nodes: &[],
+    comment_frame: &["#"],
+    annotation_line: &[],
+    generated_regions: &[],
+};
+
 /// The polarity inverts here: prose is the default and code is what gets named.
 ///
 /// The line between prose and code runs through structure, not around it.
@@ -196,7 +279,7 @@ pub static MARKDOWN: Profile = Profile {
     generated_regions: &[("TOC", "/TOC")],
 };
 
-pub static PROFILES: &[&Profile] = &[&PHP, &SHELL, &YAML, &MARKDOWN];
+pub static PROFILES: &[&Profile] = &[&PHP, &RUST, &SHELL, &TOML, &YAML, &MARKDOWN];
 
 /// Strip comment sigils and surrounding whitespace to expose a line's body,
 /// so pragma and annotation prefixes can be tested against real content.

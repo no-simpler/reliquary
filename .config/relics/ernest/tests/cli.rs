@@ -15,6 +15,21 @@ fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
+/// The languages the fixture tree covers, taken from its directory names — so a
+/// test asserting the breakdown covers a new format the day its fixture lands,
+/// rather than the day someone remembers to widen a literal list.
+fn fixture_languages() -> Vec<String> {
+    let mut found: Vec<String> = std::fs::read_dir(fixtures())
+        .expect("fixtures directory")
+        .map(|entry| entry.expect("readable entry").path())
+        .filter(|path| path.is_dir())
+        .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    found.sort();
+    assert!(!found.is_empty(), "no fixtures found");
+    found
+}
+
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("ernest-test-{name}"));
     let _ = std::fs::remove_dir_all(&dir);
@@ -28,14 +43,18 @@ fn reports_and_exits_clean() {
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.starts_with("prose density"), "{text}");
-    assert!(text.contains("php"), "{text}");
-    assert!(text.contains("shell"), "{text}");
-    assert!(text.contains("yaml"), "{text}");
+    for language in fixture_languages() {
+        assert!(text.contains(&language), "{language} is missing from:\n{text}");
+    }
 }
 
 /// A roll-up is a sum, not one more row of the breakdown, so it leads its group
 /// and the rows it sums indent under it — total over cohorts over languages, so
 /// the table visibly adds up to the headline.
+///
+/// Asserted as shape rather than as a fixed list of rows: the depth of a row is
+/// what carries the meaning, and a test that named today's languages positionally
+/// would break on every format added after it.
 #[test]
 fn the_table_rolls_up_from_languages_through_cohorts_to_the_total() {
     let out = ernest(&[fixtures().to_str().unwrap()]);
@@ -43,17 +62,48 @@ fn the_table_rolls_up_from_languages_through_cohorts_to_the_total() {
     let lines: Vec<&str> = text.lines().collect();
 
     // The heading names the hierarchy, so the roll-up is the row after it.
-    let total = 1 + lines
+    let start = 1 + lines
         .iter()
         .position(|l| l.contains("total / cohort / language"))
         .unwrap_or_else(|| panic!("no breakdown heading in:\n{text}"));
-    assert!(lines[total].starts_with("  total"), "{text}");
-    assert!(lines[total + 1].starts_with("    source"), "{text}");
-    assert!(lines[total + 2].starts_with("      php"), "{text}");
-    assert!(lines[total + 3].starts_with("      shell"), "{text}");
-    assert!(lines[total + 4].starts_with("      yaml"), "{text}");
-    assert!(lines[total + 5].starts_with("    docs"), "{text}");
-    assert!(lines[total + 6].starts_with("      markdown"), "{text}");
+    let rows: Vec<(usize, &str)> = lines[start..]
+        .iter()
+        .take_while(|l| l.starts_with("  "))
+        .map(|l| {
+            let label = l.trim_start();
+            ((l.len() - label.len()) / 2, label.split(' ').next().unwrap())
+        })
+        .collect();
+
+    assert_eq!(rows[0], (1, "total"), "{text}");
+
+    // One cohort per group, source ahead of docs, and every language nested one
+    // level under the cohort that sums it.
+    let mut cohorts = Vec::new();
+    let mut languages = Vec::new();
+    for (depth, label) in &rows[1..] {
+        match depth {
+            2 => {
+                cohorts.push(*label);
+                languages.push(Vec::new());
+            }
+            3 => languages
+                .last_mut()
+                .unwrap_or_else(|| panic!("a language row before any cohort:\n{text}"))
+                .push(*label),
+            other => panic!("row {label} sits at depth {other}:\n{text}"),
+        }
+    }
+    assert_eq!(cohorts, ["source", "docs"], "{text}");
+    for nested in &languages {
+        let mut sorted = nested.clone();
+        sorted.sort();
+        assert_eq!(nested, &sorted, "languages are not in order:\n{text}");
+    }
+
+    let mut listed: Vec<String> = languages.concat().iter().map(|l| l.to_string()).collect();
+    listed.sort();
+    assert_eq!(listed, fixture_languages(), "{text}");
 }
 
 #[test]

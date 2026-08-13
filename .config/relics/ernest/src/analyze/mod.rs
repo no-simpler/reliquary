@@ -32,7 +32,9 @@ pub fn analyze_sections(src: &str, profile: &Profile) -> Result<(Counts, Vec<(St
     Ok((measure(src, &spans, profile.default_class), rows))
 }
 
-fn parse(src: &str, profile: &Profile) -> Result<Tree> {
+/// Public so a test can ask whether a grammar actually read a file, rather than
+/// only what the rules made of what it returned.
+pub fn parse(src: &str, profile: &Profile) -> Result<Tree> {
     let mut parser = Parser::new();
     parser
         .set_language(&profile.language_fn.into())
@@ -50,10 +52,9 @@ fn classify(tree: &Tree, src: &str, profile: &Profile) -> Vec<Span> {
 
     // A shebang is unavoidable in an executable script, and grammars disagree
     // on it: tree-sitter-bash lexes it as a comment, tree-sitter-php as inline
-    // text. So the rule is generic, and it overrides whatever the walk decided
-    // about the spans the line already holds.
-    if src.starts_with("#!") {
-        let eol = src.find('\n').unwrap_or(src.len());
+    // text, tree-sitter-rust as a node of its own. So the rule is generic, and
+    // it overrides whatever the walk decided about the spans the line holds.
+    if let Some(eol) = crate::detect::shebang_len(src) {
         let inside = spans.iter().take_while(|s| s.end <= eol).count();
         // A span straddling the line end is nothing this rule can split, so it
         // leaves the file alone rather than guess.
@@ -217,7 +218,7 @@ fn line_offsets(text: &str) -> impl Iterator<Item = (usize, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use profiles::{MARKDOWN, PHP, SHELL, YAML};
+    use profiles::{MARKDOWN, PHP, RUST, SHELL, TOML, YAML};
 
     fn counts(src: &str, profile: &Profile) -> Counts {
         analyze_file(src, profile).unwrap()
@@ -314,6 +315,101 @@ mod tests {
         assert_eq!(c.code_chars, 0);
         assert_eq!(c.ignored_chars, 0);
         assert_eq!(c.prose_chars, "##Section#>mcdPATH#.-adotfiles".len() as u64);
+    }
+
+    #[test]
+    fn doc_comments_and_ordinary_comments_are_prose_alike() {
+        let src = "//! Module doc.\n/// Item doc.\n// Plain note.\nfn f() {}\n";
+        let c = counts(src, &RUST);
+        assert_eq!(
+            c.prose_chars,
+            "//!Moduledoc.///Itemdoc.//Plainnote.".len() as u64
+        );
+        assert_eq!(c.code_chars, "fnf(){}".len() as u64);
+    }
+
+    /// The one that made this profile worth writing carefully: the line is an
+    /// attribute, not a shebang, and billing it as unavoidable would write off
+    /// the most common first line in the language.
+    #[test]
+    fn an_inner_attribute_on_line_one_is_a_pragma_not_a_shebang() {
+        let c = counts("#![deny(missing_docs)]\nfn f() {}\n", &RUST);
+        assert_eq!(c.ignored_chars, "#![deny(missing_docs)]".len() as u64);
+        assert_eq!(c.prose_chars, 0);
+        assert_eq!(c.code_chars, "fnf(){}".len() as u64);
+    }
+
+    /// A lint directive is uninteresting whichever vehicle a language gives it;
+    /// an attribute that carries meaning is code.
+    #[test]
+    fn lint_attributes_are_uninteresting_and_semantic_ones_are_code() {
+        let lint = counts("#[allow(dead_code)]\nfn f() {}\n", &RUST);
+        assert_eq!(lint.ignored_chars, "#[allow(dead_code)]".len() as u64);
+
+        let semantic = counts("#[derive(Debug)]\nstruct S;\n", &RUST);
+        assert_eq!(semantic.ignored_chars, 0);
+        assert_eq!(semantic.code_chars, "#[derive(Debug)]structS;".len() as u64);
+    }
+
+    #[test]
+    fn slashes_that_are_rust_syntax_are_not_comments() {
+        for src in [
+            "let u = \"http://example.com/#frag\";\n",
+            "let r = r\"C:\\\\ // still a string\";\n",
+            "let r = r#\"a \"quoted\" // thing\"#;\n",
+            "let b = b\"bytes // here\";\n",
+            "let q = a / b / c;\n",
+            "fn f<'a>(x: &'a str) -> char { '/' }\n",
+            "'outer: loop { break 'outer; }\n",
+        ] {
+            assert_eq!(counts(src, &RUST).prose_chars, 0, "{src}");
+        }
+    }
+
+    /// Four slashes are not a doc comment, but they are still a comment.
+    #[test]
+    fn a_nested_block_comment_closes_once_and_four_slashes_are_prose() {
+        let nested = counts("/* outer /* inner */ still outer */\nfn f() {}\n", &RUST);
+        assert_eq!(nested.code_chars, "fnf(){}".len() as u64);
+
+        let four = counts("//// not a doc comment\n", &RUST);
+        assert_eq!(four.prose_chars, "////notadoccomment".len() as u64);
+    }
+
+    /// Comments reach inside macro token trees, so the coverage does not stop
+    /// at a `println!`.
+    #[test]
+    fn a_comment_inside_a_macro_is_still_a_comment() {
+        let c = counts("fn f() {\n    println!(\"{}\", /* note */ 1);\n}\n", &RUST);
+        assert_eq!(c.prose_chars, "/*note*/".len() as u64);
+    }
+
+    #[test]
+    fn hashes_inside_toml_strings_are_not_comments() {
+        for src in [
+            "url = \"https://e.com/#frag\"\n",
+            "lit = '#raw'\n",
+            "\"quoted#key\" = 2\n",
+            "multi = \"\"\"\n# not a comment\n\"\"\"\n",
+            "inline = { a = \"x#y\" }\n",
+        ] {
+            assert_eq!(counts(src, &TOML).prose_chars, 0, "{src}");
+        }
+    }
+
+    #[test]
+    fn a_toml_comment_is_prose_wherever_it_sits() {
+        let c = counts("[a]\n# Why this table.\nkey = 1 # why\n", &TOML);
+        assert_eq!(c.prose_chars, "#Whythistable.#why".len() as u64);
+        assert_eq!(c.code_chars, "[a]key=1".len() as u64);
+        assert_eq!(c.ignored_chars, 0);
+    }
+
+    #[test]
+    fn a_toml_schema_directive_is_uninteresting_not_prose() {
+        let c = counts("#:schema https://e.com/s.json\nkey = 1\n", &TOML);
+        assert_eq!(c.prose_chars, 0);
+        assert_eq!(c.ignored_chars, "#:schemahttps://e.com/s.json".len() as u64);
     }
 
     #[test]

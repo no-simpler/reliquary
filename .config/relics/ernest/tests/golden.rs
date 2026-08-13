@@ -100,6 +100,27 @@ fn every_character_is_bucketed_exactly_once() {
     }
 }
 
+/// A fixture the grammar cannot read measures the grammar's confusion rather
+/// than the file, and the blessed expectations absorb that silently — an ERROR
+/// node produces spans like any other. This is also the check a profile that
+/// borrows another dialect's grammar has to pass: CLAUDE.md records that the
+/// bash grammar errors on real zsh, and this is what turns that from a
+/// judgement call into a verdict.
+#[test]
+fn every_fixture_parses_without_error_nodes() {
+    for path in fixtures() {
+        let profile = profile_for(&path).expect("profile");
+        let src = std::fs::read_to_string(&path).expect("readable fixture");
+        let tree = ernest::analyze::parse(&src, profile).expect("fixture parses");
+        assert!(
+            !tree.root_node().has_error(),
+            "{} parses to an ERROR node under the {} grammar",
+            path.display(),
+            profile.language,
+        );
+    }
+}
+
 /// Likewise for lines: a line reaches at most one class, and never more lines
 /// than the file has.
 #[test]
@@ -129,6 +150,50 @@ fn the_adversarial_php_fixture_finds_prose_without_false_positives() {
     assert!(counts.prose_chars > 0, "found no prose at all");
     // The shebang, both PHP tags, the closing tag and the phpcs directive.
     assert!(counts.ignored_chars > 0, "found nothing uninteresting");
+}
+
+#[test]
+fn the_adversarial_rust_fixture_finds_prose_without_false_positives() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rust/adversarial.rs");
+    let (_, src, counts) = measure(&path);
+
+    for decoy in [
+        "\"http://not-a-comment/#frag\"",
+        "r\"C:\\path\\ // still a string\"",
+        "r##\"contains \"# inside\"##",
+        "b\"bytes // here\"",
+        "let slash = '/';",
+        "'outer: loop",
+        "/* outer /* inner */ still outer */",
+        "//// Four slashes",
+    ] {
+        assert!(src.contains(decoy), "fixture lost its decoy: {decoy}");
+    }
+    assert!(counts.prose_chars > 0, "found no prose at all");
+    // Three directives, and nothing else: the `#![deny(…)]` first line that is
+    // not a shebang, the SPDX identifier, and the `#[allow(…)]`.
+    assert_eq!(counts.ignored_chars, 70);
+    assert_eq!(counts.ignored_lines, 3);
+}
+
+#[test]
+fn the_adversarial_toml_fixture_finds_prose_without_false_positives() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/toml/adversarial.toml");
+    let (_, src, counts) = measure(&path);
+
+    for decoy in [
+        "\"https://example.com/page#section\"",
+        "'C:\\path\\#raw'",
+        "\"quoted#key\"",
+        "\"#ff0000\"",
+        "\"b#c\"",
+    ] {
+        assert!(src.contains(decoy), "fixture lost its decoy: {decoy}");
+    }
+    assert!(counts.prose_chars > 0, "found no prose at all");
+    // The `#:schema` directive, and nothing else.
+    assert_eq!(counts.ignored_chars, 47);
+    assert_eq!(counts.ignored_lines, 1);
 }
 
 #[test]

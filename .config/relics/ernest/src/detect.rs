@@ -39,12 +39,32 @@ pub fn profile_for(path: &Path) -> Option<&'static Profile> {
         .copied()
 }
 
+/// The length of `src`'s shebang line, or `None` when the first line is not one.
+///
+/// Opening with `#!` is not the test. Rust spells an inner attribute
+/// `#![deny(missing_docs)]`, which is the most common first line there is in
+/// that language and is code, not an unavoidable header — so what makes a
+/// shebang is naming an interpreter.
+pub(crate) fn shebang_len(src: &str) -> Option<usize> {
+    let end = src.find('\n').unwrap_or(src.len());
+    interpreter(&src[..end])?;
+    Some(end)
+}
+
 /// The interpreter a shebang names: the basename of the program, or of the
 /// first argument that is neither a flag nor an assignment when that program
 /// is `env`.
+///
+/// The program is required to be an absolute path, which every real shebang
+/// uses because the kernel does no lookup. It is also what separates a shebang
+/// from the other things a line may open with — `#![…]` above all.
 fn interpreter(line: &str) -> Option<&str> {
     let mut words = line.strip_prefix("#!")?.split_whitespace();
-    let first = basename(words.next()?);
+    let program = words.next()?;
+    if !program.starts_with('/') {
+        return None;
+    }
+    let first = basename(program);
     if first != "env" {
         return Some(first);
     }
@@ -83,6 +103,9 @@ mod tests {
         assert_eq!(language_of("c.yaml"), Some("yaml"));
         assert_eq!(language_of("scripts/publish.sh"), Some("shell"));
         assert_eq!(language_of("interactive.d/030-config.bash"), Some("shell"));
+        assert_eq!(language_of("src/main.rs"), Some("rust"));
+        assert_eq!(language_of("Cargo.toml"), Some("toml"));
+        assert_eq!(language_of("stubs/redis.phpstub"), Some("php"));
     }
 
     /// A shell dotfile carries neither an extension nor a shebang, so its name
@@ -96,10 +119,11 @@ mod tests {
 
     #[test]
     fn declines_everything_else() {
-        assert!(profile_for(Path::new("a.rs")).is_none());
         assert!(profile_for(Path::new("Makefile")).is_none());
         assert!(profile_for(Path::new("c.zsh")).is_none());
         assert!(profile_for(Path::new("c.fish")).is_none());
+        // Generated, and TOML — kept out by not claiming its extension.
+        assert!(profile_for(Path::new("Cargo.lock")).is_none());
     }
 
     #[test]
@@ -120,6 +144,23 @@ mod tests {
         assert_eq!(interpreter("#!"), None);
         assert_eq!(interpreter("#!/usr/bin/env"), None);
         assert_eq!(interpreter("#!/usr/bin/env -S"), None);
+    }
+
+    /// A Rust file opening with an inner attribute begins `#!` and is not a
+    /// shebang. Billing that line as unavoidable would write off the most
+    /// common first line in the language.
+    #[test]
+    fn an_inner_attribute_is_not_a_shebang() {
+        for line in [
+            "#![deny(missing_docs)]",
+            "#![allow(clippy::all)]",
+            "#! [allow(dead_code)]",
+            "#![doc = include_str!(\"../README.md\")]",
+        ] {
+            assert_eq!(interpreter(line), None, "{line}");
+            assert_eq!(shebang_len(line), None, "{line}");
+        }
+        assert_eq!(shebang_len("#!/bin/bash\nx=1\n"), Some(11));
     }
 
     #[test]
