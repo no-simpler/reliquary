@@ -1,6 +1,6 @@
 //! The default report.
 
-use crate::aggregate::{HEADLINE_COHORT, Report};
+use crate::aggregate::{Report, SOURCE_COHORT};
 use crate::span::Unit;
 
 use super::table::{Column, Table};
@@ -9,47 +9,59 @@ use super::{percent, thousands};
 /// Rows shown before the rest are summarised away.
 const ROWS: usize = 20;
 
+/// Extensions named before the rest are summarised away.
+const GAPS: usize = 6;
+
 /// The cohort documentation formats land in. Its density sits near 100% in any
-/// real project, so volume is what carries the signal.
+/// real project, so volume is what carries its own signal — but its prose still
+/// counts toward the headline.
 const DOCS_COHORT: &str = "docs";
 
 pub fn render(report: &Report) -> String {
     let unit = report.unit;
     let mut out = String::new();
 
-    match report.headline() {
-        Some(headline) => {
-            let base = headline.counts.prose(unit) + headline.counts.code(unit);
-            out.push_str(&format!(
-                "prose density  {}   (prose {} / base {} {})\n",
-                percent(headline.density),
-                thousands(headline.counts.prose(unit)),
-                thousands(base),
-                unit.label(),
-            ));
-        }
-        // No source cohort is not the same as nothing measured: a documentation
-        // tree is a perfectly good thing to point ernest at.
-        None if report.cohorts.is_empty() => {
-            out.push_str("prose density  n/a   (no supported files found)\n")
-        }
-        None => out.push_str("prose density  n/a   (nothing in the source cohort)\n"),
+    let total = report.headline();
+    if report.cohorts.is_empty() {
+        out.push_str("prose density  n/a   (no supported files found)\n");
+    } else {
+        let base = total.counts.prose(unit) + total.counts.code(unit);
+        out.push_str(&format!(
+            "prose density  {}   (prose {} / base {} {})\n",
+            percent(total.density),
+            thousands(total.counts.prose(unit)),
+            thousands(base),
+            unit.label(),
+        ));
     }
 
     out.push('\n');
     let mut breakdown = Table::new(vec![
-        Column::left("cohort / language"),
+        Column::left("total / cohort / language"),
         Column::left("provenance"),
         Column::right("density"),
         Column::right("prose"),
         Column::right("code"),
         Column::right("files"),
     ]);
-    for cohort in &report.cohorts {
-        // The roll-up leads its group and the languages indent under it, so the
-        // sum is never mistaken for one more row of the breakdown.
+    // The roll-up leads its group and its parts indent under it, so the table
+    // visibly sums to the headline rather than sitting beside it.
+    if !report.cohorts.is_empty() {
         breakdown.push(
             0,
+            vec![
+                "total".to_string(),
+                String::new(),
+                percent(total.density),
+                thousands(total.counts.prose(unit)),
+                thousands(total.counts.code(unit)),
+                thousands(total.files),
+            ],
+        );
+    }
+    for cohort in &report.cohorts {
+        breakdown.push(
+            1,
             vec![
                 cohort.cohort.clone(),
                 String::new(),
@@ -61,7 +73,7 @@ pub fn render(report: &Report) -> String {
         );
         for language in &cohort.languages {
             breakdown.push(
-                1,
+                2,
                 vec![
                     language.language.clone(),
                     language.provenance.label().to_string(),
@@ -126,7 +138,7 @@ pub fn render(report: &Report) -> String {
     }
 
     out.push('\n');
-    let uninteresting: u64 = report.cohorts.iter().map(|c| c.counts.ignored(unit)).sum();
+    let uninteresting = report.headline().counts.ignored(unit);
     if uninteresting > 0 {
         out.push_str(&format!(
             "  {} {} uninteresting — open tags, shebangs, tooling directives, generated regions\n",
@@ -143,12 +155,40 @@ pub fn render(report: &Report) -> String {
         out.push_str(&format!(", {} unreadable", thousands(report.files_failed)));
     }
     out.push('\n');
+    out.push_str(&unsupported_line(report));
+
+    for path in &report.ernestignore {
+        out.push_str(&format!("  {path} applied — a declared corpus is not measured\n"));
+    }
 
     if unit == Unit::Lines {
         out.push_str("  counting lines; a line belongs to whichever class holds most of it\n");
     }
 
     out
+}
+
+/// Which extensions the skipped files were. The headline sums every cohort, so
+/// an unwritten profile pulls it toward whichever cohort *is* covered — this is
+/// what stops that reading as a measurement, and it names the profile to write.
+fn unsupported_line(report: &Report) -> String {
+    if report.unsupported.is_empty() {
+        return String::new();
+    }
+    let mut gaps: Vec<(&String, &u64)> = report.unsupported.iter().collect();
+    gaps.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+
+    let named: Vec<String> = gaps
+        .iter()
+        .take(GAPS)
+        .map(|(ext, n)| format!("{ext} {}", thousands(**n)))
+        .collect();
+    let mut line = format!("  unsupported: {}", named.join(", "));
+    if gaps.len() > GAPS {
+        line.push_str(&format!(", and {} more", thousands((gaps.len() - GAPS) as u64)));
+    }
+    line.push('\n');
+    line
 }
 
 /// The shape both drill-down views share: measurements first, then the key,
@@ -164,6 +204,10 @@ fn rows_table(key: &'static str) -> Table {
 
 /// Documentation prose against the code it documents. A comparator for the
 /// before-and-after loop, never a threshold: the direction is what matters.
+///
+/// It complements the headline rather than repeating it. Move prose from a
+/// comment into a document and the headline holds still, by design — this line
+/// is what rises, and says where the prose went.
 fn docs_line(report: &Report) -> String {
     let unit = report.unit;
     let Some(docs) = report.cohort(DOCS_COHORT) else {
@@ -176,7 +220,7 @@ fn docs_line(report: &Report) -> String {
 
     let mut line = format!("\n  docs prose {} {}", thousands(prose), unit.label());
     if let Some(code) = report
-        .cohort(HEADLINE_COHORT)
+        .cohort(SOURCE_COHORT)
         .map(|c| c.counts.code(unit))
         .filter(|code| *code > 0)
     {

@@ -50,18 +50,42 @@ Uninteresting text is excluded from both sides. 0% means no prose was found;
 per-file ratios, so small files cannot dominate. Density is `n/a`, not 0%, when
 nothing countable was found.
 
-### Documentation is measured by volume, not by ratio
+### Every cohort counts toward it
 
-A Markdown corpus is prose almost by definition — Pillar's runs 98% — so its
-density is a constant that no edit worth making moves. Worse, the one lever that
-does move it is *adding* code fences, a gradient pointing away from de-prosing.
+The headline sums `Source` and `Docs`. Markdown is prose describing code, and
+prose lifted out of a comment into a document has not gone anywhere — it is
+still loaded, still re-derivable, still paid for. A metric that fell when prose
+merely changed address would reward the move, and moving is not de-prosing.
 
-So the `Docs` cohort leads with absolute prose volume, and with one cross-cohort
-comparator: documentation prose against the source code it documents. That
-moves in the right direction under every action wanted — delete a doc, write
-code, compact a paragraph — and it is what the before-and-after loop compares.
-Density stays on the row because per file it still separates a README of
-runnable examples from an essay.
+Summing makes the headline **relocation-invariant**: the same characters sit in
+both numerator and denominator wherever they live. On `lib-offer-backbone`,
+moving 10,000 chars of PHP comments into a new `docs/*.md` used to buy a 0.9pp
+improvement for no work. It now buys 0.0.
+
+This is not the old objection re-litigated. A `Docs` **density row** really is a
+near-constant — Pillar's runs 98% — and the one lever that moves it is *adding*
+code fences, a gradient pointing away from de-prosing. That argues against
+reporting docs density as a headline, which nothing here does. In a *summed*
+ratio the source code base keeps the figure off the ceiling and responsive:
+Pillar reads 26.7%, `lib-messenger` 25.9%, `app-demand-planning` 0.8%, and
+10,000 chars deleted move the number the same whether they came from a comment
+or a document.
+
+The cost, stated: the headline no longer answers "how commented is my code."
+The `source` row still does, and the table rolls up through it.
+
+### What that assumes
+
+**A code-first repository**, where source code dominates the denominator. Point
+ernest at a wiki or a fiction archive and the headline pins near 100%, because
+the prose there *is* the product rather than a description of code. That is a
+category error, not a reading — see `.ernestignore` below for the narrow case
+where a code-first repository also carries such a corpus.
+
+The `Docs` cohort keeps its own volume line and one cross-cohort comparator:
+documentation prose against the source code it documents. It complements the
+headline rather than repeating it — relocate prose and the headline holds still
+by design, while this is the line that rises and says where the prose went.
 
 ### Unit: non-whitespace characters
 
@@ -134,8 +158,8 @@ src/
   report/             table, human, json, diff
 ```
 
-`Cohort` splits `Source` from `Docs` and the two are never summed; the headline
-is `Source`.
+`Cohort` splits `Source` from `Docs`. It is a breakdown, not a barrier: the
+headline is both summed, and the table rolls up total -> cohort -> language.
 
 ## Scope and provenance
 
@@ -153,6 +177,21 @@ a path, `.gitignore` wins and the file is noise.
 
 Dependency and build directories are excluded at every level, so widening the
 scope cannot drag `vendor/` back in.
+
+### `.ernestignore`
+
+git answers "is this shared". It cannot answer "is this what ernest is for" —
+so a repository that carries prose which *is* the product, rather than prose
+about the code, declares it: gitignore syntax, honored at **every** scope,
+because a corpus is not the subject at any of them.
+
+Declared, never inferred. A rule keyed on doc-like filenames would miss
+`AGENTIC-TOOLING.md`, and would make renaming `CLAUDE.md` to `notes.md` lower
+the headline — trading one gaming vector for a worse one. The report names any
+`.ernestignore` in effect, so an excluded corpus cannot read as a repository
+with less prose in it.
+
+This is the narrow case. Most projects never write one.
 
 Every file carries a `Provenance` of `tracked` or `local`, and the report
 crosses it with cohort — the prose in a second brain is loaded on every context
@@ -229,6 +268,12 @@ wrong answer is still wrong.
 
 ## Known imprecisions
 
+- **An unwritten profile skews the headline rather than abstaining from it.**
+  Because every cohort is summed, a language ernest cannot read drops out of the
+  denominator and pulls the figure toward whichever cohort *is* covered — a Rust
+  repository reads as documentation-dominated, not as unmeasured. The report
+  tallies skipped files by extension so the gap is visible and names the profile
+  to write next; the format roadmap in `TODO.md` is the queue for closing it.
 - An annotation line carrying trailing prose (`@deprecated Use Foo instead.`) is
   billed wholly as code. Splitting mid-line is possible; it was not worth v1.
 - A fully annotated docblock slightly *dilutes* density, since annotations count
@@ -249,19 +294,5 @@ wrong answer is still wrong.
 
 ## Next steps
 
-- **Committed baselines** — an `.ernest-baseline` file and `ernest check`, so
-  the before/after loop survives across sessions without carrying snapshots by
-  hand.
-- **`--unit tokens`.** Characters are a proxy for the cost that actually
-  motivates this. The `Counts` shape already carries two units; a third is
-  additive.
-- **Licence-header detection**, so an unavoidable SPDX block is uninteresting
-  rather than prose. Single `SPDX-License-Identifier:` lines are already handled
-  by the pragma rule; multi-line blocks are not.
-- **Fence injection.** `INJECTION_QUERY_BLOCK` would let a ```php fence be
-  measured by the PHP profile and counted toward `Source`, making the cohort
-  split follow the content rather than the file extension.
-- **Promotion to Stage 3** once the format list branches out — this is a crate
-  that will want its own history, benches and CI. See `GRADUATION.md`.
-- **Amend `deprose.md`** to name the metric, once v1 has proven itself in real
-  use. It currently says "this is not a quantified metric, this is a mantra".
+`TODO.md`, alongside this file. It is read on demand; this one is loaded on
+every context load, and a backlog does not earn that.

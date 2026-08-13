@@ -9,12 +9,14 @@ use serde::{Deserialize, Serialize};
 use crate::analyze::profiles::Cohort;
 use crate::analyze::{analyze_file, analyze_sections};
 use crate::span::{Counts, Unit};
-use crate::walk::{Candidate, Provenance};
+use crate::walk::{Provenance, Survey};
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
-/// The headline cohort. Prose-by-nature formats report separately.
-pub const HEADLINE_COHORT: &str = "source";
+/// The cohort holding the code that documentation documents. It leads the
+/// breakdown and is the base the docs comparator reads against — but it is no
+/// longer the headline, which sums every cohort.
+pub const SOURCE_COHORT: &str = "source";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
@@ -24,13 +26,33 @@ pub struct Report {
     pub files_scanned: u64,
     pub files_skipped: u64,
     pub files_failed: u64,
-    /// Never summed together — a documentation format would swamp a source
-    /// denominator. The headline figure is the `source` cohort.
+    /// Files no profile claimed, by extension. The headline sums every cohort,
+    /// so an unwritten profile skews it; this is what makes that visible.
+    #[serde(default)]
+    pub unsupported: BTreeMap<String, u64>,
+    /// `.ernestignore` files that were in effect.
+    #[serde(default)]
+    pub ernestignore: Vec<String>,
+    /// Every cohort summed. The headline: prose is prose wherever it lives, so
+    /// moving it between a comment and a document must not move the number.
+    pub total: Totals,
+    /// How the total decomposes. A breakdown, not a barrier — `docs` density
+    /// alone sits near 100% in any real project and says little, but its prose
+    /// is prose the reader pays for and belongs in the figure above.
     pub cohorts: Vec<CohortReport>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<FileReport>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sections: Option<Vec<SectionReport>>,
+}
+
+/// The figure every cohort rolls up into.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct Totals {
+    pub density: Option<f64>,
+    pub files: u64,
+    #[serde(flatten)]
+    pub counts: Counts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,8 +97,8 @@ pub struct SectionReport {
 }
 
 impl Report {
-    pub fn headline(&self) -> Option<&CohortReport> {
-        self.cohorts.iter().find(|c| c.cohort == HEADLINE_COHORT)
+    pub fn headline(&self) -> &Totals {
+        &self.total
     }
 
     pub fn cohort(&self, name: &str) -> Option<&CohortReport> {
@@ -106,8 +128,9 @@ struct Outcome {
 }
 
 /// Analyze every candidate in parallel, then fold the results deterministically.
-pub fn run(candidates: &[Candidate], unit: Unit, skipped: u64, views: Views) -> Report {
-    let outcomes: Vec<Option<Outcome>> = candidates
+pub fn run(survey: &Survey, unit: Unit, views: Views) -> Report {
+    let outcomes: Vec<Option<Outcome>> = survey
+        .candidates
         .par_iter()
         .map(|candidate| {
             let bytes = std::fs::read(&candidate.path).ok()?;
@@ -176,8 +199,17 @@ pub fn run(candidates: &[Candidate], unit: Unit, skipped: u64, views: Views) -> 
             }
         })
         .collect();
-    // The headline cohort leads; the rest keep their stable order behind it.
-    cohorts.sort_by_key(|c| (c.cohort != HEADLINE_COHORT, c.cohort.clone()));
+    // Source leads; the rest keep their stable order behind it.
+    cohorts.sort_by_key(|c| (c.cohort != SOURCE_COHORT, c.cohort.clone()));
+
+    // Ratio of sums across every cohort, never a mean of their ratios — the
+    // same rule that keeps a small file from dominating its language.
+    let mut total = Totals::default();
+    for cohort in &cohorts {
+        total.counts.add(&cohort.counts);
+        total.files += cohort.files;
+    }
+    total.density = total.counts.density(unit);
 
     let files = views.by_file.then(|| {
         let mut rows: Vec<FileReport> = outcomes
@@ -230,8 +262,15 @@ pub fn run(candidates: &[Candidate], unit: Unit, skipped: u64, views: Views) -> 
         tool: "ernest".to_string(),
         unit,
         files_scanned: outcomes.len() as u64,
-        files_skipped: skipped,
+        files_skipped: survey.unsupported.values().sum(),
         files_failed: failed,
+        unsupported: survey.unsupported.clone(),
+        ernestignore: survey
+            .ernestignore
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect(),
+        total,
         cohorts,
         files,
         sections,

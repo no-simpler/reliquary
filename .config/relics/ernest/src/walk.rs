@@ -1,6 +1,6 @@
 //! Finding the files worth reading.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
@@ -9,6 +9,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::analyze::profiles::Profile;
 use crate::detect::profile_for;
+
+/// Declares prose that is the product rather than prose about the code — a
+/// fiction archive, a wiki, a test corpus. gitignore syntax, honored at every
+/// scope, because it answers a question git does not: not "is this shared" but
+/// "is this what ernest is for". The narrow case; most projects never write one.
+pub const ERNESTIGNORE: &str = ".ernestignore";
 
 /// Directory names never worth walking into. They hold dependencies and build
 /// output — text nobody wrote and nobody loads into context on purpose. They
@@ -62,23 +68,36 @@ pub struct Candidate {
     pub provenance: Provenance,
 }
 
-/// Every supported file under `roots`, plus a tally of the files skipped for
-/// having no profile — so coverage is visible rather than assumed.
-pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> (Vec<Candidate>, u64) {
-    let (found, skipped) = files(roots, scope, lang);
+/// What the walk found, and what it did not.
+pub struct Survey {
+    pub candidates: Vec<Candidate>,
+    /// Files no profile claimed, tallied by extension. The headline sums every
+    /// cohort, so a missing profile skews it — naming the extensions keeps that
+    /// visible instead of letting it read as measured.
+    pub unsupported: BTreeMap<String, u64>,
+    /// The `.ernestignore` files that were in effect, so an excluded corpus is
+    /// declared in the report rather than silently absent from it.
+    pub ernestignore: Vec<PathBuf>,
+}
+
+/// Every supported file under `roots`, plus what was passed over — so coverage
+/// is visible rather than assumed.
+pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Survey {
+    let walked = files(roots, scope, lang);
     let excludes = LocalExcludes::for_roots(roots);
 
     // At the widest scope a file may be hidden by `.gitignore` instead, which
     // no single matcher answers; the narrower walk is what names those.
     let reference: Option<HashSet<PathBuf>> = (scope == Scope::All).then(|| {
         files(roots, Scope::Local, lang)
-            .0
+            .found
             .into_iter()
             .map(|(path, _)| path)
             .collect()
     });
 
-    let mut candidates: Vec<Candidate> = found
+    let mut candidates: Vec<Candidate> = walked
+        .found
         .into_iter()
         .map(|(path, profile)| {
             let local = excludes.matches(&path)
@@ -100,7 +119,11 @@ pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> (Vec<Cand
         .collect();
 
     candidates.sort_by(|a, b| a.path.cmp(&b.path));
-    (candidates, skipped)
+    Survey {
+        candidates,
+        unsupported: walked.unsupported,
+        ernestignore: walked.ernestignore,
+    }
 }
 
 /// `.git/info/exclude` for the repositories the roots sit in.
@@ -162,11 +185,13 @@ fn matcher(repo: &Path) -> Option<Gitignore> {
     builder.build().ok()
 }
 
-fn files(
-    roots: &[PathBuf],
-    scope: Scope,
-    lang: Option<&str>,
-) -> (Vec<(PathBuf, &'static Profile)>, u64) {
+struct Walked {
+    found: Vec<(PathBuf, &'static Profile)>,
+    unsupported: BTreeMap<String, u64>,
+    ernestignore: Vec<PathBuf>,
+}
+
+fn files(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Walked {
     let respect = scope != Scope::All;
     let mut builder = WalkBuilder::new(&roots[0]);
     for root in &roots[1..] {
@@ -181,6 +206,9 @@ fn files(
         .git_global(respect)
         .git_exclude(scope == Scope::Shared)
         .ignore(respect)
+        // Unconditional: a corpus is not ernest's subject at any scope, which
+        // is what separates this from the git-derived rules above.
+        .add_custom_ignore_filename(ERNESTIGNORE)
         .filter_entry(|entry| {
             entry
                 .file_name()
@@ -188,8 +216,11 @@ fn files(
                 .is_none_or(|name| !DEFAULT_EXCLUDES.contains(&name))
         });
 
-    let mut found = Vec::new();
-    let mut skipped = 0u64;
+    let mut walked = Walked {
+        found: Vec::new(),
+        unsupported: BTreeMap::new(),
+        ernestignore: Vec::new(),
+    };
 
     for entry in builder.build() {
         let Ok(entry) = entry else { continue };
@@ -197,16 +228,34 @@ fn files(
             continue;
         }
         let path = entry.into_path();
+        // Collected from the walk rather than guessed at the roots, so one
+        // placed in a subdirectory is reported too.
+        if path.file_name().is_some_and(|n| n == ERNESTIGNORE) {
+            walked.ernestignore.push(path);
+            continue;
+        }
         match profile_for(&path) {
             Some(profile) if lang.is_none_or(|l| l == profile.language) => {
-                found.push((path, profile))
+                walked.found.push((path, profile))
             }
+            // Narrowed away by `--lang`, not unsupported: counting it would
+            // read as a coverage gap that is not there.
             Some(_) => {}
-            None => skipped += 1,
+            None => *walked.unsupported.entry(extension_of(&path)).or_insert(0) += 1,
         }
     }
 
-    (found, skipped)
+    walked.ernestignore.sort();
+    walked
+}
+
+/// The key an unsupported file is tallied under — its extension, which is what
+/// names the profile that would cover it.
+fn extension_of(path: &Path) -> String {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_else(|| "(no extension)".to_string())
 }
 
 /// A root the user named explicitly is read whether or not it is a directory,

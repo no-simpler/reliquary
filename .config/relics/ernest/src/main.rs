@@ -38,9 +38,8 @@ fn run(cli: Cli) -> Result<i32> {
     }
 
     let unit = options.unit.into();
-    let (candidates, skipped) =
-        walk::collect(&options.paths, options.scope.into(), options.lang.as_deref());
-    let report = aggregate::run(&candidates, unit, skipped, options.views());
+    let survey = walk::collect(&options.paths, options.scope.into(), options.lang.as_deref());
+    let report = aggregate::run(&survey, unit, options.views());
 
     if options.json {
         println!("{}", report::json::render(&report)?);
@@ -49,7 +48,7 @@ fn run(cli: Cli) -> Result<i32> {
     }
 
     if let Some(limit) = options.max_density
-        && let Some(density) = report.headline().and_then(|c| c.density)
+        && let Some(density) = report.headline().density
     {
         let measured = density * 100.0;
         if measured > limit {

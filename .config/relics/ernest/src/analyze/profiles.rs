@@ -8,9 +8,10 @@ use tree_sitter_language::LanguageFn;
 
 use crate::span::Class;
 
-/// Which figure a language contributes to. Prose-by-nature formats such as
-/// Markdown belong to `Docs` and are reported separately — folding them into
-/// the source denominator would swamp it.
+/// How a language's contribution is broken out. Prose-by-nature formats such as
+/// Markdown belong to `Docs`, whose own density says little — near 100% in any
+/// real project. Its prose still counts toward the headline, which sums both:
+/// prose moved from a comment into a document has not gone anywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Cohort {
     Source,

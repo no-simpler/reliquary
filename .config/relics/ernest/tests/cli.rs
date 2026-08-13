@@ -34,24 +34,26 @@ fn reports_and_exits_clean() {
 }
 
 /// A roll-up is a sum, not one more row of the breakdown, so it leads its group
-/// and the rows it sums indent under it.
+/// and the rows it sums indent under it — total over cohorts over languages, so
+/// the table visibly adds up to the headline.
 #[test]
-fn a_cohort_rolls_up_above_its_indented_languages() {
+fn the_table_rolls_up_from_languages_through_cohorts_to_the_total() {
     let out = ernest(&[fixtures().to_str().unwrap()]);
     let text = String::from_utf8(out.stdout).unwrap();
     let lines: Vec<&str> = text.lines().collect();
 
-    let cohort = lines
+    // The heading names the hierarchy, so the roll-up is the row after it.
+    let total = 1 + lines
         .iter()
-        .position(|l| l.starts_with("  source"))
-        .unwrap_or_else(|| panic!("no source roll-up in:\n{text}"));
-    assert!(lines[cohort + 1].starts_with("    php"), "{text}");
-    assert!(lines[cohort + 2].starts_with("    shell"), "{text}");
-    assert!(lines[cohort + 3].starts_with("    yaml"), "{text}");
-    assert!(
-        !text.contains("total"),
-        "the roll-up no longer needs a label:\n{text}"
-    );
+        .position(|l| l.contains("total / cohort / language"))
+        .unwrap_or_else(|| panic!("no breakdown heading in:\n{text}"));
+    assert!(lines[total].starts_with("  total"), "{text}");
+    assert!(lines[total + 1].starts_with("    source"), "{text}");
+    assert!(lines[total + 2].starts_with("      php"), "{text}");
+    assert!(lines[total + 3].starts_with("      shell"), "{text}");
+    assert!(lines[total + 4].starts_with("      yaml"), "{text}");
+    assert!(lines[total + 5].starts_with("    docs"), "{text}");
+    assert!(lines[total + 6].starts_with("      markdown"), "{text}");
 }
 
 #[test]
@@ -85,11 +87,11 @@ fn json_carries_a_versioned_schema_that_reconciles() {
     let report: serde_json::Value =
         serde_json::from_slice(&out.stdout).expect("json parses");
 
-    assert_eq!(report["schema_version"], 2);
+    assert_eq!(report["schema_version"], 3);
     assert_eq!(report["tool"], "ernest");
     assert_eq!(report["unit"], "chars");
 
-    // The headline cohort leads, so a documentation format cannot displace it.
+    // Source leads the breakdown, so a documentation format cannot displace it.
     let cohort = &report["cohorts"][0];
     assert_eq!(cohort["cohort"], "source");
     let summed: u64 = cohort["languages"]
@@ -109,7 +111,8 @@ fn json_carries_a_versioned_schema_that_reconciles() {
         .sum();
     assert_eq!(cohort["prose_chars"].as_u64().unwrap(), per_file);
 
-    // Docs never fold into the headline, however much prose they carry.
+    // Docs carry prose and it reaches the headline: the total is every cohort
+    // summed, so no cohort's prose can go missing from it.
     let docs = report["cohorts"]
         .as_array()
         .unwrap()
@@ -117,6 +120,19 @@ fn json_carries_a_versioned_schema_that_reconciles() {
         .find(|c| c["cohort"] == "docs")
         .expect("the markdown fixture lands in a docs cohort");
     assert!(docs["prose_chars"].as_u64().unwrap() > 0);
+
+    let across: u64 = report["cohorts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["prose_chars"].as_u64().unwrap())
+        .sum();
+    assert_eq!(report["total"]["prose_chars"].as_u64().unwrap(), across);
+    assert!(
+        report["total"]["prose_chars"].as_u64().unwrap()
+            > cohort["prose_chars"].as_u64().unwrap(),
+        "docs prose must reach the total, not stop at the source cohort"
+    );
 }
 
 #[test]
@@ -154,6 +170,143 @@ fn diff_reports_the_prose_a_change_removed() {
     );
     assert!(text.contains("0.0%"), "density should land at zero:\n{text}");
     assert!(text.contains("sample.php"), "should name the file:\n{text}");
+}
+
+/// The property the headline exists to have. Prose moved out of a comment and
+/// into a document has not been de-prosed, so the number must not reward it —
+/// while the cohort rows still show that it moved.
+#[test]
+fn relocating_prose_into_a_document_does_not_move_the_headline() {
+    let dir = scratch("relocation");
+    let code = dir.join("sample.php");
+    let doc = dir.join("guide.md");
+
+    // A block comment, so the whole body carries one delimiter pair however
+    // long it grows — `/*` and `*/`, four characters, the only prose the move
+    // can destroy. A line comment per line would lose `//` twelve times over.
+    let prose: String = (1..=12)
+        .map(|n| format!("Paragraph {n} explains at length why the widget reticulates.\n"))
+        .collect();
+    let statements: String = (1..=12)
+        .map(|n| format!("$widget{n} = reticulate($spline{n}, $tolerance{n});\n"))
+        .collect();
+
+    std::fs::write(&code, format!("<?php\n/*\n{prose}*/\n{statements}")).unwrap();
+    std::fs::write(&doc, "# Guide\n").unwrap();
+
+    let before = dir.join("before.json");
+    let out = ernest(&[dir.to_str().unwrap(), "--json"]);
+    std::fs::write(&before, &out.stdout).unwrap();
+    let before_json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+
+    // Move it: out of the comment, into the document. Nothing is deleted.
+    std::fs::write(&code, format!("<?php\n{statements}")).unwrap();
+    std::fs::write(&doc, format!("# Guide\n\n{prose}")).unwrap();
+
+    let after = dir.join("after.json");
+    let out = ernest(&[dir.to_str().unwrap(), "--json"]);
+    std::fs::write(&after, &out.stdout).unwrap();
+    let after_json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+
+    let density = |v: &serde_json::Value| v["density"].as_f64().expect("a density");
+    let source = |v: &serde_json::Value| {
+        v["cohorts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["cohort"] == "source")
+            .map(density)
+            .expect("a source cohort")
+    };
+
+    // Pin the delimiter story exactly, so the tolerance below is a known
+    // quantity rather than a shrug: the move destroyed `/*` and `*/`, and
+    // nothing else.
+    let prose_before = before_json["total"]["prose_chars"].as_u64().unwrap();
+    let prose_after = after_json["total"]["prose_chars"].as_u64().unwrap();
+    assert_eq!(
+        prose_before - prose_after,
+        4,
+        "only the block delimiters should have been lost"
+    );
+    assert_eq!(
+        before_json["total"]["code_chars"], after_json["total"]["code_chars"],
+        "no code was touched"
+    );
+
+    let (total_before, total_after) = (density(&before_json["total"]), density(&after_json["total"]));
+    assert!(
+        (total_after - total_before).abs() < 0.005,
+        "headline moved on a pure relocation: {total_before} -> {total_after}"
+    );
+    // The old headline was the source cohort alone — this is the drop it used
+    // to report as an improvement.
+    assert!(
+        source(&after_json) < source(&before_json) - 0.4,
+        "the source cohort should still show the prose leaving it: {} -> {}",
+        source(&before_json),
+        source(&after_json)
+    );
+
+    // And the diff says so out loud: a headline standing still above two cohort
+    // rows moving hard in opposite directions.
+    let out = ernest(&["diff", before.to_str().unwrap(), after.to_str().unwrap()]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    let headline = text.lines().next().unwrap();
+    let pp: f64 = headline
+        .split_once('(')
+        .and_then(|(_, rest)| rest.split_once(" pp"))
+        .map(|(pp, _)| pp.trim().parse().expect("a pp delta"))
+        .unwrap_or_else(|| panic!("no pp delta in:\n{text}"));
+    assert!(
+        pp.abs() < 0.5,
+        "the headline delta should read as a no-op, got {pp} pp:\n{text}"
+    );
+    assert!(
+        text.contains("-607") && text.contains("+603"),
+        "the cohort rows should show where the prose went:\n{text}"
+    );
+}
+
+/// Prose that is the product rather than prose about the code. Declared, never
+/// inferred — and said out loud, because a corpus that vanished silently would
+/// read as a repository with less prose in it.
+#[test]
+fn an_ernestignore_excludes_a_declared_corpus_and_says_so() {
+    let dir = scratch("corpus");
+    std::fs::create_dir_all(dir.join("stories")).unwrap();
+    std::fs::write(dir.join("sample.php"), "<?php\n// A note.\n$x = 1;\n").unwrap();
+    std::fs::write(
+        dir.join("stories/chapter-one.md"),
+        "# Chapter One\n\nThe rain fell on the reticulated widget for a long time.\n",
+    )
+    .unwrap();
+
+    let measured = ernest(&[dir.to_str().unwrap(), "--json"]);
+    let with_corpus: serde_json::Value = serde_json::from_slice(&measured.stdout).unwrap();
+    assert_eq!(with_corpus["files_scanned"], 2);
+
+    std::fs::write(dir.join(".ernestignore"), "stories/\n").unwrap();
+
+    let out = ernest(&[dir.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains(".ernestignore applied"),
+        "an excluded corpus must be declared in the report:\n{text}"
+    );
+    assert!(
+        !text.contains("markdown"),
+        "the corpus should be gone from the breakdown:\n{text}"
+    );
+
+    // Honored at every scope: a corpus is not ernest's subject at any of them,
+    // which is what separates this from the git-derived rules.
+    for scope in ["shared", "local", "all"] {
+        let out = ernest(&[dir.to_str().unwrap(), "--scope", scope, "--json"]);
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(report["files_scanned"], 1, "corpus leaked at --scope {scope}");
+    }
 }
 
 #[test]

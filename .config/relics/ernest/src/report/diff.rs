@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Result, bail};
 
-use crate::aggregate::{CohortReport, HEADLINE_COHORT, LanguageReport, Report};
+use crate::aggregate::{CohortReport, LanguageReport, Report, SOURCE_COHORT};
 use crate::span::{Counts, Unit};
 use crate::walk::Provenance;
 
@@ -27,17 +27,15 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
     let mut out = String::new();
 
     let (b, a) = (before.headline(), after.headline());
-    if b.is_none() && a.is_none() {
-        // A zero source delta beside a moving docs table reads as a bug.
-        out.push_str("prose density  n/a   (nothing in the source cohort)\n");
+    if before.cohorts.is_empty() && after.cohorts.is_empty() {
+        out.push_str("prose density  n/a   (no supported files found)\n");
     } else {
-        let prose_delta = a.map_or(0, |c| c.counts.prose(unit) as i64)
-            - b.map_or(0, |c| c.counts.prose(unit) as i64);
+        let prose_delta = a.counts.prose(unit) as i64 - b.counts.prose(unit) as i64;
         out.push_str(&format!(
             "prose density  {} -> {}   ({} pp,  prose {} {})\n",
-            percent(b.and_then(|c| c.density)),
-            percent(a.and_then(|c| c.density)),
-            percent_delta(b.and_then(|c| c.density), a.and_then(|c| c.density)),
+            percent(b.density),
+            percent(a.density),
+            percent_delta(b.density, a.density),
             signed(prose_delta),
             unit.label(),
         ));
@@ -49,22 +47,30 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
         before.cohorts.iter().map(|c| c.cohort.clone()),
         after.cohorts.iter().map(|c| c.cohort.clone()),
     );
-    // The headline cohort leads, as it does in the reports being compared.
-    cohorts.sort_by_key(|c| (c != HEADLINE_COHORT, c.clone()));
+    // Source leads, as it does in the reports being compared.
+    cohorts.sort_by_key(|c| (c != SOURCE_COHORT, c.clone()));
 
     let mut breakdown = Table::new(vec![
-        Column::left("cohort / language"),
+        Column::left("total / cohort / language"),
         Column::left("provenance"),
         Column::right("density"),
         Column::right("pp delta"),
         Column::right("prose"),
         Column::right("prose delta"),
     ]);
+    // Relocation is the case this table exists to expose: a headline holding
+    // still above two cohort rows moving in opposite directions.
+    if !cohorts.is_empty() {
+        breakdown.push(
+            0,
+            row("total", "", a.density, b.density, a.counts, b.counts, unit),
+        );
+    }
     for cohort in cohorts {
         let b = before.cohorts.iter().find(|c| c.cohort == cohort);
         let a = after.cohorts.iter().find(|c| c.cohort == cohort);
         breakdown.push(
-            0,
+            1,
             row(
                 &cohort,
                 "",
@@ -86,7 +92,7 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
             let lb = language_row(b, provenance, &language);
             let la = language_row(a, provenance, &language);
             breakdown.push(
-                1,
+                2,
                 row(
                     &language,
                     provenance.label(),
