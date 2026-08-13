@@ -158,6 +158,30 @@ reach, and nothing in the tool would have said a word.
 
 ---
 
+## Change-scoped ranking
+
+`--by file` ranks the repository. That is the right scope for the headline —
+relocation-invariance needs it — and the wrong one for the ranking, and today
+they are the same scope. On the call site that matters, an agent measuring
+before and after its own edit across fifty files, a repository-wide ranking is
+stationary: the same large documents lead it either way, so it says nothing
+about the change. Making the body opt-in was the interim answer; splitting the
+two scopes is the real one.
+
+Two shapes, sketched and unbuilt:
+
+- `--changed [REF]` — rank only what differs from `REF`, default `HEAD`, while
+  the headline stays repository-wide. git already answers this, so ernest asks
+  it rather than reimplements it — the same delegation `.gitignore` gets.
+- `--focus <pathspec>` — rank only what matches, for a change that is not yet a
+  commit or spans a directory rather than a diff. `--changed` is then sugar
+  over it.
+
+Neither touches the headline. The split to make first is between what is
+*computed* (`aggregate::Views`) and what is *ranked*: `aggregate::run` already
+holds every `Outcome`, so the ranking scope is a predicate applied before the
+`by_file` map, not a second walk.
+
 ## Committed baselines
 
 An `.ernest-baseline` file and `ernest check`, so the before/after loop survives
@@ -184,8 +208,3 @@ than the file extension.
 
 Once the format list branches out — this is a crate that will want its own
 history, benches and CI. See `~/.config/reliquary/GRADUATION.md`.
-
-## Amend `deprose.md`
-
-To name the metric, once it has proven itself in real use. It currently says
-"this is not a quantified metric, this is a mantra".

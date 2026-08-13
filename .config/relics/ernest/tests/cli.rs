@@ -37,12 +37,30 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
+/// A bare run is the figure and the caveats on it. No breakdown: a
+/// repository-wide ranking is stationary — it reads the same before and after
+/// the change being measured — so every one of them is asked for.
 #[test]
 fn reports_and_exits_clean() {
     let out = ernest(&[fixtures().to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.starts_with("prose density"), "{text}");
+    assert!(
+        !text.contains("total / cohort"),
+        "a bare run carries no breakdown:\n{text}"
+    );
+    // Nothing was asked for, so the reader is told what could be.
+    assert!(text.contains("--by file"), "{text}");
+}
+
+/// Every fixture language reaches the report, derived from the fixture
+/// directories rather than a literal list — so a new format is covered the day
+/// its fixture lands rather than the day someone widens a list.
+#[test]
+fn every_fixture_language_reaches_the_breakdown() {
+    let out = ernest(&[fixtures().to_str().unwrap(), "--by", "language"]);
+    let text = String::from_utf8(out.stdout).unwrap();
     for language in fixture_languages() {
         assert!(
             text.contains(&language),
@@ -60,7 +78,7 @@ fn reports_and_exits_clean() {
 /// would break on every format added after it.
 #[test]
 fn the_table_rolls_up_from_languages_through_cohorts_to_the_total() {
-    let out = ernest(&[fixtures().to_str().unwrap()]);
+    let out = ernest(&[fixtures().to_str().unwrap(), "--by", "language"]);
     let text = String::from_utf8(out.stdout).unwrap();
     let lines: Vec<&str> = text.lines().collect();
 
@@ -69,9 +87,11 @@ fn the_table_rolls_up_from_languages_through_cohorts_to_the_total() {
         .iter()
         .position(|l| l.contains("total / cohort / language"))
         .unwrap_or_else(|| panic!("no breakdown heading in:\n{text}"));
+    // The blank line that ends the block, not the indent — the notes under it
+    // are indented too, and only the blank line separates the two.
     let rows: Vec<(usize, &str)> = lines[start..]
         .iter()
-        .take_while(|l| l.starts_with("  "))
+        .take_while(|l| !l.trim().is_empty())
         .map(|l| {
             let label = l.trim_start();
             (
@@ -211,7 +231,13 @@ fn diff_reports_the_prose_a_change_removed() {
     let out = ernest(&[dir.to_str().unwrap(), "--json", "--by", "file"]);
     std::fs::write(&after, &out.stdout).unwrap();
 
-    let out = ernest(&["diff", before.to_str().unwrap(), after.to_str().unwrap()]);
+    let out = ernest(&[
+        "diff",
+        before.to_str().unwrap(),
+        after.to_str().unwrap(),
+        "--by",
+        "file",
+    ]);
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8(out.stdout).unwrap();
 
@@ -310,7 +336,13 @@ fn relocating_prose_into_a_document_does_not_move_the_headline() {
 
     // And the diff says so out loud: a headline standing still above two cohort
     // rows moving hard in opposite directions.
-    let out = ernest(&["diff", before.to_str().unwrap(), after.to_str().unwrap()]);
+    let out = ernest(&[
+        "diff",
+        before.to_str().unwrap(),
+        after.to_str().unwrap(),
+        "--by",
+        "cohort",
+    ]);
     let text = String::from_utf8(out.stdout).unwrap();
     let headline = text.lines().next().unwrap();
     let pp: f64 = headline
@@ -348,12 +380,18 @@ fn an_ernestignore_excludes_a_declared_corpus_and_says_so() {
 
     std::fs::write(dir.join(".ernestignore"), "stories/\n").unwrap();
 
-    let out = ernest(&[dir.to_str().unwrap()]);
+    // With the breakdown asked for, so the absence below is an absence from
+    // something rather than from a report that never names a language.
+    let out = ernest(&[dir.to_str().unwrap(), "--by", "language"]);
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(
         text.contains(".ernestignore applied"),
         "an excluded corpus must be declared in the report:\n{text}"
+    );
+    assert!(
+        text.contains("php"),
+        "the breakdown should still name what was measured:\n{text}"
     );
     assert!(
         !text.contains("markdown"),
@@ -614,11 +652,123 @@ fn an_extensionless_script_is_measured_by_its_shebang() {
 
 #[test]
 fn lang_narrows_the_measurement() {
-    let out = ernest(&[fixtures().to_str().unwrap(), "--lang", "yaml"]);
+    let out = ernest(&[
+        fixtures().to_str().unwrap(),
+        "--lang",
+        "yaml",
+        "--by",
+        "language",
+    ]);
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.contains("yaml"), "{text}");
     assert!(
         !text.contains("php"),
         "php should have been excluded:\n{text}"
     );
+}
+
+/// The gate's dialect. `--quiet` writes what `--max-density` reads, so the two
+/// sides of a threshold speak the same language and neither needs stripping.
+#[test]
+fn quiet_writes_the_value_and_nothing_else() {
+    let out = ernest(&[fixtures().to_str().unwrap(), "--quiet"]);
+    assert_eq!(out.status.code(), Some(0));
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(text, "38.2\n");
+}
+
+/// `n/a` rather than a number, matching `null` in the snapshot: nothing
+/// countable was found, which is not the same as no prose.
+#[test]
+fn quiet_says_n_a_when_nothing_was_countable() {
+    let out = ernest(&[fixtures().to_str().unwrap(), "--lang", "nothing", "-q"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), "n/a\n");
+}
+
+#[test]
+fn quiet_still_reports_the_verdict_through_the_exit_code() {
+    let out = ernest(&[fixtures().to_str().unwrap(), "-q", "--max-density", "0"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), "38.2\n");
+    assert!(String::from_utf8(out.stderr).unwrap().contains("exceeds"));
+}
+
+/// The alias and the format it names are one flag with two spellings, and
+/// asking for both is a contradiction rather than a preference.
+#[test]
+fn the_format_aliases_agree_and_refuse_to_be_combined() {
+    let dir = fixtures();
+    let dir = dir.to_str().unwrap();
+    assert_eq!(
+        ernest(&[dir, "--json"]).stdout,
+        ernest(&[dir, "--format", "json"]).stdout
+    );
+    assert_eq!(
+        ernest(&[dir, "--quiet"]).stdout,
+        ernest(&[dir, "--format", "value"]).stdout
+    );
+    for argv in [
+        vec![dir, "--json", "--format", "text"],
+        vec![dir, "--quiet", "--json"],
+        vec![dir, "--quiet", "--by", "file"],
+    ] {
+        assert_eq!(ernest(&argv).status.code(), Some(2), "{argv:?}");
+    }
+}
+
+/// `--by` is global, so it means the same thing to a comparison as to a
+/// measurement — and a flag that only worked before the subcommand would be a
+/// parser artifact rather than a design.
+#[test]
+fn by_reaches_the_diff_subcommand_from_either_side() {
+    let dir = scratch("global");
+    std::fs::write(dir.join("sample.php"), "<?php\n// A note.\n$x = 1;\n").unwrap();
+    let before = dir.join("before.json");
+    let out = ernest(&[dir.to_str().unwrap(), "--json", "--by", "file"]);
+    std::fs::write(&before, &out.stdout).unwrap();
+
+    std::fs::write(dir.join("sample.php"), "<?php\n$x = 1;\n").unwrap();
+    let after = dir.join("after.json");
+    let out = ernest(&[dir.to_str().unwrap(), "--json", "--by", "file"]);
+    std::fs::write(&after, &out.stdout).unwrap();
+
+    let (before, after) = (before.to_str().unwrap(), after.to_str().unwrap());
+    let ahead = ernest(&["--by", "file", "diff", before, after]);
+    let behind = ernest(&["diff", before, after, "--by", "file"]);
+    assert_eq!(ahead.status.code(), Some(0));
+    assert_eq!(ahead.stdout, behind.stdout);
+    assert!(
+        String::from_utf8(behind.stdout)
+            .unwrap()
+            .contains("sample.php")
+    );
+}
+
+/// A truncated list that looks complete is worse than no list, and 0 is the one
+/// reading of `--top` that has no other spelling.
+#[test]
+fn top_bounds_a_ranked_view_and_zero_lifts_the_bound() {
+    let dir = fixtures();
+    let dir = dir.to_str().unwrap();
+
+    let capped = ernest(&[dir, "--by", "file", "--top", "2"]);
+    let text = String::from_utf8(capped.stdout).unwrap();
+    assert!(text.contains("more files"), "{text}");
+
+    let whole = ernest(&[dir, "--by", "file", "--top", "0"]);
+    let text = String::from_utf8(whole.stdout).unwrap();
+    assert!(!text.contains("more files"), "{text}");
+    for language in fixture_languages() {
+        assert!(text.contains(&language), "{language} missing from:\n{text}");
+    }
+}
+
+/// One file is not one files.
+#[test]
+fn a_count_agrees_with_its_noun() {
+    let path = fixtures().join("yaml/adversarial.yaml");
+    let out = ernest(&[path.to_str().unwrap()]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("1 file measured"), "{text}");
 }

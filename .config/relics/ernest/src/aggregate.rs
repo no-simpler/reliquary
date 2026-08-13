@@ -18,6 +18,11 @@ pub const SCHEMA_VERSION: u32 = 3;
 /// longer the headline, which sums every cohort.
 pub const SOURCE_COHORT: &str = "source";
 
+/// The cohort documentation formats land in. Its density sits near 100% in any
+/// real project, so volume is what carries its own signal — but its prose still
+/// counts toward the headline.
+pub const DOCS_COHORT: &str = "docs";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
     pub schema_version: u32,
@@ -106,12 +111,25 @@ impl Report {
     }
 }
 
-/// Which extra rows to carry. Both are off by default: the summary is what a
-/// bare run is for, and the rows are what a de-prosing pass drills into.
+/// Which breakdowns to show. All off by default: a bare run is the figure, and
+/// every breakdown of it is a question a caller asks on purpose.
+///
+/// A repository-wide breakdown is stationary — it describes the tree rather than
+/// the change just made to it — so showing one unasked spends a reader's
+/// attention on rows that read the same before and after the work.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Views {
+    pub by_cohort: bool,
+    pub by_language: bool,
     pub by_file: bool,
     pub by_section: bool,
+}
+
+impl Views {
+    /// Whether any breakdown was asked for. What the affordance note keys on.
+    pub fn any(&self) -> bool {
+        self.by_cohort || self.by_language || self.by_file || self.by_section
+    }
 }
 
 /// Accumulated counts and file tally for one `(language, provenance)` row,

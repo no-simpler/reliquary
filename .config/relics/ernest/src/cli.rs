@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use ernest::aggregate::Views;
+use ernest::report::Presentation;
 use ernest::span::Unit;
 use ernest::walk::Scope;
 
@@ -22,7 +23,43 @@ pub struct Cli {
     pub command: Option<Command>,
 
     #[command(flatten)]
+    pub view: View,
+
+    #[command(flatten)]
     pub measure: Measure,
+}
+
+/// How to present a report. Global, because `diff` presents one too and a view
+/// flag that reached only the measurement would leave the two renderers
+/// disagreeing about what `--by` means.
+#[derive(Debug, Args)]
+pub struct View {
+    /// Which breakdowns to show. None by default: a bare run is the figure.
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        value_delimiter = ',',
+        value_name = "VIEW"
+    )]
+    pub by: Vec<ViewArg>,
+
+    /// Rows in each ranked view, most prose first. 0 shows every row.
+    #[arg(long, global = true, default_value_t = 20, value_name = "N")]
+    pub top: usize,
+
+    /// What to write. `value` is the density alone, for a caller that acts on
+    /// the exit code.
+    #[arg(long, global = true, value_enum, value_name = "FORMAT")]
+    pub format: Option<FormatArg>,
+
+    /// Emit a machine-readable snapshot instead of a report.
+    #[arg(long, global = true, conflicts_with_all = ["format", "quiet"])]
+    pub json: bool,
+
+    /// Write the density and nothing else.
+    #[arg(long, short, global = true, conflicts_with_all = ["format", "by"])]
+    pub quiet: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -42,14 +79,6 @@ pub struct Measure {
     #[arg(default_value = ".")]
     pub paths: Vec<PathBuf>,
 
-    /// Emit a machine-readable snapshot instead of a report.
-    #[arg(long)]
-    pub json: bool,
-
-    /// Extra rows to carry, most prose first. Sections are a documentation view.
-    #[arg(long, value_enum, value_delimiter = ',', value_name = "VIEW")]
-    pub by: Vec<ViewArg>,
-
     /// What to count. Characters are canonical; lines are the familiar proxy.
     #[arg(long, value_enum, default_value_t = UnitArg::Chars)]
     pub unit: UnitArg,
@@ -68,13 +97,59 @@ pub struct Measure {
     pub max_density: Option<f64>,
 }
 
-impl Measure {
+impl View {
     pub fn views(&self) -> Views {
         Views {
+            by_cohort: self.by.contains(&ViewArg::Cohort),
+            by_language: self.by.contains(&ViewArg::Language),
             by_file: self.by.contains(&ViewArg::File),
             by_section: self.by.contains(&ViewArg::Section),
         }
     }
+
+    pub fn presentation(&self) -> Presentation {
+        Presentation {
+            views: self.views(),
+            // 0 is "no limit". Asking for nothing is already spelled by omitting
+            // `--by`, so the spare value buys the reading that has no other
+            // spelling.
+            top: if self.top == 0 { usize::MAX } else { self.top },
+        }
+    }
+
+    /// The one place output mode is decided. The two booleans are the shorter
+    /// spellings of the formats they name, and clap refuses them together.
+    pub fn format(&self) -> Format {
+        if self.json {
+            return Format::Json;
+        }
+        if self.quiet {
+            return Format::Value;
+        }
+        match self.format {
+            Some(FormatArg::Json) => Format::Json,
+            Some(FormatArg::Value) => Format::Value,
+            Some(FormatArg::Text) | None => Format::Text,
+        }
+    }
+}
+
+/// The resolved output mode, once the aliases have been folded in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    Text,
+    Json,
+    Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum FormatArg {
+    /// The report.
+    Text,
+    /// A snapshot, for `ernest diff`.
+    Json,
+    /// The density alone.
+    Value,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -92,12 +167,18 @@ impl From<UnitArg> for Unit {
     }
 }
 
+/// Declared most-asked-for first: the order `--help` prints and the order the
+/// affordance note names them in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ViewArg {
-    /// One row per file.
+    /// One row per file, most prose first.
     File,
     /// One row per innermost heading of a document.
     Section,
+    /// The total and the cohorts it sums.
+    Cohort,
+    /// The same, decomposed one level further into languages.
+    Language,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

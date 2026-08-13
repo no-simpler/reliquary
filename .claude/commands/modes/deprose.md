@@ -5,9 +5,9 @@ disable-model-invocation: true
 
 # Deprose mode
 
-Prose volume per line-of-code must go **down**, or at worst stay the same.
-This is not a quantified metric, this is a mantra.
-In scope: all related and quasi-related prose you come across.
+Prose density must go **down**, or at worst stay the same.
+Measure by calling `ernest` util from project root.
+Call before changes (or with changes stashed) and after.
 
 Prioritise deleting prose.
 Fall back to compacting prose.

@@ -1,78 +1,109 @@
-//! The default report.
+//! The text report.
+//!
+//! A headline that always shows, breakdowns that show only when `--by` names
+//! them, and notes that each fire on their own condition. A bare run is the
+//! figure it was called for and the caveats on that figure, nothing else.
 
-use crate::aggregate::{Report, SOURCE_COHORT};
-use crate::span::Unit;
+use crate::aggregate::{DOCS_COHORT, Report, SOURCE_COHORT};
+use crate::span::Counts;
 
+use super::notes::Notes;
 use super::table::{Column, Table};
-use super::{percent, thousands};
+use super::{Blocks, Presentation, percent, thousands};
 
-/// Rows shown before the rest are summarised away.
-const ROWS: usize = 20;
+pub fn render(report: &Report, show: Presentation) -> String {
+    let mut blocks = Blocks::default();
+    blocks.push(headline(report));
+    blocks.push(breakdown(report, show));
+    blocks.push(ranked(report, show, Rank::File));
+    blocks.push(ranked(report, show, Rank::Section));
+    blocks.push(notes(report, show).render());
+    blocks.render()
+}
 
-/// Extensions named before the rest are summarised away.
-const GAPS: usize = 6;
+/// The density alone, for a caller acting on the exit code. `n/a` rather than a
+/// number when nothing countable was found, matching what the snapshot carries.
+pub fn value(report: &Report) -> String {
+    match report.headline().density {
+        Some(density) => format!("{:.1}\n", density * 100.0),
+        None => "n/a\n".to_string(),
+    }
+}
 
-/// The cohort documentation formats land in. Its density sits near 100% in any
-/// real project, so volume is what carries its own signal — but its prose still
-/// counts toward the headline.
-const DOCS_COHORT: &str = "docs";
-
-pub fn render(report: &Report) -> String {
+/// The figure, and the one comparator that complements rather than repeats it.
+fn headline(report: &Report) -> String {
     let unit = report.unit;
-    let mut out = String::new();
-
     let total = report.headline();
     if report.cohorts.is_empty() {
-        out.push_str("prose density  n/a   (no supported files found)\n");
-    } else {
-        let base = total.counts.prose(unit) + total.counts.code(unit);
-        out.push_str(&format!(
-            "prose density  {}   (prose {} / base {} {})\n",
-            percent(total.density),
-            thousands(total.counts.prose(unit)),
-            thousands(base),
-            unit.label(),
-        ));
+        return "prose density  n/a   (no supported files found)\n".to_string();
     }
+    let base = total.counts.prose(unit) + total.counts.code(unit);
+    format!(
+        "prose density  {}   (prose {} / base {} {})\n{}",
+        percent(total.density),
+        thousands(total.counts.prose(unit)),
+        thousands(base),
+        unit.label(),
+        docs_line(report),
+    )
+}
 
-    out.push('\n');
-    let mut breakdown = Table::new(vec![
-        Column::left("total / cohort / language"),
-        Column::left("provenance"),
+/// The roll-up leads its group and its parts indent under it, so the table
+/// visibly sums to the headline rather than sitting beside it.
+fn breakdown(report: &Report, show: Presentation) -> String {
+    if report.cohorts.is_empty() || !(show.views.by_cohort || show.views.by_language) {
+        return String::new();
+    }
+    let unit = report.unit;
+    let total = report.headline();
+    // `--by language` is `--by cohort` decomposed one level further, so asking
+    // for both is asking for the deeper one.
+    let languages = show.views.by_language;
+
+    // Provenance only ever varies on a language row, and a column sizes to its
+    // header even when every cell under it is blank — so the shallower table
+    // does not carry one.
+    let mut columns = vec![Column::left(if languages {
+        "total / cohort / language"
+    } else {
+        "total / cohort"
+    })];
+    if languages {
+        columns.push(Column::left("provenance"));
+    }
+    columns.extend([
         Column::right("density"),
         Column::right("prose"),
         Column::right("code"),
         Column::right("files"),
     ]);
-    // The roll-up leads its group and its parts indent under it, so the table
-    // visibly sums to the headline rather than sitting beside it.
-    if !report.cohorts.is_empty() {
-        breakdown.push(
-            0,
-            vec![
-                "total".to_string(),
-                String::new(),
-                percent(total.density),
-                thousands(total.counts.prose(unit)),
-                thousands(total.counts.code(unit)),
-                thousands(total.files),
-            ],
-        );
-    }
+    let mut table = Table::new(columns);
+
+    let roll = |label: &str, density: Option<f64>, counts: Counts, files: u64| {
+        let mut row = vec![label.to_string()];
+        if languages {
+            row.push(String::new());
+        }
+        row.extend([
+            percent(density),
+            thousands(counts.prose(unit)),
+            thousands(counts.code(unit)),
+            thousands(files),
+        ]);
+        row
+    };
+
+    table.push(0, roll("total", total.density, total.counts, total.files));
     for cohort in &report.cohorts {
-        breakdown.push(
+        table.push(
             1,
-            vec![
-                cohort.cohort.clone(),
-                String::new(),
-                percent(cohort.density),
-                thousands(cohort.counts.prose(unit)),
-                thousands(cohort.counts.code(unit)),
-                thousands(cohort.files),
-            ],
+            roll(&cohort.cohort, cohort.density, cohort.counts, cohort.files),
         );
+        if !languages {
+            continue;
+        }
         for language in &cohort.languages {
-            breakdown.push(
+            table.push(
                 2,
                 vec![
                     language.language.clone(),
@@ -85,126 +116,94 @@ pub fn render(report: &Report) -> String {
             );
         }
     }
-    out.push_str(&breakdown.render());
-
-    out.push_str(&docs_line(report));
-
-    if let Some(files) = &report.files {
-        out.push('\n');
-        let mut table = rows_table("file");
-        for file in files.iter().take(ROWS) {
-            table.push(
-                0,
-                vec![
-                    percent(file.density),
-                    thousands(file.counts.prose(unit)),
-                    thousands(file.counts.code(unit)),
-                    file.path.clone(),
-                ],
-            );
-        }
-        out.push_str(&table.render());
-        // Say what was left out; a truncated list that looks complete is worse
-        // than no list.
-        if files.len() > ROWS {
-            out.push_str(&format!(
-                "  … {} more files, ordered by prose; --json carries them all\n",
-                thousands((files.len() - ROWS) as u64),
-            ));
-        }
-    }
-
-    if let Some(sections) = &report.sections {
-        out.push('\n');
-        let mut table = rows_table("section");
-        for section in sections.iter().take(ROWS) {
-            table.push(
-                0,
-                vec![
-                    percent(section.density),
-                    thousands(section.counts.prose(unit)),
-                    thousands(section.counts.code(unit)),
-                    format!("{}#{}", section.path, section.section),
-                ],
-            );
-        }
-        out.push_str(&table.render());
-        if sections.len() > ROWS {
-            out.push_str(&format!(
-                "  … {} more sections, ordered by prose; --json carries them all\n",
-                thousands((sections.len() - ROWS) as u64),
-            ));
-        }
-    }
-
-    out.push('\n');
-    let uninteresting = report.headline().counts.ignored(unit);
-    if uninteresting > 0 {
-        out.push_str(&format!(
-            "  {} {} uninteresting — open tags, shebangs, tooling directives, generated regions\n",
-            thousands(uninteresting),
-            unit.label(),
-        ));
-    }
-    out.push_str(&format!(
-        "  {} files measured, {} skipped as unsupported",
-        thousands(report.files_scanned),
-        thousands(report.files_skipped),
-    ));
-    if report.files_failed > 0 {
-        out.push_str(&format!(", {} unreadable", thousands(report.files_failed)));
-    }
-    out.push('\n');
-    out.push_str(&unsupported_line(report));
-
-    for path in &report.ernestignore {
-        out.push_str(&format!(
-            "  {path} applied — a declared corpus is not measured\n"
-        ));
-    }
-
-    if unit == Unit::Lines {
-        out.push_str("  counting lines; a line belongs to whichever class holds most of it\n");
-    }
-
-    out
+    table.render()
 }
 
-/// Which extensions the skipped files were. The headline sums every cohort, so
-/// an unwritten profile pulls it toward whichever cohort *is* covered — this is
-/// what stops that reading as a measurement, and it names the profile to write.
-fn unsupported_line(report: &Report) -> String {
-    if report.unsupported.is_empty() {
+/// The two views that rank rather than roll up. They share a shape: measurements
+/// first, then the key, which is long and of no fixed width.
+#[derive(Clone, Copy)]
+enum Rank {
+    File,
+    Section,
+}
+
+fn ranked(report: &Report, show: Presentation, rank: Rank) -> String {
+    let unit = report.unit;
+    let (wanted, noun) = match rank {
+        Rank::File => (show.views.by_file, "file"),
+        Rank::Section => (show.views.by_section, "section"),
+    };
+    if !wanted {
         return String::new();
     }
-    let mut gaps: Vec<(&String, &u64)> = report.unsupported.iter().collect();
-    gaps.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+    let rows: Vec<(Option<f64>, u64, u64, String)> = match rank {
+        Rank::File => report
+            .files
+            .iter()
+            .flatten()
+            .map(|f| {
+                (
+                    f.density,
+                    f.counts.prose(unit),
+                    f.counts.code(unit),
+                    f.path.clone(),
+                )
+            })
+            .collect(),
+        Rank::Section => report
+            .sections
+            .iter()
+            .flatten()
+            .map(|s| {
+                (
+                    s.density,
+                    s.counts.prose(unit),
+                    s.counts.code(unit),
+                    format!("{}#{}", s.path, s.section),
+                )
+            })
+            .collect(),
+    };
 
-    let named: Vec<String> = gaps
-        .iter()
-        .take(GAPS)
-        .map(|(ext, n)| format!("{ext} {}", thousands(**n)))
-        .collect();
-    let mut line = format!("  unsupported: {}", named.join(", "));
-    if gaps.len() > GAPS {
-        line.push_str(&format!(
-            ", and {} more",
-            thousands((gaps.len() - GAPS) as u64)
-        ));
-    }
-    line.push('\n');
-    line
-}
-
-/// The shape both drill-down views share: measurements first, then the key,
-/// which is long and of no fixed width.
-fn rows_table(key: &'static str) -> Table {
-    Table::new(vec![
+    let mut table = Table::new(vec![
         Column::right("density"),
         Column::right("prose"),
         Column::right("code"),
-        Column::left(key),
-    ])
+        Column::left(noun),
+    ]);
+    for (density, prose, code, key) in rows.iter().take(show.top) {
+        table.push(
+            0,
+            vec![
+                percent(*density),
+                thousands(*prose),
+                thousands(*code),
+                key.clone(),
+            ],
+        );
+    }
+    table.render()
+}
+
+fn notes(report: &Report, show: Presentation) -> Notes {
+    let mut notes = Notes::default();
+    if let Some(files) = &report.files
+        && show.views.by_file
+    {
+        notes.truncated(show.top, files.len(), "file");
+    }
+    if let Some(sections) = &report.sections
+        && show.views.by_section
+    {
+        notes.truncated(show.top, sections.len(), "section");
+    }
+    notes.census(report);
+    notes.corpora(report);
+    notes.unit(report.unit);
+    if !show.views.any() {
+        notes.views(true);
+    }
+    notes
 }
 
 /// Documentation prose against the code it documents. A comparator for the
@@ -223,7 +222,7 @@ fn docs_line(report: &Report) -> String {
         return String::new();
     }
 
-    let mut line = format!("\n  docs prose {} {}", thousands(prose), unit.label());
+    let mut line = format!("  docs prose {} {}", thousands(prose), unit.label());
     if let Some(code) = report
         .cohort(SOURCE_COHORT)
         .map(|c| c.counts.code(unit))
@@ -248,4 +247,67 @@ fn docs_line(report: &Report) -> String {
     }
     line.push('\n');
     line
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::aggregate::{SCHEMA_VERSION, Totals};
+    use crate::span::Unit;
+    use std::collections::BTreeMap;
+
+    fn empty() -> Report {
+        Report {
+            schema_version: SCHEMA_VERSION,
+            tool: "ernest".to_string(),
+            unit: Unit::Chars,
+            files_scanned: 0,
+            files_skipped: 0,
+            files_failed: 0,
+            unsupported: BTreeMap::new(),
+            ernestignore: Vec::new(),
+            total: Totals::default(),
+            cohorts: Vec::new(),
+            files: None,
+            sections: None,
+        }
+    }
+
+    fn bare() -> Presentation {
+        Presentation {
+            views: Default::default(),
+            top: 20,
+        }
+    }
+
+    /// Nothing found is still a report, and it used to carry a stray blank line
+    /// where the unrequested table would have gone.
+    #[test]
+    fn a_report_of_nothing_has_no_gap_in_it() {
+        let text = render(&empty(), bare());
+        assert!(!text.contains("\n\n\n"), "{text:?}");
+        assert!(text.ends_with('\n'));
+    }
+
+    #[test]
+    fn a_bare_run_names_the_views_it_did_not_show() {
+        assert!(render(&empty(), bare()).contains("--by file|section|cohort|language"));
+    }
+
+    #[test]
+    fn asking_for_a_view_retires_the_menu() {
+        let show = Presentation {
+            views: crate::aggregate::Views {
+                by_language: true,
+                ..Default::default()
+            },
+            top: 20,
+        };
+        assert!(!render(&empty(), show).contains("--by file"));
+    }
+
+    #[test]
+    fn the_value_format_carries_the_absence_of_a_density() {
+        assert_eq!(value(&empty()), "n/a\n");
+    }
 }

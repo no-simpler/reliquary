@@ -1,21 +1,93 @@
 //! Comparing two snapshots — the workflow ernest exists for. Measure before,
 //! measure after, then look at where the difference came from.
+//!
+//! Same three registers as the measurement report, and the same `--by`: a bare
+//! diff is the delta, and the rows that produced it are asked for.
 
 use std::collections::BTreeMap;
 
 use anyhow::{Result, bail};
 
-use crate::aggregate::{CohortReport, LanguageReport, Report, SOURCE_COHORT};
+use crate::aggregate::{CohortReport, DOCS_COHORT, LanguageReport, Report, SOURCE_COHORT};
 use crate::span::{Counts, Unit};
 use crate::walk::Provenance;
 
+use super::notes::Notes;
 use super::table::{Column, Table};
-use super::{percent, percent_delta, signed, thousands};
+use super::{Blocks, Presentation, count, percent, percent_delta, signed, thousands};
 
-/// Movers shown before the rest are summarised away.
-const ROWS: usize = 20;
+pub fn render(before: &Report, after: &Report, show: Presentation) -> Result<String> {
+    let unit = same_unit(before, after)?;
+    let mut blocks = Blocks::default();
+    let mut notes = Notes::default();
 
-pub fn render(before: &Report, after: &Report) -> Result<String> {
+    blocks.push(headline(before, after, unit));
+    blocks.push(breakdown(before, after, show, unit));
+
+    if show.views.by_file {
+        match (&before.files, &after.files) {
+            (Some(b), Some(a)) => blocks.push(movers(
+                "file",
+                show,
+                &mut notes,
+                b.iter()
+                    .map(|f| (f.path.clone(), f.counts.prose(unit), f.density)),
+                a.iter()
+                    .map(|f| (f.path.clone(), f.counts.prose(unit), f.density)),
+            )),
+            _ => notes.push("per-file movement needs both snapshots taken with --by file"),
+        }
+    }
+
+    if show.views.by_section {
+        match (&before.sections, &after.sections) {
+            (Some(b), Some(a)) => {
+                let key = |path: &str, section: &str| format!("{path}#{section}");
+                blocks.push(movers(
+                    "section",
+                    show,
+                    &mut notes,
+                    b.iter()
+                        .map(|s| (key(&s.path, &s.section), s.counts.prose(unit), s.density)),
+                    a.iter()
+                        .map(|s| (key(&s.path, &s.section), s.counts.prose(unit), s.density)),
+                ))
+            }
+            _ => notes.push("per-section movement needs both snapshots taken with --by section"),
+        }
+    }
+
+    // A density delta is only about prose if the corpus behind it held still.
+    // Files arriving or leaving move the figure for a reason that is not work.
+    if before.files_scanned != after.files_scanned {
+        notes.push(format!(
+            "{} measured before, {} after — the corpus changed too",
+            count(before.files_scanned, "file"),
+            thousands(after.files_scanned),
+        ));
+    }
+    notes.corpora(after);
+    notes.unit(unit);
+    if !show.views.any() {
+        notes.views(false);
+    }
+    blocks.push(notes.render());
+
+    Ok(blocks.render())
+}
+
+/// The density alone, as a change in percentage points. What `--quiet` writes
+/// on this side, so a gate reading a diff speaks the dialect one reading a
+/// measurement does.
+pub fn quiet(before: &Report, after: &Report) -> Result<String> {
+    same_unit(before, after)?;
+    Ok(format!(
+        "{}\n",
+        percent_delta(before.headline().density, after.headline().density)
+    ))
+}
+
+fn same_unit(before: &Report, after: &Report) -> Result<Unit> {
     if before.unit != after.unit {
         bail!(
             "snapshots use different units ({} and {}) — re-measure both the same way",
@@ -23,23 +95,68 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
             after.unit.label()
         );
     }
-    let unit = after.unit;
-    let mut out = String::new();
+    Ok(after.unit)
+}
 
+fn headline(before: &Report, after: &Report, unit: Unit) -> String {
     let (b, a) = (before.headline(), after.headline());
     if before.cohorts.is_empty() && after.cohorts.is_empty() {
-        out.push_str("prose density  n/a   (no supported files found)\n");
-    } else {
-        let prose_delta = a.counts.prose(unit) as i64 - b.counts.prose(unit) as i64;
-        out.push_str(&format!(
-            "prose density  {} -> {}   ({} pp,  prose {} {})\n",
-            percent(b.density),
-            percent(a.density),
-            percent_delta(b.density, a.density),
-            signed(prose_delta),
-            unit.label(),
-        ));
+        return "prose density  n/a   (no supported files found)\n".to_string();
     }
+    let prose_delta = a.counts.prose(unit) as i64 - b.counts.prose(unit) as i64;
+    format!(
+        "prose density  {} -> {}   ({} pp,  prose {} {})\n{}",
+        percent(b.density),
+        percent(a.density),
+        percent_delta(b.density, a.density),
+        signed(prose_delta),
+        unit.label(),
+        docs_line(before, after, unit),
+    )
+}
+
+/// Documentation prose against the code it documents, before and after. The
+/// headline holds still on a pure relocation by design, so this is the line that
+/// moves and says where the prose went — which makes a comparison the place it
+/// earns its keep most.
+fn docs_line(before: &Report, after: &Report, unit: Unit) -> String {
+    let prose = |report: &Report| {
+        report
+            .cohort(DOCS_COHORT)
+            .map_or(0, |docs| docs.counts.prose(unit))
+    };
+    let (b, a) = (prose(before), prose(after));
+    if b == 0 && a == 0 {
+        return String::new();
+    }
+
+    let mut line = format!(
+        "  docs prose {} -> {} {}",
+        thousands(b),
+        thousands(a),
+        unit.label()
+    );
+    let against = |report: &Report, prose: u64| {
+        report
+            .cohort(SOURCE_COHORT)
+            .map(|c| c.counts.code(unit))
+            .filter(|code| *code > 0)
+            .map(|code| prose as f64 / code as f64 * 100.0)
+    };
+    if let (Some(b), Some(a)) = (against(before, b), against(after, a)) {
+        line.push_str(&format!(" — {b:.1}% -> {a:.1}% of source code"));
+    }
+    line.push('\n');
+    line
+}
+
+/// Relocation is the case this table exists to expose: a headline holding still
+/// above two cohort rows moving in opposite directions.
+fn breakdown(before: &Report, after: &Report, show: Presentation, unit: Unit) -> String {
+    if !(show.views.by_cohort || show.views.by_language) {
+        return String::new();
+    }
+    let languages = show.views.by_language;
 
     // Cohorts, provenances and languages present in either snapshot: something
     // that disappeared entirely is exactly the kind of movement worth seeing.
@@ -47,33 +164,49 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
         before.cohorts.iter().map(|c| c.cohort.clone()),
         after.cohorts.iter().map(|c| c.cohort.clone()),
     );
+    if cohorts.is_empty() {
+        return String::new();
+    }
     // Source leads, as it does in the reports being compared.
     cohorts.sort_by_key(|c| (c != SOURCE_COHORT, c.clone()));
 
-    let mut breakdown = Table::new(vec![
-        Column::left("total / cohort / language"),
-        Column::left("provenance"),
+    // Provenance only ever varies on a language row, and a column sizes to its
+    // header even when every cell under it is blank.
+    let mut columns = vec![Column::left(if languages {
+        "total / cohort / language"
+    } else {
+        "total / cohort"
+    })];
+    if languages {
+        columns.push(Column::left("provenance"));
+    }
+    columns.extend([
         Column::right("density"),
         Column::right("pp delta"),
         Column::right("prose"),
         Column::right("prose delta"),
     ]);
-    // Relocation is the case this table exists to expose: a headline holding
-    // still above two cohort rows moving in opposite directions.
-    if !cohorts.is_empty() {
-        breakdown.push(
-            0,
-            row("total", "", a.density, b.density, a.counts, b.counts, unit),
-        );
-    }
+    let mut table = Table::new(columns);
+
+    // A roll-up row in a table that carries the column still needs its blank
+    // cell; a table without the column needs no cell at all.
+    let blank = languages.then_some("");
+
+    let (b, a) = (before.headline(), after.headline());
+    table.push(
+        0,
+        row(
+            "total", blank, a.density, b.density, a.counts, b.counts, unit,
+        ),
+    );
     for cohort in cohorts {
         let b = before.cohorts.iter().find(|c| c.cohort == cohort);
         let a = after.cohorts.iter().find(|c| c.cohort == cohort);
-        breakdown.push(
+        table.push(
             1,
             row(
                 &cohort,
-                "",
+                blank,
                 a.and_then(|c| c.density),
                 b.and_then(|c| c.density),
                 a.map_or(Counts::default(), |c| c.counts),
@@ -81,6 +214,9 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
                 unit,
             ),
         );
+        if !languages {
+            continue;
+        }
 
         let rows = union(
             b.into_iter().flat_map(|c| {
@@ -97,11 +233,11 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
         for (language, provenance) in rows {
             let lb = language_row(b, provenance, &language);
             let la = language_row(a, provenance, &language);
-            breakdown.push(
+            table.push(
                 2,
                 row(
                     &language,
-                    provenance.label(),
+                    Some(provenance.label()),
                     la.and_then(|l| l.density),
                     lb.and_then(|l| l.density),
                     la.map_or(Counts::default(), |l| l.counts),
@@ -111,32 +247,7 @@ pub fn render(before: &Report, after: &Report) -> Result<String> {
             );
         }
     }
-    out.push('\n');
-    out.push_str(&breakdown.render());
-
-    match (&before.files, &after.files) {
-        (Some(bf), Some(af)) => out.push_str(&movers(
-            "file",
-            bf.iter()
-                .map(|f| (f.path.clone(), f.counts.prose(unit), f.density)),
-            af.iter()
-                .map(|f| (f.path.clone(), f.counts.prose(unit), f.density)),
-        )),
-        _ => out.push_str("\n  per-file movement needs both snapshots taken with --by file\n"),
-    }
-
-    if let (Some(bs), Some(as_)) = (&before.sections, &after.sections) {
-        let key = |path: &str, section: &str| format!("{path}#{section}");
-        out.push_str(&movers(
-            "section",
-            bs.iter()
-                .map(|s| (key(&s.path, &s.section), s.counts.prose(unit), s.density)),
-            as_.iter()
-                .map(|s| (key(&s.path, &s.section), s.counts.prose(unit), s.density)),
-        ));
-    }
-
-    Ok(out)
+    table.render()
 }
 
 fn language_row<'a>(
@@ -155,6 +266,8 @@ fn language_row<'a>(
 /// snapshot still shows, with its whole weight as the delta.
 fn movers(
     noun: &'static str,
+    show: Presentation,
+    notes: &mut Notes,
     before: impl Iterator<Item = (String, u64, Option<f64>)>,
     after: impl Iterator<Item = (String, u64, Option<f64>)>,
 ) -> String {
@@ -174,48 +287,42 @@ fn movers(
         .collect();
     rows.sort_by(|x, y| y.1.abs().cmp(&x.1.abs()).then_with(|| x.0.cmp(&y.0)));
 
-    if rows.is_empty() {
-        return String::new();
-    }
-
     let mut table = Table::new(vec![
         Column::right("prose delta"),
         Column::right("density"),
         Column::left(noun),
     ]);
-    for (key, delta, density) in rows.iter().take(ROWS) {
+    for (key, delta, density) in rows.iter().take(show.top) {
         table.push(0, vec![signed(*delta), percent(*density), key.clone()]);
     }
-    let mut out = format!("\n{}", table.render());
-    if rows.len() > ROWS {
-        out.push_str(&format!(
-            "  … {} more {}s moved\n",
-            thousands((rows.len() - ROWS) as u64),
-            noun
-        ));
-    }
-    out
+    notes.truncated(show.top, rows.len(), noun);
+    table.render()
 }
 
 /// A row is only comparable within its provenance: local prose and shared prose
 /// move for different reasons.
 fn row(
     label: &str,
-    provenance: &str,
+    provenance: Option<&str>,
     after: Option<f64>,
     before: Option<f64>,
     after_counts: Counts,
     before_counts: Counts,
     unit: Unit,
 ) -> Vec<String> {
-    vec![
-        label.to_string(),
-        provenance.to_string(),
+    let mut row = vec![label.to_string()];
+    // `None` is a table without the column at all; a roll-up row in a table that
+    // has one still needs its blank cell.
+    if let Some(provenance) = provenance {
+        row.push(provenance.to_string());
+    }
+    row.extend([
         percent(after),
         percent_delta(before, after),
         thousands(after_counts.prose(unit)),
         signed(after_counts.prose(unit) as i64 - before_counts.prose(unit) as i64),
-    ]
+    ]);
+    row
 }
 
 /// Ordered union of two key sequences, so a key in only one snapshot still shows.

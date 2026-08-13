@@ -72,7 +72,7 @@ Pillar reads 26.7%, `lib-messenger` 25.9%, `app-demand-planning` 0.8%, and
 or a document.
 
 The cost, stated: the headline no longer answers "how commented is my code."
-The `source` row still does, and the table rolls up through it.
+The `source` row still does, and `--by language` is where it is read.
 
 ### What that assumes
 
@@ -126,8 +126,8 @@ there.
   weight is the right answer, not an artifact.
 - **Code punctuation is code.** Braces scale with the code you chose to write,
   unlike `<?php`. The consequence: density is comparable *within* a language,
-  not across them, so the per-language table is the primary view and the total
-  reads as "this repository's mix".
+  not across them. The total reads as "this repository's mix"; a per-language
+  figure is read from `--by language`, and that caveat attaches there.
 - **Whitespace is never counted**, so the bytes between spans need no rule.
 
 The same line runs through Markdown's structure: what scales with the construct
@@ -181,7 +181,7 @@ src/
   detect.rs           path, then shebang -> profile
   walk.rs             scope, provenance, ignore::WalkBuilder, default excludes
   aggregate.rs        file -> (cohort, provenance, language) -> report
-  report/             table, human, json, diff
+  report/             blocks and notes, then table, human, json, diff
 ```
 
 `Cohort` splits `Source` from `Docs`. It is a breakdown, not a barrier: the
@@ -248,12 +248,65 @@ inferred from the walk, because `ignore` exempts a walk root from its own rules:
 without that, `ernest .claude --scope shared` would report the very files a
 clone cannot see.
 
-## Views
+## Output
 
-`--by file,section`. Sections are keyed `path#Heading > Subheading` and exist
-for the `Docs` cohort, where a file is too coarse a unit — a 90 KB spec that is
-98% prose says nothing about where to cut. Every byte belongs to its innermost
-enclosing section, so the per-character invariants still hold across the rows.
+Three registers. A **headline** that always shows — the figure, and under it the
+docs comparator when the `Docs` cohort carries prose. A **body** that shows only
+what `--by` names. **Notes**, each firing on its own condition. `report/blocks`
+joins them with exactly one blank line and drops the empty ones, so a view that
+produced nothing leaves no gap behind it.
+
+**A bare run has no body.** Every repository-wide breakdown is a stationary
+statistic: it describes the tree rather than the change just made to it, so the
+same rows lead it before and after the work. On the call site that dominates —
+an agent measuring its own edit — that costs tokens on every invocation and
+reads as though it were the answer. A session drilling into a whole repository
+asks for a breakdown on purpose and can afford the second call.
+
+```
+--by file        one row per file, most prose first
+--by section     one row per innermost heading of a document
+--by cohort      the total and the cohorts it sums
+--by language    the same, decomposed one level further
+--top N          rows in each ranked view; 0 shows every row      [default 20]
+```
+
+Comma-delimited and composable, and `--by` means the same thing to `ernest diff`
+as it does to a measurement — the flags are global, so either side of the
+subcommand parses. `--by language` contains `--by cohort`, so asking for both is
+asking for the deeper one.
+
+Sections are keyed `path#Heading > Subheading` and exist for the `Docs` cohort,
+where a file is too coarse a unit — a 90 KB spec that is 98% prose says nothing
+about where to cut. Every byte belongs to its innermost enclosing section, so the
+per-character invariants still hold across the rows.
+
+Only `--by section` costs anything: it swaps `analyze_file` for
+`analyze_sections` on `Docs` files. `file` is a map and a sort over results
+already in hand, and `cohort` and `language` are free — the roll-up is built on
+every run, because the headline needs the total and the docs comparator needs the
+cohorts.
+
+### Three channels, three promises
+
+`--format {text,json,value}`, with `--json` and `-q`/`--quiet` as the short
+spellings of the last two.
+
+- `--json` **is the contract.** `schema_version` moves when it changes, and
+  `ernest diff` refuses a snapshot from another schema.
+- `--quiet` is one line and one promise: the density as a bare number, `40.4`, or
+  `n/a`. It is what a hook or a `--max-density` gate reads, and `--max-density`
+  takes the same dialect back. On a diff it is the delta in percentage points.
+- **The text report carries no stability promise at all.** Columns, wording and
+  which lines appear may change in any release. That is git's porcelain
+  convention, and it buys the same thing: freedom to keep making the default
+  output better without breaking a caller, because a caller parsing it was told
+  not to. `tests/render/expected/` is what stops that freedom becoming drift —
+  every change to the text is a blessed diff someone read.
+
+Output carries no colour, on purpose. The primary reader pays for every ANSI byte
+and gains nothing from one, and a palette conditional on a TTY would make the
+output bimodal for the benefit of the caller that matters least.
 
 ## Adding a format
 
@@ -358,8 +411,21 @@ The `tests/fixtures/<language>/` directory name must equal `profile.language`:
 names, so a new fixture is covered the day it lands rather than the day someone
 widens a list.
 
+`tests/render.rs` guards the rendered output against blessed snapshots over the
+frozen trees in `tests/render/`, plus layout invariants asserted on every case
+rather than eyeballed in each snapshot: no two blank lines in a row, no trailing
+whitespace, exactly one final newline, no absolute path. `tests/cli.rs` asserts
+what a report *means* and `tests/render.rs` what it *looks like* — a roll-up that
+stops summing and a stray blank line are different failures, and neither suite
+should be able to absorb the other's.
+
+The render trees are frozen deliberately. `tests/fixtures/` grows every time a
+format lands, so snapshots over it would churn on changes that are not about
+rendering and drown the diff someone is meant to read.
+
 Regenerate expectations after a deliberate change with
-`ERNEST_BLESS=1 cargo test --test golden`, then **read the diff** — a blessed
+`ERNEST_BLESS=1 cargo test --test golden` and
+`ERNEST_BLESS=1 cargo test --test render`, then **read the diff** — a blessed
 wrong answer is still wrong.
 
 ## Known imprecisions

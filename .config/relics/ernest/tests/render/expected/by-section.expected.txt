@@ -1,0 +1,10 @@
+prose density  54.5%   (prose 272 / base 499 chars)
+  docs prose 183 chars — 88.4% of source code
+
+  density  prose  code  section
+   100.0%     75     0  tests/render/tree/docs/guide.md#Guide > Tolerance
+   100.0%     69     0  tests/render/tree/docs/guide.md#Guide > Reticulating
+    62.3%     33    20  tests/render/tree/README.md#Widget
+   100.0%      6     0  tests/render/tree/docs/guide.md#Guide
+
+  5 files measured, 2 unsupported (json 2)

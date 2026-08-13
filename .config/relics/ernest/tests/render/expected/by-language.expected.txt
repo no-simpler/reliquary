@@ -1,0 +1,12 @@
+prose density  54.5%   (prose 272 / base 499 chars)
+  docs prose 183 chars — 88.4% of source code
+
+  total / cohort / language  provenance  density  prose  code  files
+  total                                    54.5%    272   227      5
+    source                                 30.1%     89   207      3
+      php                    tracked       23.0%     55   184      2
+      yaml                   tracked       59.6%     34    23      1
+    docs                                   90.1%    183    20      2
+      markdown               tracked       90.1%    183    20      2
+
+  5 files measured, 2 unsupported (json 2)

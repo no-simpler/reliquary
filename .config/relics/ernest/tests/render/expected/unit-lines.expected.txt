@@ -1,0 +1,10 @@
+prose density  45.8%   (prose 11 / base 24 lines)
+  docs prose 7 lines — 58.3% of source code
+
+  total / cohort  density  prose  code  files
+  total             45.8%     11    13      5
+    source          25.0%      4    12      3
+    docs            87.5%      7     1      2
+
+  5 files measured, 2 unsupported (json 2)
+  counting lines; a line belongs to whichever class holds most of it

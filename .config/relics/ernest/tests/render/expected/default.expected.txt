@@ -1,0 +1,5 @@
+prose density  54.5%   (prose 272 / base 499 chars)
+  docs prose 183 chars — 88.4% of source code
+
+  5 files measured, 2 unsupported (json 2)
+  --by file|section|cohort|language, --top N, --json

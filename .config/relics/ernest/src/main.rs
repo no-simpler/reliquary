@@ -3,7 +3,7 @@ mod cli;
 use anyhow::Result;
 use clap::Parser;
 
-use cli::{Cli, Command};
+use cli::{Cli, Command, Format};
 use ernest::{aggregate, report, walk};
 
 /// Density exceeded `--max-density`. Distinct from 2, which means ernest could
@@ -23,10 +23,21 @@ fn main() {
 }
 
 fn run(cli: Cli) -> Result<i32> {
+    let show = cli.view.presentation();
+    let format = cli.view.format();
+
     if let Some(Command::Diff { before, after }) = cli.command {
         let before = report::json::load(&before)?;
         let after = report::json::load(&after)?;
-        print!("{}", report::diff::render(&before, &after)?);
+        match format {
+            // A diff is not a measurement, so there is no snapshot to write. Say
+            // so rather than write a report the caller did not ask for.
+            Format::Json => {
+                anyhow::bail!("diff has no --format json; compare the snapshots you already hold")
+            }
+            Format::Value => print!("{}", report::diff::quiet(&before, &after)?),
+            Format::Text => print!("{}", report::diff::render(&before, &after, show)?),
+        }
         return Ok(0);
     }
 
@@ -43,12 +54,12 @@ fn run(cli: Cli) -> Result<i32> {
         options.scope.into(),
         options.lang.as_deref(),
     );
-    let report = aggregate::run(&survey, unit, options.views());
+    let report = aggregate::run(&survey, unit, show.views);
 
-    if options.json {
-        println!("{}", report::json::render(&report)?);
-    } else {
-        print!("{}", report::human::render(&report));
+    match format {
+        Format::Json => println!("{}", report::json::render(&report)?),
+        Format::Value => print!("{}", report::human::value(&report)),
+        Format::Text => print!("{}", report::human::render(&report, show)),
     }
 
     if let Some(limit) = options.max_density

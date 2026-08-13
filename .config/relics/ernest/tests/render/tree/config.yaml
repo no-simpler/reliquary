@@ -1,0 +1,3 @@
+# The tolerance the reticulator runs at.
+tolerance: 0.5
+splines: 12
