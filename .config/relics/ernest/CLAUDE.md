@@ -128,7 +128,7 @@ src/
   analyze/mod.rs      tree walk, pragma rule, annotation and region post-passes
   analyze/profiles.rs the format registry
   analyze/sections.rs innermost-section decomposition of a document
-  detect.rs           path -> profile
+  detect.rs           path, then shebang -> profile
   walk.rs             scope, provenance, ignore::WalkBuilder, default excludes
   aggregate.rs        file -> (cohort, provenance, language) -> report
   report/             table, human, json, diff
@@ -179,6 +179,7 @@ pub static YAML: Profile = Profile {
     language_fn: tree_sitter_yaml::LANGUAGE,
     extensions: &["yaml", "yml"],
     filenames: &[],
+    interpreters: &[],
     cohort: Cohort::Source,
     default_class: Class::Code,
     prose_nodes: &["comment"],
@@ -189,6 +190,10 @@ pub static YAML: Profile = Profile {
     generated_regions: &[],
 };
 ```
+
+`interpreters` names the shebang basenames identifying a script that carries no
+extension. A file that has one is never second-guessed: an extension is the
+author's declaration of format, and only its absence justifies opening the file.
 
 `generated_regions` pairs the pragma bodies that open and close a region a tool
 rewrites — `<!-- TOC -->` and `<!-- /TOC -->`. The pair and everything between it

@@ -130,3 +130,22 @@ fn the_adversarial_php_fixture_finds_prose_without_false_positives() {
     // The shebang, both PHP tags, the closing tag and the phpcs directive.
     assert!(counts.ignored_chars > 0, "found nothing uninteresting");
 }
+
+#[test]
+fn the_adversarial_shell_fixture_finds_prose_without_false_positives() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/shell/adversarial.sh");
+    let (_, src, counts) = measure(&path);
+
+    for decoy in [
+        "${PWD##*/}",
+        "${#REPOS[@]}",
+        "'#'*|''",
+        "/^[[:space:]]*#/",
+        "printf '#!/usr/bin/env bash",
+    ] {
+        assert!(src.contains(decoy), "fixture lost its decoy: {decoy}");
+    }
+    assert!(counts.prose_chars > 0, "found no prose at all");
+    // The shebang and the shellcheck directive, and nothing else.
+    assert_eq!(counts.ignored_chars, 43);
+}

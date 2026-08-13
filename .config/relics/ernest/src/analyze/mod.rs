@@ -48,13 +48,17 @@ fn classify(tree: &Tree, src: &str, profile: &Profile) -> Vec<Span> {
     let mut spans = Vec::new();
     collect(tree.root_node(), profile, src, &mut spans);
 
-    // A shebang is unavoidable in an executable script. It is not part of any
-    // comment node — tree-sitter-php lexes it as inline text — so the rule is
-    // generic rather than per-profile.
+    // A shebang is unavoidable in an executable script, and grammars disagree
+    // on it: tree-sitter-bash lexes it as a comment, tree-sitter-php as inline
+    // text. So the rule is generic, and it overrides whatever the walk decided
+    // about the spans the line already holds.
     if src.starts_with("#!") {
         let eol = src.find('\n').unwrap_or(src.len());
-        if spans.first().is_none_or(|s| s.start >= eol) {
-            spans.insert(0, Span::new(0, eol, Class::Ignored));
+        let inside = spans.iter().take_while(|s| s.end <= eol).count();
+        // A span straddling the line end is nothing this rule can split, so it
+        // leaves the file alone rather than guess.
+        if spans.get(inside).is_none_or(|s| s.start >= eol) {
+            spans.splice(..inside, [Span::new(0, eol, Class::Ignored)]);
         }
     }
 
@@ -213,7 +217,7 @@ fn line_offsets(text: &str) -> impl Iterator<Item = (usize, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use profiles::{MARKDOWN, PHP, YAML};
+    use profiles::{MARKDOWN, PHP, SHELL, YAML};
 
     fn counts(src: &str, profile: &Profile) -> Counts {
         analyze_file(src, profile).unwrap()
@@ -261,6 +265,55 @@ mod tests {
         let banner = "<?php\n// ====================\n$x = 1;\n";
         let c = counts(banner, &PHP);
         assert_eq!(c.prose_chars, 22);
+    }
+
+    /// tree-sitter-bash lexes the shebang as a comment, so the rule has to
+    /// override a span rather than only fill a gap.
+    #[test]
+    fn a_shebang_the_grammar_claimed_as_a_comment_is_still_uninteresting() {
+        let c = counts("#!/usr/bin/env bash\nx=1\n", &SHELL);
+        assert_eq!(c.ignored_chars, "#!/usr/bin/envbash".len() as u64);
+        assert_eq!(c.prose_chars, 0);
+        assert_eq!(c.code_chars, "x=1".len() as u64);
+    }
+
+    #[test]
+    fn hashes_that_are_shell_syntax_are_not_comments() {
+        for src in [
+            "p=\"${PWD##*/}\"\n",
+            "n=${#REPOS[@]}\n",
+            "while [[ $# -gt 0 ]]; do shift; done\n",
+            "case $x in '#'*|'') echo a ;; \\#*) echo b ;; esac\n",
+            "awk '/^[[:space:]]*#/ { next }' f\n",
+            "echo \"value # not a comment\"\n",
+        ] {
+            assert_eq!(counts(src, &SHELL).prose_chars, 0, "{src}");
+        }
+    }
+
+    #[test]
+    fn heredoc_content_is_not_a_comment_in_shell() {
+        let quoted = "cat <<'EOF'\n#!/bin/bash\n# nope\nEOF\n";
+        assert_eq!(counts(quoted, &SHELL).prose_chars, 0);
+        let expanded = "cat <<EOF\n#!/bin/bash\n# nope\nEOF\n";
+        assert_eq!(counts(expanded, &SHELL).prose_chars, 0);
+    }
+
+    #[test]
+    fn a_shellcheck_directive_is_uninteresting_not_prose() {
+        let c = counts("# shellcheck disable=SC1091\nsource f\n", &SHELL);
+        assert_eq!(c.prose_chars, 0);
+        assert_eq!(c.ignored_chars, "#shellcheckdisable=SC1091".len() as u64);
+    }
+
+    /// `##`, `#>` and `#.` are house comment sigils, not a machine-consumed
+    /// convention, so nothing about them reclassifies to code.
+    #[test]
+    fn the_house_comment_sigils_are_prose() {
+        let c = counts("## Section\n#>  mcd PATH\n#.  -a  dotfiles\n", &SHELL);
+        assert_eq!(c.code_chars, 0);
+        assert_eq!(c.ignored_chars, 0);
+        assert_eq!(c.prose_chars, "##Section#>mcdPATH#.-adotfiles".len() as u64);
     }
 
     #[test]

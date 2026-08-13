@@ -31,6 +31,9 @@ pub struct Profile {
     pub language_fn: LanguageFn,
     pub extensions: &'static [&'static str],
     pub filenames: &'static [&'static str],
+    /// Interpreter basenames a shebang may name. The only thing that identifies
+    /// a script carrying no extension, which is what a personal-bin utility is.
+    pub interpreters: &'static [&'static str],
     pub cohort: Cohort,
     /// What bytes no rule claims are worth. `Code` for source languages, so an
     /// analyzer's whole job is finding prose; `Prose` for documentation
@@ -92,6 +95,7 @@ pub static PHP: Profile = Profile {
     language_fn: tree_sitter_php::LANGUAGE_PHP,
     extensions: &["php", "phtml", "php4", "php5", "php7", "phps"],
     filenames: &[],
+    interpreters: &["php"],
     cohort: Cohort::Source,
     default_class: Class::Code,
     // One `comment` kind covers //, #, /* */ and /** */ alike.
@@ -108,12 +112,47 @@ pub static YAML: Profile = Profile {
     language_fn: tree_sitter_yaml::LANGUAGE,
     extensions: &["yaml", "yml"],
     filenames: &[],
+    interpreters: &[],
     cohort: Cohort::Source,
     default_class: Class::Code,
     prose_nodes: &["comment"],
     code_nodes: &[],
     // Document markers are structure you cannot write your way out of.
     ignored_nodes: &["---", "..."],
+    comment_frame: &["#"],
+    annotation_line: &[],
+    generated_regions: &[],
+};
+
+/// POSIX sh and bash, which is what tree-sitter-bash declares and parses
+/// cleanly. Do not widen `extensions` to the other dialects: on real zsh the
+/// grammar errors in most files, loses about an eighth of the comment
+/// characters, and bills `(#i)` glob flags as prose. fish needs its own
+/// grammar, and that crate still predates `LanguageFn`.
+///
+/// Nothing is uninteresting by node kind — shell has no counterpart to `<?php`
+/// or a YAML document marker, and the shebang is handled for every language in
+/// `analyze::classify`. Nothing is an annotation either: `##`, `#>` and `#.`
+/// are house comment sigils, not a machine-consumed convention like `@param`.
+pub static SHELL: Profile = Profile {
+    language: "shell",
+    language_fn: tree_sitter_bash::LANGUAGE,
+    extensions: &["sh", "bash"],
+    filenames: &[
+        ".bashrc",
+        ".bash_profile",
+        ".bash_login",
+        ".bash_logout",
+        ".bash_env",
+        ".bash_aliases",
+        ".profile",
+    ],
+    interpreters: &["sh", "bash", "dash"],
+    cohort: Cohort::Source,
+    default_class: Class::Code,
+    prose_nodes: &["comment"],
+    code_nodes: &[],
+    ignored_nodes: &[],
     comment_frame: &["#"],
     annotation_line: &[],
     generated_regions: &[],
@@ -131,6 +170,7 @@ pub static MARKDOWN: Profile = Profile {
     language_fn: tree_sitter_md::LANGUAGE,
     extensions: &["md", "markdown", "mdown", "mkd", "mkdn"],
     filenames: &[],
+    interpreters: &[],
     cohort: Cohort::Docs,
     default_class: Class::Prose,
     prose_nodes: &[],
@@ -155,7 +195,7 @@ pub static MARKDOWN: Profile = Profile {
     generated_regions: &[("TOC", "/TOC")],
 };
 
-pub static PROFILES: &[&Profile] = &[&PHP, &YAML, &MARKDOWN];
+pub static PROFILES: &[&Profile] = &[&PHP, &SHELL, &YAML, &MARKDOWN];
 
 /// Strip comment sigils and surrounding whitespace to expose a line's body,
 /// so pragma and annotation prefixes can be tested against real content.

@@ -29,6 +29,7 @@ fn reports_and_exits_clean() {
     let text = String::from_utf8(out.stdout).unwrap();
     assert!(text.starts_with("prose density"), "{text}");
     assert!(text.contains("php"), "{text}");
+    assert!(text.contains("shell"), "{text}");
     assert!(text.contains("yaml"), "{text}");
 }
 
@@ -45,7 +46,8 @@ fn a_cohort_rolls_up_above_its_indented_languages() {
         .position(|l| l.starts_with("  source"))
         .unwrap_or_else(|| panic!("no source roll-up in:\n{text}"));
     assert!(lines[cohort + 1].starts_with("    php"), "{text}");
-    assert!(lines[cohort + 2].starts_with("    yaml"), "{text}");
+    assert!(lines[cohort + 2].starts_with("    shell"), "{text}");
+    assert!(lines[cohort + 3].starts_with("    yaml"), "{text}");
     assert!(
         !text.contains("total"),
         "the roll-up no longer needs a label:\n{text}"
@@ -277,6 +279,28 @@ fn sections_rank_a_documents_headings() {
 
     assert!(text.contains("#Adversarial Markdown > Fences"), "{text}");
     assert!(text.contains("#Adversarial Markdown > Tables"), "{text}");
+}
+
+/// A personal-bin utility carries no extension, so the shebang is the only
+/// thing that names its language.
+#[test]
+fn an_extensionless_script_is_measured_by_its_shebang() {
+    let dir = scratch("shebang");
+    std::fs::write(
+        dir.join("tool"),
+        "#!/usr/bin/env bash\n# Why this exists.\nset -euo pipefail\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("notes"), "Just text, no shebang.\n").unwrap();
+
+    let out = ernest(&[dir.to_str().unwrap(), "--json", "--by", "file"]);
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+
+    assert_eq!(report["files_scanned"], 1);
+    assert_eq!(report["files_skipped"], 1);
+    assert_eq!(report["files"][0]["language"], "shell");
+    // The shebang is uninteresting; only the comment counts as prose.
+    assert_eq!(report["files"][0]["prose_chars"], "#Whythisexists.".len() as u64);
 }
 
 #[test]
