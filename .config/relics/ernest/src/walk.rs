@@ -16,20 +16,18 @@ use crate::detect::profile_for;
 /// "is this what ernest is for". The narrow case; most projects never write one.
 pub const ERNESTIGNORE: &str = ".ernestignore";
 
-/// Directory names never worth walking into. They hold dependencies and build
-/// output — text nobody wrote and nobody loads into context on purpose. They
-/// are excluded at every scope, so widening the scope cannot drag them in.
-const DEFAULT_EXCLUDES: &[&str] = &[
-    ".git",
-    ".hg",
-    ".svn",
-    "node_modules",
-    "vendor",
-    "target",
-    "__pycache__",
-    ".venv",
-    "venv",
-];
+/// The version control system's own store, which is not part of the work tree
+/// at any scope. This is the one exclusion `.gitignore` cannot express: git
+/// excludes `.git` structurally rather than by rule, so `git check-ignore .git`
+/// says nothing and no committed pattern can stand in for this list. Nothing
+/// else filters it either, because the walk sets `hidden(false)` deliberately —
+/// dotfiles are the subject here.
+///
+/// Dependency and build directories are **not** listed. They are what
+/// `.gitignore` is for, and honoring the project's own declaration is the whole
+/// contract; a second, hidden list would answer a question the repository has
+/// already answered, and would quietly contradict `--scope all`.
+const VCS_DIRS: &[&str] = &[".git", ".hg", ".svn"];
 
 /// How far the walk reaches. The levels are nested, and the line between them
 /// is the one git already draws: `.gitignore` is committed and holds the noise,
@@ -206,6 +204,13 @@ fn files(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Walked {
         .git_global(respect)
         .git_exclude(scope == Scope::Shared)
         .ignore(respect)
+        // Without this the crate applies no git-derived rule outside a `.git`,
+        // and a `.gitignore` sitting on its own is inert. A yadm-managed tree is
+        // exactly that shape — the work tree is `$HOME` and the git dir lives
+        // elsewhere — so this repository's own `/target` rule would go unread,
+        // and delegating build output to `.gitignore` would silently not work
+        // in the tree ernest was written in.
+        .require_git(false)
         // Unconditional: a corpus is not ernest's subject at any scope, which
         // is what separates this from the git-derived rules above.
         .add_custom_ignore_filename(ERNESTIGNORE)
@@ -213,7 +218,7 @@ fn files(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Walked {
             entry
                 .file_name()
                 .to_str()
-                .is_none_or(|name| !DEFAULT_EXCLUDES.contains(&name))
+                .is_none_or(|name| !VCS_DIRS.contains(&name))
         });
 
     let mut walked = Walked {

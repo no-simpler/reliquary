@@ -494,6 +494,88 @@ fn gitignore_beats_a_local_exclude() {
     );
 }
 
+/// The one exclusion that cannot be delegated. git keeps its own directory out
+/// structurally rather than by rule — `git check-ignore .git` says nothing — and
+/// the walk sets `hidden(false)` on purpose, so without the VCS list a repo's
+/// hooks read as ordinary shell source.
+#[test]
+fn the_vcs_directory_is_never_walked() {
+    let dir = scratch("vcs");
+    std::fs::create_dir_all(dir.join(".git/hooks")).unwrap();
+    std::fs::write(dir.join("app.php"), "<?php\n// A note.\n$x = 1;\n").unwrap();
+    std::fs::write(
+        dir.join(".git/hooks/post-commit"),
+        "#!/usr/bin/env bash\n# Installed by tooling, not written here.\nexit 0\n",
+    )
+    .unwrap();
+
+    for scope in ["shared", "local", "all"] {
+        let out = ernest(&[
+            dir.to_str().unwrap(),
+            "--json",
+            "--by",
+            "file",
+            "--scope",
+            scope,
+        ]);
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let paths: Vec<&str> = report["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths.len(), 1, "at --scope {scope}: {paths:?}");
+        assert!(
+            paths[0].ends_with("app.php"),
+            "a git hook was measured at --scope {scope}: {paths:?}"
+        );
+    }
+}
+
+/// Dependency and build output is the repository's declaration to make, not
+/// ernest's to assume. `--scope all` turns the declaration off, so it reaches
+/// what the declaration was hiding — which is what the flag says it does.
+#[test]
+fn scope_all_reaches_a_gitignored_dependency_tree() {
+    let dir = scratch("dependencies");
+    std::fs::create_dir_all(dir.join("vendor")).unwrap();
+    std::fs::write(dir.join(".gitignore"), "/vendor/\n").unwrap();
+    std::fs::write(dir.join("app.php"), "<?php\n// A note.\n$x = 1;\n").unwrap();
+    std::fs::write(dir.join("vendor/lib.php"), "<?php\n// Nobody wrote this.\n").unwrap();
+
+    let scanned = |scope: &str| {
+        let out = ernest(&[dir.to_str().unwrap(), "--json", "--scope", scope]);
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        report["files_scanned"].as_u64().unwrap()
+    };
+
+    assert_eq!(scanned("local"), 1, "the default honors the declaration");
+    assert_eq!(scanned("all"), 2, "--scope all means all");
+}
+
+/// The regression guard for `require_git(false)`. A yadm-managed tree has its
+/// work tree at `$HOME` and its git dir elsewhere, so a `.gitignore` sits with
+/// no `.git` beside it — the shape this repository itself has. Left to the
+/// crate's default, every rule in that file goes unread.
+#[test]
+fn a_gitignore_applies_without_a_git_directory() {
+    let dir = scratch("no-git");
+    std::fs::create_dir_all(dir.join("target")).unwrap();
+    assert!(!dir.join(".git").exists());
+
+    std::fs::write(dir.join(".gitignore"), "/target\n").unwrap();
+    std::fs::write(dir.join("app.php"), "<?php\n// A note.\n$x = 1;\n").unwrap();
+    std::fs::write(dir.join("target/built.php"), "<?php\n// Build output.\n").unwrap();
+
+    let out = ernest(&[dir.to_str().unwrap(), "--json"]);
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        report["files_scanned"], 1,
+        "a .gitignore with no .git beside it must still be honored"
+    );
+}
+
 #[test]
 fn sections_rank_a_documents_headings() {
     let path = fixtures().join("markdown/adversarial.md");
