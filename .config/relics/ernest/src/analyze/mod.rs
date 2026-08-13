@@ -227,7 +227,9 @@ fn line_offsets(text: &str) -> impl Iterator<Item = (usize, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use profiles::{JAVASCRIPT, MARKDOWN, PHP, RUST, SHELL, TOML, TSX, TYPESCRIPT, YAML};
+    use profiles::{
+        CSS, HTML, JAVASCRIPT, MARKDOWN, PHP, RUST, SHELL, TOML, TSX, TWIG, TYPESCRIPT, XML, YAML,
+    };
 
     fn counts(src: &str, profile: &Profile) -> Counts {
         analyze_file(src, profile).unwrap()
@@ -494,6 +496,170 @@ mod tests {
 
         let commented = counts("const A = () => <p>{/* note */}text</p>;\n", &TSX);
         assert_eq!(commented.prose_chars, "/*note*/".len() as u64);
+    }
+
+    #[test]
+    fn stars_and_slashes_that_are_css_syntax_are_not_comments() {
+        for src in [
+            ".a { content: \"/* not a comment */\"; }\n",
+            ".b { background: url(http://e.com/#frag); }\n",
+            ".c::after { content: \"//\"; }\n",
+            ".d { width: calc(100% / 3); }\n",
+        ] {
+            assert_eq!(counts(src, &CSS).prose_chars, 0, "{src}");
+        }
+    }
+
+    /// Both forms count, including the `//` the preprocessors and postcss
+    /// accept — naming it costs one word against a false negative.
+    #[test]
+    fn a_css_comment_is_prose_in_both_of_its_forms() {
+        let c = counts(
+            "/* Why this rule. */\n// A note.\n.a { color: red; } /* why */\n",
+            &CSS,
+        );
+        assert_eq!(
+            c.prose_chars,
+            "/*Whythisrule.*/".len() as u64 + "//Anote.".len() as u64 + "/*why*/".len() as u64
+        );
+        assert_eq!(c.code_chars, ".a{color:red;}".len() as u64);
+        assert_eq!(c.ignored_chars, 0);
+    }
+
+    #[test]
+    fn a_stylelint_directive_is_uninteresting_not_prose() {
+        let c = counts(
+            "/* stylelint-disable no-descending-specificity */\n.a { top: 0; }\n",
+            &CSS,
+        );
+        assert_eq!(c.prose_chars, 0);
+        assert_eq!(
+            c.ignored_chars,
+            "/*stylelint-disableno-descending-specificity*/".len() as u64
+        );
+    }
+
+    #[test]
+    fn the_html_doctype_is_uninteresting() {
+        let c = counts("<!DOCTYPE html>\n<p>x</p>\n", &HTML);
+        assert_eq!(c.ignored_chars, "<!DOCTYPEhtml>".len() as u64);
+        assert_eq!(c.prose_chars, 0);
+        assert_eq!(c.code_chars, "<p>x</p>".len() as u64);
+    }
+
+    /// Body copy is the interface's own text rather than prose describing code,
+    /// so it lands where `jsx_text` does — and a comment beside it is prose.
+    #[test]
+    fn html_body_copy_is_code_and_a_comment_beside_it_is_prose() {
+        let c = counts(
+            "<!-- Why this markup. -->\n<p>Reticulating splines</p>\n",
+            &HTML,
+        );
+        assert_eq!(c.prose_chars, "<!--Whythismarkup.-->".len() as u64);
+        assert_eq!(c.code_chars, "<p>Reticulatingsplines</p>".len() as u64);
+    }
+
+    /// The grammar hands an inline script or stylesheet back as `raw_text`, so
+    /// the comment inside it is never seen as one. The injection gap, pinned
+    /// here rather than left to drift.
+    #[test]
+    fn a_comment_inside_an_inline_script_or_style_is_code() {
+        assert_eq!(
+            counts("<script>\n// a note\n</script>\n", &HTML).prose_chars,
+            0
+        );
+        assert_eq!(
+            counts("<style>\n/* a note */\n</style>\n", &HTML).prose_chars,
+            0
+        );
+    }
+
+    #[test]
+    fn an_html_tooling_directive_is_uninteresting_not_prose() {
+        let c = counts("<!-- prettier-ignore -->\n<p>x</p>\n", &HTML);
+        assert_eq!(c.prose_chars, 0);
+        assert_eq!(c.ignored_chars, "<!--prettier-ignore-->".len() as u64);
+    }
+
+    /// The whitespace-control markers are part of the delimiter, and the
+    /// delimiter is part of the comment.
+    #[test]
+    fn a_twig_comment_is_prose_in_all_of_its_delimiter_forms() {
+        let c = counts(
+            "{# Why this template. #}\n{#- Trimmed. -#}\n<p>x</p>\n",
+            &TWIG,
+        );
+        assert_eq!(
+            c.prose_chars,
+            "{#Whythistemplate.#}".len() as u64 + "{#-Trimmed.-#}".len() as u64
+        );
+        assert_eq!(c.code_chars, "<p>x</p>".len() as u64);
+    }
+
+    /// `{# @var … #}` is an IDE type hint: avoidable, machine-consumed, not
+    /// prose. PHPDoc's convention in another vehicle, so the rule transfers.
+    #[test]
+    fn a_twig_type_hint_is_code_and_a_description_is_prose() {
+        let hint = counts(
+            "{# @var post \\App\\Entity\\Post #}\n{{ post.title }}\n",
+            &TWIG,
+        );
+        assert_eq!(hint.prose_chars, 0);
+        assert_eq!(
+            hint.code_chars,
+            "{#@varpost\\App\\Entity\\Post#}".len() as u64 + "{{post.title}}".len() as u64
+        );
+
+        let described = counts("{# Renders one row. #}\n{{ row }}\n", &TWIG);
+        assert_eq!(described.prose_chars, "{#Rendersonerow.#}".len() as u64);
+    }
+
+    #[test]
+    fn a_twig_cs_fixer_directive_is_uninteresting_not_prose() {
+        let c = counts("{# twig-cs-fixer-disable #}\n{{ x }}\n", &TWIG);
+        assert_eq!(c.prose_chars, 0);
+        assert_eq!(c.ignored_chars, "{#twig-cs-fixer-disable#}".len() as u64);
+    }
+
+    /// The grammar is template-first: everything between the delimiters arrives
+    /// as one `text` node. That is the wanted answer for markup and the wrong
+    /// one for a comment sitting in it — the injection gap again, not a rule
+    /// this profile could express.
+    #[test]
+    fn markup_inside_a_template_is_code_comments_and_all() {
+        let c = counts(
+            "{# Twig comment. #}\n<!-- HTML comment. -->\n<p>x</p>\n",
+            &TWIG,
+        );
+        assert_eq!(c.prose_chars, "{#Twigcomment.#}".len() as u64);
+        assert_eq!(
+            c.code_chars,
+            "<!--HTMLcomment.-->".len() as u64 + "<p>x</p>".len() as u64
+        );
+    }
+
+    #[test]
+    fn the_xml_declaration_and_doctype_are_uninteresting() {
+        let c = counts(
+            "<?xml version=\"1.0\"?>\n<!DOCTYPE a SYSTEM \"a.dtd\">\n<a>\n  <!-- Why. -->\n</a>\n",
+            &XML,
+        );
+        assert_eq!(
+            c.ignored_chars,
+            "<?xmlversion=\"1.0\"?>".len() as u64 + "<!DOCTYPEaSYSTEM\"a.dtd\">".len() as u64
+        );
+        assert_eq!(c.prose_chars, "<!--Why.-->".len() as u64);
+    }
+
+    #[test]
+    fn comment_lookalikes_inside_xml_data_are_not_comments() {
+        for src in [
+            "<a><![CDATA[ <!-- not a comment --> ]]></a>\n",
+            "<a attr=\"&lt;!-- not a comment --&gt;\"/>\n",
+            "<a>text &lt;!-- nope --&gt;</a>\n",
+        ] {
+            assert_eq!(counts(src, &XML).prose_chars, 0, "{src}");
+        }
     }
 
     #[test]

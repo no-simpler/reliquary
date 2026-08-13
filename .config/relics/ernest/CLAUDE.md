@@ -147,6 +147,12 @@ the way an explanation is, and it sits on the same side of the line as any other
 string literal. A comment *inside* the markup arrives as an ordinary `comment`
 and is prose like any other.
 
+The same silence covers the same case in the formats where markup is the whole
+file: HTML's `text` and Twig's `text` are named by no rule either, so a page's
+copy and a template's copy bill as code for the reason JSX's does. That is also
+why `html` sits in `Source` rather than `Docs` — a page is the product, and
+`Docs` is for the formats whose default inverts to `Prose`.
+
 This is the same line the Markdown table runs along, and the same line that
 makes a wiki a category error for the headline: ernest measures prose *about*
 code, not text as such.
@@ -369,7 +375,33 @@ wrong answer is still wrong.
   and YAML that survived the gap, in a repository holding 6.5 million. The
   report tallies skipped files by extension so the gap is visible and names the
   profile to write next; the format roadmap in `TODO.md` is the queue for
-  closing it.
+  closing it. The gap does not always flatter: css, html, twig and xml took a
+  Symfony front-end from 25.9% to 26.2%, because the 147 files they added were
+  denser than the repository around them — its stylesheets read 47.5%.
+- **Three of the borrowed grammars are a release behind their language**, which
+  shows as `ERROR` nodes on real files: `@media (width >= 48rem)` and
+  `@container name (…)` in CSS, `{% props a, b = 'x' %}` and Twig's else-less
+  ternary, and Angular's `@if (x > 0) {` in an HTML template. Measured on
+  Pillar and the admin front-end, that is 4 of 50 stylesheets, 7 of 94
+  templates and 6 of 307 Angular templates. Every one of them sits in an
+  expression or an at-rule prelude, where nothing is ever prose — a sweep of
+  all 455 files recovered every comment character exactly, so the confusion
+  costs tree shape rather than classification. That is what separates these
+  from zsh, where the bash grammar loses about an eighth of the comment
+  characters and bills glob flags as prose. Grammar-health reporting, queued in
+  `TODO.md`, is what would make this visible without a hand sweep.
+- **The template and markup profiles cannot see into what they embed.** Twig's
+  grammar is template-first and hands all markup back as one `text` node;
+  HTML's hands an inline `<script>` or `<style>` back as `raw_text`. So an
+  `<!-- -->` inside a `.twig` file, and a comment inside an inline script or
+  stylesheet, bill as code. One gap rather than three, and the fence injection
+  queued in `TODO.md` closes all of it.
+- An HTML `comment` is an `extra`, so the scanner emits one inside a quoted
+  attribute value too: `data-x="<!-- x -->"` bills as prose. Contrived, and no
+  file in any repository here has one.
+- CSS's `/*! preserved banner */` counts as prose. It is the licence-header
+  convention rather than a directive, and `!` is too blunt a prefix to key on —
+  the licence-header item in `TODO.md` is what claims it.
 - A doctest fence inside a Rust doc comment counts as prose, code and all. It is
   compiled, runnable code, and the general fix is the fence injection queued in
   `TODO.md` rather than a Rust-only second parse.

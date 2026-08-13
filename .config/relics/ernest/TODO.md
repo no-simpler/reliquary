@@ -17,6 +17,9 @@ repository from 82.5% to 34.3% without a character changing; the first figure
 was measuring the Markdown that survived the gap. Adding javascript and
 typescript took an Angular front-end from 6.3% to 0.3% — 99.3% of that
 repository had been invisible. Coverage is therefore load-bearing, not garnish.
+It does not only ever flatter: css, html, twig and xml moved a Symfony
+front-end from 25.9% to 26.2%, because the 147 files they let in were denser
+than the repository around them — the stylesheets read 47.5%.
 
 A census is a snapshot and ages badly: this file rated javascript/typescript
 Tier 2 on a count of **7 files**, against the ~7,000 that were actually there.
@@ -49,7 +52,15 @@ tracked set — evidence for the ordering, not targets.
 
 - **json** (88) and **jsonc**. Plain JSON has no comments, so the value is
   denominator accuracy rather than prose; jsonc (tsconfig, VS Code) does.
-- **xml** (39) — `<!-- -->`.
+- **scss** (286, all in one Angular front-end). Blocked rather than merely
+  unwritten, and blocked the way fish is: both `tree-sitter-scss` and the
+  `cortexkit-` fork still expose the pre-`LanguageFn` API,
+  `pub fn language() -> Language`, which `Profile.language_fn` cannot hold.
+  Reaching the raw `tree_sitter_scss` symbol by redeclaring the extern would
+  work and is not worth the unsafe FFI; wait for a crate that has moved, or
+  vendor the grammar. Do **not** widen the css profile's extensions instead —
+  `$var`, `@mixin` and `@include` all error under the CSS grammar, which is
+  what `declines_everything_else` in `src/detect.rs` pins.
 - **python** — only 8 files here, but a bedrock member and the uv lane's
   language, so it will not stay at 8. The next one up, and the first format
   whose prose is not delivered by a comment: a module, class or function
@@ -61,10 +72,6 @@ tracked set — evidence for the ordering, not targets.
   `Analyzer`. `#` comments work already; `noqa` and `type:` are the profile's
   `pragma_prefixes` when it lands, having come out of the old global list with
   nowhere to go. Type annotations and decorators are code.
-- **html** (307 in one Angular front-end alone) and **css** / **scss** (286
-  there). Both raise the question the JSX text answered — body copy in an
-  `.html` file is the product, not prose about code — and html has a second one
-  the others do not: whether it belongs in `Docs` or `Source`.
 - **neon** (5) — PHPStan configuration. YAML-adjacent; check whether the YAML
   grammar reads it acceptably before reaching for another crate.
 
@@ -107,6 +114,10 @@ becomes Tier 1 the day such a repository turns up.
   is a large, formulaic, entirely re-derivable prose vector, and it is
   annotation-shaped, so `annotation_line` may take it directly.
 - **graphql**, **protobuf** — `"""` descriptions and `//` respectively.
+- **jinja**, **nunjucks**, **django** — `tree_sitter_jinja_dialects` already
+  parses the union of the family, so each is a second `Profile` constant over
+  the grammar `TWIG` loads and nothing else. Not written because there is no
+  `.j2`, `.jinja` or `.njk` file on this machine to verify one against.
 - **rst**, **adoc**, **txt** — the `Docs` cohort. reStructuredText is the
   Python world's documentation format and pairs with the python profile.
 - **ipynb** — JSON carrying Markdown cells. Needs a bespoke `Analyzer` rather
@@ -133,6 +144,17 @@ that did were minified vendor bundles, every one of them already gitignored and
 so out of scope by the project's own declaration. Good news, and an argument for
 the feature rather than against it — that took a shell loop over
 `cargo run --example kinds`, which is not something anyone will do twice.
+
+Swept again for css, html, twig and xml, and this time the news was mixed:
+**4 of 50** stylesheets, **7 of 94** Twig templates and **6 of 307** Angular
+templates error, on constructs their grammars have not caught up with —
+`@media (width >= 48rem)`, `@container name (…)`, `{% props a, b = 'x' %}`,
+Twig's else-less ternary, Angular's `@if (x > 0) {`. Every one is in an
+expression or an at-rule prelude, so a second sweep comparing ernest's prose
+against a regex over each format's comment delimiters found a shortfall of
+**0 characters across all 455 files** — the confusion costs tree shape, not
+classification. Which is the point: that verdict took two throwaway scripts to
+reach, and nothing in the tool would have said a word.
 
 ---
 

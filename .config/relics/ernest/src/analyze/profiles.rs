@@ -81,6 +81,74 @@ pub struct Profile {
 pub const UNIVERSAL_PRAGMA_PREFIXES: &[&str] =
     &["SPDX-License-Identifier:", "vim:", "editorconfig-checker-"];
 
+/// Two comment kinds, both reachable anywhere: `comment` is `/* */` and
+/// `js_comment` is the `//` form postcss and the preprocessors accept. Naming
+/// the second costs one word against a false negative, which is the trade
+/// `WEB_PROSE_NODES` already makes for JavaScript's Annex B comment.
+///
+/// Nothing is uninteresting by node kind. `@charset` reads like a header but is
+/// optional, so it is code — the line TOML records for `[section]`: there is no
+/// counterpart to `<?php` here.
+///
+/// Do not widen `extensions` to the preprocessors. The grammar reads standard
+/// nesting, but `$var`, `@mixin` and `@include` error, and both scss crates
+/// still predate `LanguageFn` — see `TODO.md`.
+pub static CSS: Profile = Profile {
+    language: "css",
+    language_fn: tree_sitter_css::LANGUAGE,
+    extensions: &["css"],
+    filenames: &[],
+    interpreters: &[],
+    cohort: Cohort::Source,
+    default_class: Class::Code,
+    prose_nodes: &["comment", "js_comment"],
+    code_nodes: &[],
+    ignored_nodes: &[],
+    // Longest first, as in `RUST`.
+    comment_frame: &["/**", "/*", "*/", "*", "//"],
+    annotation_line: &[],
+    generated_regions: &[],
+    // Deliberately absent: `!`, for the `/*! preserved banner */` convention.
+    // A one-character prefix is the objection `WEB_PRAGMA_PREFIXES` records
+    // against eslint's `/* global */`, and a licence block is the queued
+    // header-detection item's to claim rather than a prefix rule's.
+    pragma_prefixes: &[
+        "stylelint-",
+        "prettier-ignore",
+        "biome-ignore",
+        "autoprefixer:",
+    ],
+};
+
+/// `Source`, not `Docs`, which answers the question the format roadmap left
+/// open. An `.html` file is a template or a page — the product rather than a
+/// description of it — and `Docs` is for formats whose `default_class` inverts
+/// to `Prose`. This one's does not.
+///
+/// `text` is named by no rule and so falls to `Code`, which is the wanted
+/// answer for exactly the reason `jsx_text` gets it: interface copy is the
+/// product. A `comment` is an `extra` here, so it is reached wherever it sits.
+///
+/// `doctype` is the one unavoidable construct — `<?php` in another costume.
+/// `<html>`, `<head>` and `<body>` are all optional, and naming them starts a
+/// slide with no floor.
+pub static HTML: Profile = Profile {
+    language: "html",
+    language_fn: tree_sitter_html::LANGUAGE,
+    extensions: &["html", "htm"],
+    filenames: &[],
+    interpreters: &[],
+    cohort: Cohort::Source,
+    default_class: Class::Code,
+    prose_nodes: &["comment"],
+    code_nodes: &[],
+    ignored_nodes: &["doctype"],
+    comment_frame: &["<!--", "-->"],
+    annotation_line: &[],
+    generated_regions: &[],
+    pragma_prefixes: &["prettier-ignore", "htmlhint ", "biome-ignore"],
+};
+
 pub static PHP: Profile = Profile {
     language: "php",
     language_fn: tree_sitter_php::LANGUAGE_PHP,
@@ -245,6 +313,46 @@ pub static TOML: Profile = Profile {
     pragma_prefixes: &[":schema"],
 };
 
+/// The grammar parses the union of the Jinja family — Jinja2, Nunjucks, Twig,
+/// Tera, Django — so a second constant would buy `.j2` and `.njk` for the price
+/// of one word. There is no such file to verify against here, so only `.twig`
+/// is claimed; the rest is queued in `TODO.md`.
+///
+/// `.html.twig` needs no rule of its own: `Path::extension` returns the last
+/// component, which is what a Symfony template's name makes `twig`.
+///
+/// **The markup is opaque.** This is a template-first grammar: everything
+/// between the delimiters arrives as one `text` node, which falls to `Code`.
+/// That is the right answer for the denominator and the wrong one for an
+/// `<!-- -->` comment sitting in it, which bills as code — the injection gap,
+/// recorded under Known imprecisions in `CLAUDE.md`.
+///
+/// Nothing is uninteresting by node kind. A `{% raw %}` region is content the
+/// author wrote and chose not to render, not something a tool rewrites.
+pub static TWIG: Profile = Profile {
+    language: "twig",
+    language_fn: tree_sitter_jinja_dialects::LANGUAGE,
+    extensions: &["twig"],
+    filenames: &[],
+    interpreters: &[],
+    cohort: Cohort::Source,
+    default_class: Class::Code,
+    // The node spans `{#` through `#}`, so the delimiters count as prose
+    // exactly as a PHP docblock's do.
+    prose_nodes: &["comment"],
+    code_nodes: &[],
+    ignored_nodes: &[],
+    // The whitespace-control variants lead the bare form: `{#` matching first
+    // would strip to `-`, and the body would never reach a prefix test.
+    comment_frame: &["{#-", "{#~", "{#", "-#}", "~#}", "#}"],
+    // `{# @var post \App\Entity\Post #}` is PHPDoc's convention in another
+    // vehicle — avoidable, machine-consumed, and not prose.
+    annotation_line: &["@"],
+    generated_regions: &[],
+    // Covers -disable, -disable-next-line and -enable.
+    pragma_prefixes: &["twig-cs-fixer-"],
+};
+
 /// Shared by the three ECMAScript profiles, which differ only in the grammar
 /// they load. Longest first, as in `RUST`: `//` ahead of `///` would leave a
 /// slash behind on a triple-slash directive.
@@ -360,6 +468,42 @@ pub static TSX: Profile = Profile {
     pragma_prefixes: WEB_PRAGMA_PREFIXES,
 };
 
+/// The crate ships two grammars; `LANGUAGE_XML` is the document one, and
+/// `LANGUAGE_DTD` parses a standalone DTD, which is not a file that turns up
+/// here. Node kinds come straight from the spec's own names, so they are
+/// capitalised: `Comment`, not `comment`.
+///
+/// `XMLDecl` and `doctypedecl` are unavoidable given the file exists, which is
+/// `<?php` and `<!DOCTYPE html>` in a third costume. A processing instruction
+/// such as `<?xml-stylesheet ?>` is not: it scales with what you asked the
+/// document to do, so it is code.
+///
+/// `pragma_prefixes` is empty on purpose rather than by omission. XML's
+/// consumers are schema validators that read attributes, not comments, so
+/// `UNIVERSAL_PRAGMA_PREFIXES` is all this format has any use for.
+///
+/// Two extensions are deliberately unclaimed, for the reason `TOML` leaves
+/// `Cargo.lock` alone. `.svg` is exported artwork — 828 files across
+/// `~/Developer`, whose path data nobody authored — and folding it in would
+/// bury a repository's stylesheets under its icon set. `.plist` is marked
+/// binary by this repository's own `git/attributes`.
+pub static XML: Profile = Profile {
+    language: "xml",
+    language_fn: tree_sitter_xml::LANGUAGE_XML,
+    extensions: &["xml", "xsd", "xsl", "xslt"],
+    filenames: &[],
+    interpreters: &[],
+    cohort: Cohort::Source,
+    default_class: Class::Code,
+    prose_nodes: &["Comment"],
+    code_nodes: &[],
+    ignored_nodes: &["XMLDecl", "doctypedecl"],
+    comment_frame: &["<!--", "-->"],
+    annotation_line: &[],
+    generated_regions: &[],
+    pragma_prefixes: &[],
+};
+
 /// The polarity inverts here: prose is the default and code is what gets named.
 ///
 /// The line between prose and code runs through structure, not around it.
@@ -415,13 +559,17 @@ pub static MARKDOWN: Profile = Profile {
 /// should land on the dialect that does not need the JSX grammar. Lookups by
 /// extension are unambiguous either way.
 pub static PROFILES: &[&Profile] = &[
+    &CSS,
+    &HTML,
     &JAVASCRIPT,
     &PHP,
     &RUST,
     &SHELL,
     &TOML,
+    &TWIG,
     &TYPESCRIPT,
     &TSX,
+    &XML,
     &YAML,
     &MARKDOWN,
 ];

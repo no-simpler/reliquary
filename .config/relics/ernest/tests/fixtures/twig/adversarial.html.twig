@@ -1,0 +1,40 @@
+{# SPDX-License-Identifier: MIT #}
+{# twig-cs-fixer-disable #}
+{# @var rows \App\Entity\Row[] #}
+{#
+   The block form.
+
+   Everything below that looks like a comment and is not, plus every delimiter
+   shape the language gives a comment: bare, whitespace-trimmed, and the
+   newline-preserving variant.
+#}
+{#- Trimmed on both sides. -#}
+{#~ Newline-preserving, which is Twig's own. ~#}
+{% extends '_root.html.twig' %}
+
+{% block main %}
+    <!-- An HTML comment, which this grammar hands back inside `text` and so
+         bills as code. The injection gap, not a rule this profile could fix. -->
+    <p>Interface copy is the product, not prose about code.</p>
+
+    {% set label = 'a string with #} inside it' %}
+    {% set other = "and a {# one in the other quote" %}
+
+    {% for row in rows if row.visible %}
+        <li class="row {{ row.spent ? 'row--spent' : '' }}">
+            {# A comment nested inside a loop, to prove the walk reaches it. #}
+            {{ row.title|upper|default('—') }}
+            {{ row.total ?? 0 }}
+        </li>
+    {% endfor %}
+
+    {% raw %}
+        {{ this is not parsed }}
+    {% endraw %}
+
+    <twig:Background/>
+{% endblock main %}
+
+{% macro badge(value) %}
+    <span class="badge">{{ value }}</span>
+{% endmacro %}

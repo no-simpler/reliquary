@@ -106,6 +106,23 @@ mod tests {
         assert_eq!(language_of("src/main.rs"), Some("rust"));
         assert_eq!(language_of("Cargo.toml"), Some("toml"));
         assert_eq!(language_of("stubs/redis.phpstub"), Some("php"));
+        assert_eq!(language_of("assets/styles/app.css"), Some("css"));
+        assert_eq!(language_of("public/index.html"), Some("html"));
+        assert_eq!(language_of("legacy/frame.htm"), Some("html"));
+        assert_eq!(language_of("phpunit.dist.xml"), Some("xml"));
+        assert_eq!(language_of("schema/offer.xsd"), Some("xml"));
+    }
+
+    /// A Symfony template is named for both formats it is, and the last
+    /// extension is the one that says how to read it.
+    #[test]
+    fn a_double_extension_resolves_on_its_last_component() {
+        assert_eq!(language_of("templates/_root.html.twig"), Some("twig"));
+        assert_eq!(
+            language_of("templates/components/Badge.html.twig"),
+            Some("twig")
+        );
+        assert_eq!(language_of("phpunit.baseline.xml"), Some("xml"));
     }
 
     /// TSX is TypeScript and reports as such — the second grammar is an
@@ -147,6 +164,12 @@ mod tests {
         assert!(profile_for(Path::new("c.fish")).is_none());
         // Generated, and TOML — kept out by not claiming its extension.
         assert!(profile_for(Path::new("Cargo.lock")).is_none());
+        // XML, and exported artwork; XML, and marked binary here.
+        assert!(profile_for(Path::new("assets/icon.svg")).is_none());
+        assert!(profile_for(Path::new("Info.plist")).is_none());
+        // The CSS grammar cannot read the preprocessors — see `TODO.md`.
+        assert!(profile_for(Path::new("styles/app.scss")).is_none());
+        assert!(profile_for(Path::new("styles/app.less")).is_none());
     }
 
     #[test]

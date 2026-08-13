@@ -1,0 +1,40 @@
+/* SPDX-License-Identifier: MIT */
+/* stylelint-disable no-descending-specificity */
+
+/*
+ * The banner form, and the shapes a regex classifier gets wrong.
+ *
+ * Everything below that looks like a comment and is not, plus every comment
+ * sigil the grammar accepts.
+ */
+@charset "utf-8";
+
+.token {
+    /* A real comment, indented inside a block. */
+    content: "/* not a comment */";
+    background: url(http://not-a-comment/#frag);
+    quotes: "//" "*/";
+    width: calc(100% / 3); /* a trailing comment after a slash that divides */
+}
+
+// The `//` form, which the preprocessors and postcss accept and the grammar
+// names separately from the block form.
+.token::after {
+    content: "\2014";
+    grid-template-areas:
+        "head head"
+        "body side";
+}
+
+/*! A preserved banner. Counted as prose today — see the licence-header item. */
+@media (min-width: 48rem) {
+    .token {
+        /* Nested one level down, to prove the walk reaches it. */
+        inline-size: 100%;
+    }
+}
+
+/* prettier-ignore */
+.ornament { color: #ff0000; }
+
+/* ============================ */

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<!-- SPDX-License-Identifier: MIT -->
+<!-- prettier-ignore -->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Reticulating splines</title>
+    <!--
+        The block form, and everything below that looks like markup and is not.
+        A comment is an `extra` in this grammar, so it is reached wherever it
+        sits rather than only between elements.
+    -->
+    <style>
+        /* Inside `raw_text`, so this bills as code — the injection gap. */
+        .a { color: red; }
+    </style>
+    <script>
+        // Likewise: an inline script is one opaque token to this grammar.
+        const url = "http://not-a-comment/#frag";
+    </script>
+</head>
+<body>
+    <!-- Why this markup is shaped the way it is. -->
+    <div class="pane" data-controller="theme-toggle" hidden>
+        <p>Interface copy is the product, not prose about code.</p>
+        <pre>&lt;!-- an escaped comment, which is text --&gt;</pre>
+        <a href="https://example.com/?a=1&amp;b=2#frag">A link</a>
+        <input type="checkbox" checked>
+        <img src="x.png" alt="Copy inside an attribute">
+    </div>
+
+    <!-- The framework attribute shapes, which the attribute lexer has to
+         tolerate: they are not HTML, and they are not comments either. -->
+    <mm-panel *ngIf="ready" [value]="row.total" (click)="open()" #anchor></mm-panel>
+
+    <table>
+        <tr><td>a</td><td>b</td></tr>
+    </table>
+</body>
+</html>

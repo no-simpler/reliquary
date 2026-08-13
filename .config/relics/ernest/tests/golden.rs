@@ -272,6 +272,112 @@ fn the_adversarial_typescript_fixture_finds_prose_without_false_positives() {
 }
 
 #[test]
+fn the_adversarial_css_fixture_finds_prose_without_false_positives() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/css/adversarial.css");
+    let (_, src, counts) = measure(&path);
+
+    for decoy in [
+        "\"/* not a comment */\"",
+        "url(http://not-a-comment/#frag)",
+        "quotes: \"//\" \"*/\"",
+        "calc(100% / 3)",
+    ] {
+        assert!(src.contains(decoy), "fixture lost its decoy: {decoy}");
+    }
+    assert!(counts.prose_chars > 0, "found no prose at all");
+    // The SPDX identifier, the stylelint directive and the prettier one.
+    assert_eq!(counts.ignored_lines, 3);
+}
+
+/// Body copy is the interface's own text rather than prose describing code, so
+/// it bills as code — and a comment beside it still bills as prose.
+///
+/// Asserted by shortening the copy rather than by a fixed number, as the JSX
+/// fixture is: what has to hold is that the characters move the *code* bucket
+/// and leave prose alone, and that survives every later edit to the fixture.
+#[test]
+fn the_adversarial_html_fixture_bills_markup_copy_as_code() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/html/adversarial.html");
+    let (profile, src, counts) = measure(&path);
+
+    for decoy in [
+        "&lt;!-- an escaped comment, which is text --&gt;",
+        "https://example.com/?a=1&amp;b=2#frag",
+        "*ngIf=\"ready\" [value]=\"row.total\" (click)=\"open()\" #anchor",
+    ] {
+        assert!(src.contains(decoy), "fixture lost its decoy: {decoy}");
+    }
+    assert!(counts.prose_chars > 0, "found no prose at all");
+    // The doctype, the SPDX identifier and the prettier directive.
+    assert_eq!(counts.ignored_lines, 3);
+
+    let copy = "<p>Interface copy is the product, not prose about code.</p>";
+    assert!(src.contains(copy), "fixture lost its markup copy");
+    let shortened = src.replace(copy, "<p>x</p>");
+    let after = analyze_file(&shortened, profile).expect("analyzes");
+    assert_eq!(
+        counts.prose_chars, after.prose_chars,
+        "interface copy reached the prose bucket"
+    );
+    assert_eq!(
+        counts.code_chars - after.code_chars,
+        ("Interfacecopyistheproduct,notproseaboutcode.".len() - 1) as u64,
+        "interface copy should bill as code, character for character"
+    );
+}
+
+/// The grammar is template-first, so the markup between the delimiters is one
+/// opaque `text` node. The comment in it bills as code, and this is where that
+/// is pinned against the real file rather than a two-line snippet.
+#[test]
+fn the_adversarial_twig_fixture_finds_prose_without_false_positives() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/twig/adversarial.html.twig");
+    let (profile, src, counts) = measure(&path);
+
+    for decoy in [
+        "'a string with #} inside it'",
+        "\"and a {# one in the other quote\"",
+        "{{ this is not parsed }}",
+    ] {
+        assert!(src.contains(decoy), "fixture lost its decoy: {decoy}");
+    }
+    assert!(counts.prose_chars > 0, "found no prose at all");
+    // The SPDX identifier and the twig-cs-fixer directive.
+    assert_eq!(counts.ignored_lines, 2);
+
+    let markup = "The injection gap, not a rule this profile could fix.";
+    assert!(src.contains(markup), "fixture lost its HTML comment");
+    let shortened = src.replace(markup, "x");
+    let after = analyze_file(&shortened, profile).expect("analyzes");
+    assert_eq!(
+        counts.prose_chars, after.prose_chars,
+        "an HTML comment inside a template reached the prose bucket"
+    );
+    assert!(
+        counts.code_chars > after.code_chars,
+        "an HTML comment inside a template should bill as code"
+    );
+}
+
+#[test]
+fn the_adversarial_xml_fixture_finds_prose_without_false_positives() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/xml/adversarial.xml");
+    let (_, src, counts) = measure(&path);
+
+    for decoy in [
+        "attr=\"&lt;!-- not a comment --&gt;\"",
+        "<!-- not a comment either -->",
+        "WHERE tag <> 'x' AND note LIKE '%--%'",
+    ] {
+        assert!(src.contains(decoy), "fixture lost its decoy: {decoy}");
+    }
+    assert!(counts.prose_chars > 0, "found no prose at all");
+    // The XML declaration, the doctype and the SPDX identifier.
+    assert_eq!(counts.ignored_lines, 3);
+}
+
+#[test]
 fn the_adversarial_shell_fixture_finds_prose_without_false_positives() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/shell/adversarial.sh");
     let (_, src, counts) = measure(&path);

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "suite.dtd">
+<!-- SPDX-License-Identifier: MIT -->
+<?xml-stylesheet type="text/xsl" href="report.xsl"?>
+<suite bootstrap="tests/bootstrap.php" colors="true">
+    <!--
+        The block form, and everything below that looks like a comment and is
+        not: escaped in an entity, escaped in an attribute, and verbatim inside
+        a character-data section.
+    -->
+    <source>
+        <include>
+            <directory>src</directory>
+        </include>
+    </source>
+
+    <query attr="&lt;!-- not a comment --&gt;"><![CDATA[
+        <!-- not a comment either -->
+        SELECT * FROM offer WHERE tag <> 'x' AND note LIKE '%--%'
+    ]]></query>
+
+    <php>
+        <!-- Why this variable is set here rather than in the environment. -->
+        <env name="APP_ENV" value="test"/>
+    </php>
+</suite>
