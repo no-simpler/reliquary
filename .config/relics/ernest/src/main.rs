@@ -1,6 +1,8 @@
 mod cli;
 
-use anyhow::Result;
+use std::io::{self, Write};
+
+use anyhow::{Context, Result};
 use clap::Parser;
 
 use cli::{Cli, Command, Format};
@@ -16,10 +18,33 @@ fn main() {
     match run(cli) {
         Ok(code) => std::process::exit(code),
         Err(err) => {
-            eprintln!("ernest: {err:#}");
+            warn(&format!("ernest: {err:#}"));
             std::process::exit(EXIT_ERROR);
         }
     }
+}
+
+/// Every byte the report writes goes through here: stdout is locked once rather
+/// than reacquired per macro call, and flushed explicitly rather than relying on
+/// `std::process::exit` to do it.
+///
+/// A reader that went away is not a failure of the measurement — `ernest | head`
+/// must not look like a broken run, and the print macros make it one by panicking
+/// on `BrokenPipe`. Returning `Ok` rather than exiting is deliberate: the
+/// `--max-density` gate reads a density already in hand, so the verdict still
+/// reaches the exit code with nobody left to read stdout.
+fn emit(text: &str) -> Result<()> {
+    let mut out = io::stdout().lock();
+    match out.write_all(text.as_bytes()).and_then(|()| out.flush()) {
+        Err(err) if err.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        other => other.context("writing the report"),
+    }
+}
+
+/// stderr breaks the same way, and a diagnostic nobody is left to read is not
+/// worth a panic on top of whatever already went wrong.
+fn warn(text: &str) {
+    let _ = writeln!(io::stderr(), "{text}");
 }
 
 fn run(cli: Cli) -> Result<i32> {
@@ -35,8 +60,8 @@ fn run(cli: Cli) -> Result<i32> {
             Format::Json => {
                 anyhow::bail!("diff has no --format json; compare the snapshots you already hold")
             }
-            Format::Value => print!("{}", report::diff::quiet(&before, &after)?),
-            Format::Text => print!("{}", report::diff::render(&before, &after, show)?),
+            Format::Value => emit(&report::diff::quiet(&before, &after)?)?,
+            Format::Text => emit(&report::diff::render(&before, &after, show)?)?,
         }
         return Ok(0);
     }
@@ -57,9 +82,11 @@ fn run(cli: Cli) -> Result<i32> {
     let report = aggregate::run(&survey, unit, show.views);
 
     match format {
-        Format::Json => println!("{}", report::json::render(&report)?),
-        Format::Value => print!("{}", report::human::value(&report)),
-        Format::Text => print!("{}", report::human::render(&report, show)),
+        // The pretty-printer supplies no trailing newline, and a snapshot that
+        // ends mid-line is awkward in every reader that is not a parser.
+        Format::Json => emit(&format!("{}\n", report::json::render(&report)?))?,
+        Format::Value => emit(&report::human::value(&report))?,
+        Format::Text => emit(&report::human::render(&report, show))?,
     }
 
     if let Some(limit) = options.max_density
@@ -67,7 +94,9 @@ fn run(cli: Cli) -> Result<i32> {
     {
         let measured = density * 100.0;
         if measured > limit {
-            eprintln!("ernest: prose density {measured:.1}% exceeds --max-density {limit:.1}%");
+            warn(&format!(
+                "ernest: prose density {measured:.1}% exceeds --max-density {limit:.1}%"
+            ));
             return Ok(EXIT_OVER_THRESHOLD);
         }
     }

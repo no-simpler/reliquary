@@ -143,6 +143,25 @@ fn an_unreadable_path_is_an_error_not_a_verdict() {
     );
 }
 
+/// `ernest --by file --top 0 | head` is the obvious way to skim a long ranking,
+/// and the print macros made it a panic. A real pipeline is the faithful test:
+/// dropping a piped handle from inside the harness closes the reader at a moment
+/// the OS chooses, which is exactly the flake this is guarding against.
+#[test]
+fn a_severed_pipe_is_not_a_failure() {
+    let out = Command::new("sh")
+        .arg("-c")
+        .arg(r#""$0" "$1" --by file --top 0 | head -1"#)
+        .arg(env!("CARGO_BIN_EXE_ernest"))
+        .arg(fixtures())
+        .output()
+        .expect("the pipeline runs");
+
+    assert_eq!(out.status.code(), Some(0));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}
+
 #[test]
 fn the_threshold_separates_exceeded_from_broken() {
     let dir = fixtures();
