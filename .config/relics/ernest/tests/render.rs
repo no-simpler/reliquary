@@ -124,6 +124,20 @@ fn the_value_format_is_one_line() {
     check("value", &run(&[TREE, "--format", "value"]));
 }
 
+/// One step up is provenance: what was measured, at what scope, and how much of
+/// it a clone would not see.
+#[test]
+fn verbose_says_what_the_walk_reached() {
+    check("verbose", &run(&[TREE, "-v", "--by", "language"]));
+}
+
+/// The histogram is summarised at the default level and whole here — the edge
+/// tree carries six extensions against a cap of four, so the two readings differ.
+#[test]
+fn verbose_uncaps_the_unsupported_histogram() {
+    check("verbose-edge", &run(&[EDGE, "-v"]));
+}
+
 /// `-q` is the quiet end of the verbosity axis, not a format: the figure stays,
 /// and everything that comments on the run goes.
 #[test]

@@ -204,7 +204,8 @@ fn notes(report: &Report, show: Presentation) -> Notes {
     if show.verbosity == Verbosity::Quiet {
         return notes;
     }
-    notes.census(report);
+    notes.census(report, show.verbosity);
+    notes.provenance(report, show.verbosity);
     notes.corpora(report);
     notes.unit(report.unit);
     if !show.views.any() {

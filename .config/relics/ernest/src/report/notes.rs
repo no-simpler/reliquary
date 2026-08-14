@@ -9,11 +9,13 @@
 
 use crate::aggregate::Report;
 use crate::span::Unit;
+use crate::walk::Provenance;
 
-use super::{count, plural, thousands};
+use super::{Verbosity, count, plural, thousands};
 
-/// Extensions named before the rest are summarised away. A note is not a view,
-/// so `--top` does not govern it — `--json` carries the whole histogram.
+/// Extensions named before the rest are summarised away at the default level. A
+/// note is not a view, so `--top` does not govern it — `-v` uncaps it, and
+/// `--json` carries the whole histogram at every level.
 const GAPS: usize = 4;
 
 /// Every `--by` value, in the order they are declared: what a caller most often
@@ -35,21 +37,74 @@ impl Notes {
     /// What was measured and what was not. The headline sums every cohort, so a
     /// format ernest cannot read skews it rather than abstaining from it — this
     /// is the line that makes that visible, and names the profile to write next.
-    pub fn census(&mut self, report: &Report) {
+    pub fn census(&mut self, report: &Report, level: Verbosity) {
         let mut line = count(report.files_scanned, "file") + " measured";
         if report.files_skipped > 0 {
             line.push_str(&format!(
                 ", {} unsupported",
                 thousands(report.files_skipped)
             ));
-            if let Some(gaps) = unsupported(report) {
-                line.push_str(&format!(" ({gaps})"));
+            // The histogram is summarised at the default level and whole at `-v`:
+            // "+2 more" is the right answer to a question nobody asked, and the
+            // wrong one to a caller who asked for provenance.
+            let gaps = if level >= Verbosity::Verbose {
+                usize::MAX
+            } else {
+                GAPS
+            };
+            if let Some(named) = unsupported(report, gaps) {
+                line.push_str(&format!(" ({named})"));
             }
         }
         if report.files_failed > 0 {
             line.push_str(&format!(", {} unreadable", thousands(report.files_failed)));
         }
         self.push(line);
+    }
+
+    /// What the walk was asked for and what it reached. Provenance rather than
+    /// caveat: none of it qualifies the figure, and all of it answers "why is
+    /// this number over these files" — which is only a question once someone is
+    /// surprised by the answer.
+    pub fn provenance(&mut self, report: &Report, level: Verbosity) {
+        if level < Verbosity::Verbose {
+            return;
+        }
+
+        if !report.roots.is_empty() {
+            self.push(format!("measuring {}", report.roots.join(", ")));
+        }
+
+        self.push(format!(
+            "--scope {} — {}",
+            report.scope,
+            match report.scope.as_str() {
+                "shared" => "only what a fresh clone would see",
+                "all" => "gitignored files included",
+                _ => "locally-excluded files included, gitignored files not",
+            }
+        ));
+
+        // Tracked against local is the second brain made visible: prose in a
+        // committed document is paid for by a reader, prose in `.claude/` by
+        // every context load.
+        let (tracked, local) = provenance_split(report);
+        if local > 0 {
+            self.push(format!(
+                "{} tracked, {} local to this machine",
+                thousands(tracked),
+                thousands(local)
+            ));
+        }
+
+        // A narrowed run passes over supported files without counting them as a
+        // coverage gap — correct, and silent, so the figure looks repository-wide
+        // when it is not.
+        if let Some(lang) = &report.lang {
+            self.push(format!(
+                "--lang {lang} — supported files in other languages were not measured"
+            ));
+        }
     }
 
     /// A declared corpus is prose that is the product rather than prose about
@@ -106,8 +161,9 @@ impl Notes {
     }
 }
 
-/// Which extensions the skipped files were, heaviest first.
-fn unsupported(report: &Report) -> Option<String> {
+/// Which extensions the skipped files were, heaviest first, naming at most
+/// `limit` of them.
+fn unsupported(report: &Report, limit: usize) -> Option<String> {
     if report.unsupported.is_empty() {
         return None;
     }
@@ -116,13 +172,29 @@ fn unsupported(report: &Report) -> Option<String> {
 
     let mut named: Vec<String> = gaps
         .iter()
-        .take(GAPS)
+        .take(limit)
         .map(|(ext, n)| format!("{ext} {}", thousands(**n)))
         .collect();
-    if gaps.len() > GAPS {
-        named.push(format!("+{} more", thousands((gaps.len() - GAPS) as u64)));
+    if gaps.len() > limit {
+        named.push(format!("+{} more", thousands((gaps.len() - limit) as u64)));
     }
     Some(named.join(", "))
+}
+
+/// Files on each side of the share, summed from the breakdown that is built on
+/// every run — so this costs nothing and needs no new field.
+fn provenance_split(report: &Report) -> (u64, u64) {
+    let mut tracked = 0;
+    let mut local = 0;
+    for cohort in &report.cohorts {
+        for language in &cohort.languages {
+            match language.provenance {
+                Provenance::Tracked => tracked += language.files,
+                Provenance::Local => local += language.files,
+            }
+        }
+    }
+    (tracked, local)
 }
 
 #[cfg(test)]
@@ -139,7 +211,7 @@ mod tests {
     #[test]
     fn a_clean_census_carries_only_what_it_measured() {
         let mut notes = Notes::default();
-        notes.census(&report());
+        notes.census(&report(), Verbosity::Normal);
         assert_eq!(notes.render(), "  1 file measured\n");
     }
 
@@ -161,10 +233,19 @@ mod tests {
         .collect();
 
         let mut notes = Notes::default();
-        notes.census(&report);
+        notes.census(&report, Verbosity::Normal);
         assert_eq!(
             notes.render(),
             "  40 files measured, 17 unsupported (vim 20, json 14, map 9, log 3, +2 more), 2 unreadable\n"
+        );
+
+        // The same tally at `-v`: every extension named, nothing summarised
+        // away, and the heaviest-first order unchanged.
+        let mut notes = Notes::default();
+        notes.census(&report, Verbosity::Verbose);
+        assert_eq!(
+            notes.render(),
+            "  40 files measured, 17 unsupported (vim 20, json 14, map 9, log 3, bin 2, lock 1), 2 unreadable\n"
         );
     }
 
