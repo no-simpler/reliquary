@@ -88,9 +88,9 @@ pub fn render(before: &Report, after: &Report, show: Presentation) -> Result<Str
     Ok(blocks.render())
 }
 
-/// The density alone, as a change in percentage points. What `--quiet` writes
-/// on this side, so a gate reading a diff speaks the dialect one reading a
-/// measurement does.
+/// The density alone, as a change in percentage points. What `--format value`
+/// writes on this side, so a gate reading a diff speaks the dialect one reading
+/// a measurement does.
 pub fn quiet(before: &Report, after: &Report) -> Result<String> {
     same_unit(before, after)?;
     Ok(format!(

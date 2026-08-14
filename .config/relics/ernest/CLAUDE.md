@@ -180,6 +180,7 @@ src/
   analyze/sections.rs innermost-section decomposition of a document
   detect.rs           path, then shebang -> profile
   walk.rs             scope, provenance, ignore::WalkBuilder, default excludes
+  rank.rs             which files the ranked views cover: --changed, --focus
   aggregate.rs        file -> (cohort, provenance, language) -> report
   report/             blocks and notes, then table, human, json, diff
 ```
@@ -272,17 +273,52 @@ reads as though it were the answer. A session drilling into a whole repository
 asks for a breakdown on purpose and can afford the second call.
 
 ```
---by file        one row per file, most prose first
---by section     one row per innermost heading of a document
---by cohort      the total and the cohorts it sums
---by language    the same, decomposed one level further
---top N          rows in each ranked view; 0 shows every row      [default 20]
+--by file           one row per file, most prose first
+--by section        one row per innermost heading of a document
+--by cohort         the total and the cohorts it sums
+--by language       the same, decomposed one level further
+--top N             rows in each ranked view; 0 shows every row   [default 20]
+--changed[=REF]     rank only what differs from REF               [default HEAD]
+--focus PATHSPEC    rank only the paths matching
 ```
 
 Comma-delimited and composable, and `--by` means the same thing to `ernest diff`
 as it does to a measurement — the flags are global, so either side of the
 subcommand parses. `--by language` contains `--by cohort`, so asking for both is
 asking for the deeper one.
+
+### The ranking is not the headline's scope
+
+`--by file` ranks the repository. That is the right scope for the headline —
+relocation-invariance needs it — and the wrong one for the ranking. On the call
+site that dominates, an agent measuring before and after its own edit across
+fifty files, a repository-wide ranking is stationary: the same large documents
+lead it either way, so it says nothing about the change.
+
+So the two split. **`--changed` and `--focus` narrow the ranked views and
+nothing else** — the headline, the cohorts and `files_scanned` stay
+repository-wide. They intersect, and either implies `--by file` when no `--by`
+was named, since a ranking scope with no ranked view scopes nothing visible.
+
+`--focus` takes gitignore glob syntax, the same dialect `.ernestignore` uses, so
+`*.php` matches at any depth while `docs/**` is anchored at the working
+directory. `--changed` asks git rather than reimplementing it — the same
+delegation `.gitignore` gets — with **two-dot** semantics: `git diff <REF>`
+against the working tree, plus the untracked files beside it. Merge-base
+(three-dot) would answer "what this branch added" and drop uncommitted work,
+which is the very thing the measure-edit-measure loop weighs. Its value must be
+attached (`--changed=main`), because a bare path follows it.
+
+A ranking scope is recorded in the snapshot. Without that, a scoped `files` is
+indistinguishable from a smaller repository, and `ernest diff` across a scoped
+and an unscoped snapshot bills every out-of-scope file as a full-weight
+deletion; it is refused row by row and allowed at the headline, which is
+unscoped by construction.
+
+The note under a scoped ranking gives **volume**, never a scoped density. A
+per-change density is not relocation-invariant — prose moved out of a changed
+file into an untouched one would lower it for free — which is the vector the
+summed headline was built to close.
 
 Sections are keyed `path#Heading > Subheading` and exist for the `Docs` cohort,
 where a file is too coarse a unit — a 90 KB spec that is 98% prose says nothing
@@ -297,14 +333,15 @@ cohorts.
 
 ### Three channels, three promises
 
-`--format {text,json,value}`, with `--json` and `-q`/`--quiet` as the short
-spellings of the last two.
+`-f`/`--format {text,json,value}`, with `--json` as the short spelling of the
+second.
 
 - `--json` **is the contract.** `schema_version` moves when it changes, and
   `ernest diff` refuses a snapshot from another schema.
-- `--quiet` is one line and one promise: the density as a bare number, `40.4`, or
-  `n/a`. It is what a hook or a `--max-density` gate reads, and `--max-density`
-  takes the same dialect back. On a diff it is the delta in percentage points.
+- `--format value` is one line and one promise: the density as a bare number,
+  `40.4`, or `n/a`. It is what a hook or a `--max-density` gate reads, and
+  `--max-density` takes the same dialect back. On a diff it is the delta in
+  percentage points.
 - **The text report carries no stability promise at all.** Columns, wording and
   which lines appear may change in any release. That is git's porcelain
   convention, and it buys the same thing: freedom to keep making the default
@@ -315,6 +352,40 @@ spellings of the last two.
 Output carries no colour, on purpose. The primary reader pays for every ANSI byte
 and gains nothing from one, and a palette conditional on a TTY would make the
 output bimodal for the benefit of the caller that matters least.
+
+### How loud, on one axis
+
+```
+-q      the figure, and only what qualifies a block that was printed
+        the figure and the caveats on how to read it              [default]
+-v      provenance — roots, scope, the tracked/local split, the whole
+        unsupported histogram, and any --lang narrowing
+-vv     per-file diagnostics — every path set aside and why, and which
+        profile read each ranked file
+-vvv    parse-level — what each grammar could not read
+```
+
+`-q` and `-v` are **one counted axis**, netting off and clamping silently at
+both ends, as `ssh` and `rsync` spell it. `-q` naming a *format* would make it
+the one flag here a caller could not reason about from any other tool, so
+`--format value` is the only spelling of the bare number.
+
+Verbosity is **presentation, and text only**. `--json -vvv` writes the same
+bytes as `--json`, and `--format value` is one line whatever the level — but
+both are *accepted*, never refused, so a wrapper can pass a flag set it did not
+assemble. That is possible because the snapshot is full-fidelity at every level:
+the grammar tally, the failure paths and the exclusion count are always in it.
+
+`--by` is a different kind of flag and the distinction is load-bearing: it
+selects what is **computed**, so `--json` and `--json --by file` legitimately
+differ in shape. Verbosity selects what is **said** about what was computed, and
+never changes the shape of anything.
+
+Unbounded per-file lists — a `--scope all` PHP repository passes over sixty
+thousand unsupported files — live in `report::Diagnostics`, which is text-only
+and collected only at `-vv`. That is the one thing allowed to key on verbosity.
+Anything reaching `Report` is collected whatever the flags say, or the
+contract's shape starts depending on how loud the caller asked to be.
 
 ## Adding a format
 
@@ -496,6 +567,14 @@ wrong answer is still wrong.
 - Density does not compare across languages — brace-heavy languages read lower.
 - `--unit lines` resolves a split line by dominant class, so a code line with a
   long trailing comment reads as prose.
+- **`--changed` needs a discoverable git repository**, which a yadm-managed tree
+  is not: the work tree is `$HOME` and the git dir lives elsewhere, so `git -C
+  ~/.config rev-parse` fails there. `GIT_DIR` and `GIT_WORK_TREE` are the escape
+  hatch and the error names them. ernest never sets them itself — that would be
+  guessing at git's job, and would make `--changed` mean something other than
+  what `git diff` means in the same directory.
+- `--focus` matches the path as the report prints it, so a pathspec with a slash
+  in it is anchored at the working directory rather than at a walk root.
 - A git worktree checked out under a locally-excluded path is walked at the
   default scope and double-counts the repository. The project-side fix is to
   gitignore the agent's runtime state, which makes it noise rather than second
