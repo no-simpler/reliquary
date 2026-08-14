@@ -6,4 +6,4 @@ prose density  81.5%   (prose 22 / base 27 chars)
       php                    tracked       81.5%     22     5      1
 
   1 file measured, 7 unsupported (vim 2, bin 1, log 1, map 1, +2 more)
-  tests/render/edge/.ernestignore applied — a declared corpus is not measured
+  tests/render/edge/.ernestignore applied — 1 file excluded as a declared corpus

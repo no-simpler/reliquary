@@ -206,7 +206,7 @@ fn notes(report: &Report, show: Presentation) -> Notes {
     }
     notes.census(report, show.verbosity);
     notes.provenance(report, show.verbosity);
-    notes.corpora(report);
+    notes.corpora(report, show.verbosity);
     notes.unit(report.unit);
     if !show.views.any() {
         notes.views(true);

@@ -86,6 +86,11 @@ pub struct Survey {
     /// The `.ernestignore` files that were in effect, so an excluded corpus is
     /// declared in the report rather than silently absent from it.
     pub ernestignore: Vec<PathBuf>,
+    /// The supported files those declarations removed, sorted. Supported only:
+    /// a corpus of five thousand binaries did not move the figure, and the
+    /// number that decides whether to say anything is what *would* have been
+    /// measured. Empty unless an `.ernestignore` was found.
+    pub excluded: Vec<PathBuf>,
     /// What the walk was asked for. Carried so the report — and the snapshot it
     /// serialises — can say what produced it: a figure that does not name its
     /// scope cannot be reasoned about, and two snapshots taken at different ones
@@ -98,18 +103,39 @@ pub struct Survey {
 /// Every supported file under `roots`, plus what was passed over — so coverage
 /// is visible rather than assumed.
 pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Survey {
-    let walked = files(roots, scope, lang);
+    let walked = files(roots, scope, lang, Corpus::Excluded);
     let excludes = LocalExcludes::for_roots(roots);
 
     // At the widest scope a file may be hidden by `.gitignore` instead, which
     // no single matcher answers; the narrower walk is what names those.
     let reference: Option<HashSet<PathBuf>> = (scope == Scope::All).then(|| {
-        files(roots, Scope::Local, lang)
+        files(roots, Scope::Local, lang, Corpus::Excluded)
             .found
             .into_iter()
             .map(|(path, _)| path)
             .collect()
     });
+
+    // What a declared corpus removed. The `ignore` crate swallows a match before
+    // it is yielded and never descends into an excluded directory, so counting
+    // them means asking again without the rule — there is no cheaper answer, and
+    // the count is what separates a declared test fixture from half a repository.
+    //
+    // Conditional, so only the rare repository that writes one pays for it. The
+    // second walk here is the same shape `Scope::All` above already takes.
+    let excluded: Vec<PathBuf> = if walked.ernestignore.is_empty() {
+        Vec::new()
+    } else {
+        let seen: HashSet<&PathBuf> = walked.found.iter().map(|(path, _)| path).collect();
+        let mut removed: Vec<PathBuf> = files(roots, scope, lang, Corpus::Included)
+            .found
+            .into_iter()
+            .map(|(path, _)| path)
+            .filter(|path| !seen.contains(path))
+            .collect();
+        removed.sort();
+        removed
+    };
 
     let mut candidates: Vec<Candidate> = walked
         .found
@@ -138,6 +164,7 @@ pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Survey {
         candidates,
         unsupported: walked.unsupported,
         ernestignore: walked.ernestignore,
+        excluded,
         scope,
         lang: lang.map(str::to_string),
         roots: roots.to_vec(),
@@ -209,7 +236,16 @@ struct Walked {
     ernestignore: Vec<PathBuf>,
 }
 
-fn files(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Walked {
+/// Whether a walk honors a declared corpus. The one rule that varies between the
+/// two walks `collect` may take, so the difference between them is the corpus and
+/// nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Corpus {
+    Excluded,
+    Included,
+}
+
+fn files(roots: &[PathBuf], scope: Scope, lang: Option<&str>, corpus: Corpus) -> Walked {
     let respect = scope != Scope::All;
     let mut builder = WalkBuilder::new(&roots[0]);
     for root in &roots[1..] {
@@ -231,15 +267,19 @@ fn files(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Walked {
         // and delegating build output to `.gitignore` would silently not work
         // in the tree ernest was written in.
         .require_git(false)
-        // Unconditional: a corpus is not ernest's subject at any scope, which
-        // is what separates this from the git-derived rules above.
-        .add_custom_ignore_filename(ERNESTIGNORE)
         .filter_entry(|entry| {
             entry
                 .file_name()
                 .to_str()
                 .is_none_or(|name| !VCS_DIRS.contains(&name))
         });
+
+    // Independent of `--scope`, unlike every git-derived rule above: a corpus is
+    // not ernest's subject at any of them. The one walk that omits it is the one
+    // counting what it removed.
+    if corpus == Corpus::Excluded {
+        builder.add_custom_ignore_filename(ERNESTIGNORE);
+    }
 
     let mut walked = Walked {
         found: Vec::new(),

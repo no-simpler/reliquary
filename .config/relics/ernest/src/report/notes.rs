@@ -110,11 +110,33 @@ impl Notes {
     /// A declared corpus is prose that is the product rather than prose about
     /// the code. Excluded silently it would read as a repository with less prose
     /// in it, so the exclusion is said out loud wherever it applied.
-    pub fn corpora(&mut self, report: &Report) {
+    ///
+    /// Materiality decides *when*, not verbosity. Behind `-v` a default run
+    /// would under-report in silence, which is the failure this line exists to
+    /// prevent — but a corpus that removed one test fixture has not moved the
+    /// figure and does not need announcing in every measurement of the tree
+    /// above it. So: named by default when it removed enough to matter, and at
+    /// `-v` either way.
+    ///
+    /// The count is corpus-wide rather than per rule file. Attributing an
+    /// exclusion to one of several `.ernestignore` files would mean matching
+    /// each rule set separately, and the number that decides materiality is the
+    /// total.
+    pub fn corpora(&mut self, report: &Report, level: Verbosity) {
+        if !material(report) && level < Verbosity::Verbose {
+            return;
+        }
         for path in &report.ernestignore {
-            self.push(format!(
-                "{path} applied — a declared corpus is not measured"
-            ));
+            let mut line = format!("{path} applied");
+            if report.ernestignore_excluded > 0 {
+                line.push_str(&format!(
+                    " — {} excluded as a declared corpus",
+                    count(report.ernestignore_excluded, "file")
+                ));
+            } else {
+                line.push_str(" — a declared corpus is not measured");
+            }
+            self.push(line);
         }
     }
 
@@ -159,6 +181,17 @@ impl Notes {
             .map(|note| format!("  {note}\n"))
             .collect::<String>()
     }
+}
+
+/// Whether a declared corpus removed enough to have moved the figure.
+///
+/// A ratio rather than a ceiling, because materiality is proportional: the same
+/// corpus is trivia in a monorepo and the whole story in a four-file tree. A tenth
+/// of what would have been measured is the line — below it, the exclusion is the
+/// test fixture case and belongs behind `-v`.
+fn material(report: &Report) -> bool {
+    let excluded = report.ernestignore_excluded;
+    excluded > 0 && excluded * 10 >= excluded + report.files_scanned
 }
 
 /// Which extensions the skipped files were, heaviest first, naming at most

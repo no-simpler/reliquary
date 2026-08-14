@@ -422,6 +422,7 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> (Report, Diagnostics) {
             .iter()
             .map(|p| p.display().to_string())
             .collect(),
+        ernestignore_excluded: survey.excluded.len() as u64,
         total,
         cohorts,
         files,

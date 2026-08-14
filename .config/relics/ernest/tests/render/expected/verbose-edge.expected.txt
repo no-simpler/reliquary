@@ -3,5 +3,5 @@ prose density  81.5%   (prose 22 / base 27 chars)
   1 file measured, 7 unsupported (vim 2, bin 1, log 1, map 1, rst 1, tmp 1)
   measuring tests/render/edge
   --scope local — locally-excluded files included, gitignored files not
-  tests/render/edge/.ernestignore applied — a declared corpus is not measured
+  tests/render/edge/.ernestignore applied — 1 file excluded as a declared corpus
   --by file|section|cohort|language, --top N, --json

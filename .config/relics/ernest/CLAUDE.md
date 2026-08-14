@@ -234,9 +234,17 @@ because a corpus is not the subject at any of them.
 
 Declared, never inferred. A rule keyed on doc-like filenames would miss
 `AGENTIC-TOOLING.md`, and would make renaming `CLAUDE.md` to `notes.md` lower
-the headline — trading one gaming vector for a worse one. The report names any
-`.ernestignore` in effect, so an excluded corpus cannot read as a repository
-with less prose in it.
+the headline — trading one gaming vector for a worse one.
+
+The report names an `.ernestignore` whose corpus was **material** — a tenth or
+more of what would otherwise have been measured — so an excluded corpus cannot
+read as a repository with less prose in it. Below that it is named at `-v`
+instead. Materiality rather than verbosity, because behind a level a default run
+would under-report in silence, which is the failure the line exists to prevent;
+and a corpus that removed one test fixture has not moved the figure it would be
+qualifying. The count that decides it costs a second walk, taken only when an
+`.ernestignore` was found: the `ignore` crate drops a match before yielding it
+and never descends into an excluded directory, so there is no cheaper answer.
 
 This is the narrow case. Most projects never write one.
 

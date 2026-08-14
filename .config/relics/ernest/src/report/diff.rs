@@ -74,7 +74,7 @@ pub fn render(before: &Report, after: &Report, show: Presentation) -> Result<Str
             thousands(after.files_scanned),
         ));
     }
-    notes.corpora(after);
+    notes.corpora(after, show.verbosity);
     notes.unit(unit);
     if !show.views.any() {
         notes.views(false);

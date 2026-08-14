@@ -162,6 +162,47 @@ fn a_severed_pipe_is_not_a_failure() {
     assert!(!stderr.contains("panicked"), "{stderr}");
 }
 
+/// A corpus that removed a tenth of what would have been measured moved the
+/// figure and is named where the figure is. One that removed a test fixture did
+/// not, and announcing it in every measurement of the tree above it is the noise
+/// this rule exists to drop.
+///
+/// Materiality rather than verbosity, deliberately: behind `-v` a default run
+/// would under-report in silence, which is the failure the line was written to
+/// prevent.
+#[test]
+fn a_declared_corpus_is_named_when_it_moved_the_figure() {
+    let corpus = |name: &str, php: usize, prose: usize| {
+        let dir = scratch(name);
+        std::fs::write(dir.join(".ernestignore"), "corpus/\n").unwrap();
+        std::fs::create_dir_all(dir.join("corpus")).unwrap();
+        for n in 0..php {
+            std::fs::write(dir.join(format!("f{n}.php")), "<?php\n$x = 1;\n").unwrap();
+        }
+        for n in 0..prose {
+            std::fs::write(dir.join(format!("corpus/s{n}.md")), "# Story\n\nOnce.\n").unwrap();
+        }
+        dir
+    };
+
+    // Twenty measured against one excluded: below the line.
+    let quiet = corpus("corpus-immaterial", 20, 1);
+    let out = ernest(&[quiet.to_str().unwrap()]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(!text.contains(".ernestignore"), "{text}");
+
+    let out = ernest(&[quiet.to_str().unwrap(), "-v"]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains(".ernestignore applied"), "{text}");
+    assert!(text.contains("1 file excluded"), "{text}");
+
+    // One measured against five excluded: the corpus is most of the tree.
+    let loud = corpus("corpus-material", 1, 5);
+    let out = ernest(&[loud.to_str().unwrap()]);
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("5 files excluded"), "{text}");
+}
+
 /// A name no profile carries used to measure nothing and exit 0, so a typo was
 /// indistinguishable from a repository with no prose in it.
 #[test]
