@@ -203,6 +203,35 @@ fn a_declared_corpus_is_named_when_it_moved_the_figure() {
     assert!(text.contains("5 files excluded"), "{text}");
 }
 
+/// A grammar that cannot read a file still returns a tree, and the rules still
+/// classify it — so without the tally, a borrowed dialect's confusion reports as
+/// an ordinary row and nothing says a word. Establishing that used to take a
+/// shell loop over an example binary.
+#[test]
+fn the_grammar_tally_names_a_file_the_parser_could_not_read() {
+    let dir = scratch("grammar");
+    // A range media query, which tree-sitter-css has not caught up with.
+    std::fs::write(
+        dir.join("a.css"),
+        "@media (width >= 48rem) { .c { top: 0 } }\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("b.css"), ".c { top: 0 }\n").unwrap();
+
+    let out = ernest(&[dir.to_str().unwrap(), "--json"]);
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json parses");
+    let css = &report["grammar"]["css"];
+    assert_eq!(css["files"], 1, "{report}");
+    assert_eq!(css["measured"], 2, "{report}");
+    assert!(css["error_nodes"].as_u64().unwrap() > 0, "{report}");
+
+    // The verdict is in the snapshot at every level, and the paths behind it are
+    // what the loud rungs add.
+    let text = String::from_utf8(ernest(&[dir.to_str().unwrap(), "-vvv"]).stdout).unwrap();
+    assert!(text.contains("a.css"), "{text}");
+    assert!(!text.contains("no file defeated"), "{text}");
+}
+
 /// A name no profile carries used to measure nothing and exit 0, so a typo was
 /// indistinguishable from a repository with no prose in it.
 #[test]

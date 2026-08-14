@@ -140,6 +140,18 @@ impl Notes {
         }
     }
 
+    /// A clean corpus is a result, not an absence. Without this line, `-vvv` on a
+    /// repository whose grammars all coped would look like a rung that failed to
+    /// print rather than one that found nothing to report.
+    pub fn grammar(&mut self, report: &Report, level: Verbosity) {
+        if level < Verbosity::Trace {
+            return;
+        }
+        if report.grammar.values().all(|health| health.files == 0) {
+            self.push("no file defeated its grammar");
+        }
+    }
+
     /// Lines cannot split a mixed line, so the unit that resolves one by
     /// dominance says so rather than letting the figure pass as the canonical
     /// one.

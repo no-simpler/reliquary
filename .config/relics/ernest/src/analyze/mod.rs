@@ -9,6 +9,45 @@ use tree_sitter::{Node, Parser, Tree};
 use crate::span::{Class, Counts, Span, measure, measure_range};
 use profiles::{Profile, UNIVERSAL_PRAGMA_PREFIXES, comment_body};
 
+/// What a grammar made of one file. A grammar that cannot read a file still
+/// returns a tree, and the rules still classify it, so without this a borrowed
+/// dialect's confusion reports as an ordinary row.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Health {
+    pub errors: u64,
+    pub missing: u64,
+}
+
+impl Health {
+    pub fn clean(&self) -> bool {
+        self.errors == 0 && self.missing == 0
+    }
+}
+
+/// One file, measured. The entry point `aggregate` uses; the two below are the
+/// same work without the health verdict, kept because the tests and the `kinds`
+/// example ask exactly those questions.
+pub struct Analysis {
+    pub counts: Counts,
+    pub sections: Vec<(String, Counts)>,
+    pub health: Health,
+}
+
+pub fn analyze(src: &str, profile: &Profile, wants_sections: bool) -> Result<Analysis> {
+    let tree = parse(src, profile)?;
+    let spans = classify(&tree, src, profile);
+    let sections = if wants_sections {
+        section_rows(&tree, &spans, src, profile)
+    } else {
+        Vec::new()
+    };
+    Ok(Analysis {
+        counts: measure(src, &spans, profile.default_class),
+        sections,
+        health: health(&tree),
+    })
+}
+
 /// Classify `src` under `profile` and roll the result up into counts.
 pub fn analyze_file(src: &str, profile: &Profile) -> Result<Counts> {
     let tree = parse(src, profile)?;
@@ -21,12 +60,22 @@ pub fn analyze_file(src: &str, profile: &Profile) -> Result<Counts> {
 pub fn analyze_sections(src: &str, profile: &Profile) -> Result<(Counts, Vec<(String, Counts)>)> {
     let tree = parse(src, profile)?;
     let spans = classify(&tree, src, profile);
-    let rows = sections::of(tree.root_node(), src)
+    let rows = section_rows(&tree, &spans, src, profile);
+    Ok((measure(src, &spans, profile.default_class), rows))
+}
+
+fn section_rows(
+    tree: &Tree,
+    spans: &[Span],
+    src: &str,
+    profile: &Profile,
+) -> Vec<(String, Counts)> {
+    sections::of(tree.root_node(), src)
         .into_iter()
         .map(|section| {
             let counts = measure_range(
                 src,
-                &spans,
+                spans,
                 profile.default_class,
                 section.start,
                 section.end,
@@ -34,8 +83,46 @@ pub fn analyze_sections(src: &str, profile: &Profile) -> Result<(Counts, Vec<(St
             (section.label, counts)
         })
         .filter(|(_, c)| c.prose_chars + c.code_chars + c.ignored_chars > 0)
-        .collect();
-    Ok((measure(src, &spans, profile.default_class), rows))
+        .collect()
+}
+
+/// `has_error` on the root is a flag read, not a walk, and it already covers
+/// `MISSING` as well as `ERROR` — so every file pays nothing for the verdict.
+/// Only the files that fail it pay for the tally, and in the sweeps recorded in
+/// `TODO.md` that was 0 of 7,048 at best and 4 of 50 at worst.
+fn health(tree: &Tree) -> Health {
+    let root = tree.root_node();
+    if !root.has_error() {
+        return Health::default();
+    }
+
+    let mut health = Health::default();
+    let mut cursor = root.walk();
+    let mut descend = true;
+    loop {
+        let node = cursor.node();
+        // A subtree with nothing wrong in it cannot hold an ERROR, so the flag
+        // prunes the walk as well as opening it.
+        if descend && node.has_error() {
+            if node.is_error() {
+                health.errors += 1;
+            }
+            if node.is_missing() {
+                health.missing += 1;
+            }
+            if cursor.goto_first_child() {
+                continue;
+            }
+        }
+        if cursor.goto_next_sibling() {
+            descend = true;
+            continue;
+        }
+        if !cursor.goto_parent() {
+            return health;
+        }
+        descend = false;
+    }
 }
 
 /// Public so a test can ask whether a grammar actually read a file, rather than

@@ -152,6 +152,20 @@ fn debug_names_the_profile_behind_each_ranked_file() {
     check("debug-by-file", &run(&[TREE, "-vv", "--by", "file"]));
 }
 
+/// The edge tree carries one stylesheet the CSS grammar cannot read, so the
+/// tally has something to report and the proportion — one of one — is visible.
+#[test]
+fn trace_says_what_each_grammar_made_of_its_files() {
+    check("trace", &run(&[EDGE, "-vvv"]));
+}
+
+/// A clean corpus is a result rather than an absence, and says so — otherwise the
+/// rung reads as one that failed to print.
+#[test]
+fn trace_says_so_when_every_grammar_coped() {
+    check("trace-clean", &run(&[TREE, "-vvv"]));
+}
+
 /// `-q` is the quiet end of the verbosity axis, not a format: the figure stays,
 /// and everything that comments on the run goes.
 #[test]
@@ -218,5 +232,5 @@ fn the_render_trees_are_walked_whole() {
         )
     };
     assert_eq!(count(TREE), (5, 2), "the canonical tree");
-    assert_eq!(count(EDGE), (1, 7), "the edge tree, its corpus excluded");
+    assert_eq!(count(EDGE), (2, 7), "the edge tree, its corpus excluded");
 }

@@ -17,6 +17,7 @@ pub fn render(report: &Report, found: &Diagnostics, show: Presentation) -> Strin
     blocks.push(breakdown(report, show));
     blocks.push(ranked(report, show, Rank::File));
     blocks.push(ranked(report, show, Rank::Section));
+    blocks.push(grammar(report, show));
     blocks.push(diagnostics(report, found, show));
     blocks.push(notes(report, found, show).render());
     blocks.render()
@@ -196,6 +197,42 @@ fn ranked(report: &Report, show: Presentation, rank: Rank) -> String {
     table.render()
 }
 
+/// What each grammar made of the files it was handed.
+///
+/// A grammar that cannot read a file still returns a tree, and the rules still
+/// classify it, so a borrowed dialect's confusion reports as an ordinary row and
+/// nothing says a word. Establishing that took two hand sweeps and a pair of
+/// throwaway scripts; this is the same verdict as a flag.
+///
+/// Every measured language gets a row, clean ones included: `0 of 50` and a
+/// missing entry read very differently to someone asking whether a borrowed
+/// grammar is coping.
+fn grammar(report: &Report, show: Presentation) -> String {
+    if show.verbosity < Verbosity::Trace || report.grammar.is_empty() {
+        return String::new();
+    }
+    let mut table = Table::new(vec![
+        Column::left("language"),
+        Column::right("unread"),
+        Column::right("measured"),
+        Column::right("error nodes"),
+        Column::right("missing nodes"),
+    ]);
+    for (language, health) in &report.grammar {
+        table.push(
+            0,
+            vec![
+                language.clone(),
+                thousands(health.files),
+                thousands(health.measured),
+                thousands(health.error_nodes),
+                thousands(health.missing_nodes),
+            ],
+        );
+    }
+    table.render()
+}
+
 /// One line per path the run set aside, and why. The census above says how many;
 /// this says which, which is what a caller reaches for when the count is not the
 /// number they expected.
@@ -278,6 +315,7 @@ fn notes(report: &Report, found: &Diagnostics, show: Presentation) -> Notes {
     notes.census(report, show.verbosity);
     notes.provenance(report, show.verbosity);
     notes.corpora(report, show.verbosity);
+    notes.grammar(report, show.verbosity);
     notes.unit(report.unit);
     if !show.views.any() {
         notes.views(true);

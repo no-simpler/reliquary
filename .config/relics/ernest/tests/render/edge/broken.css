@@ -1,0 +1,4 @@
+/* A range media query, which tree-sitter-css does not parse yet. */
+@media (width >= 48rem) {
+    .card { color: red }
+}

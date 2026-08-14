@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::analyze::profiles::Cohort;
-use crate::analyze::{analyze_file, analyze_sections};
+use crate::analyze::{Health, analyze};
 use crate::report::Diagnostics;
 use crate::span::{Counts, Unit};
 use crate::walk::{Provenance, Survey};
@@ -256,6 +256,7 @@ struct Outcome {
     provenance: Provenance,
     counts: Counts,
     sections: Vec<(String, Counts)>,
+    health: Health,
 }
 
 /// Analyze every candidate in parallel, then fold the results deterministically.
@@ -274,21 +275,16 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> (Report, Diagnostics) {
             let src = String::from_utf8(bytes).map_err(|_| fail("not utf-8"))?;
             // Sections describe a document; a source file has none worth naming.
             let wants_sections = views.by_section && candidate.profile.cohort == Cohort::Docs;
-            let (counts, sections) = if wants_sections {
-                analyze_sections(&src, candidate.profile).map_err(|_| fail("parse failed"))?
-            } else {
-                (
-                    analyze_file(&src, candidate.profile).map_err(|_| fail("parse failed"))?,
-                    Vec::new(),
-                )
-            };
+            let analysis = analyze(&src, candidate.profile, wants_sections)
+                .map_err(|_| fail("parse failed"))?;
             Ok(Outcome {
                 path: candidate.path.clone(),
                 language: candidate.profile.language,
                 cohort: candidate.profile.cohort.label(),
                 provenance: candidate.provenance,
-                counts,
-                sections,
+                counts: analysis.counts,
+                sections: analysis.sections,
+                health: analysis.health,
             })
         })
         .collect();
@@ -304,6 +300,23 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> (Report, Diagnostics) {
     // Candidates arrive sorted, so this already is — asserted rather than
     // assumed, because a snapshot that reorders on a rerun diffs as noise.
     failed.sort_by(|a, b| a.path.cmp(&b.path));
+
+    // Every language gets a row, so a clean grammar is visible as clean rather
+    // than absent — `0 of 50` and "no entry" read very differently to someone
+    // asking whether a borrowed grammar is coping.
+    let mut grammar: BTreeMap<String, GrammarHealth> = BTreeMap::new();
+    let mut unread: Vec<String> = Vec::new();
+    for outcome in &outcomes {
+        let entry = grammar.entry(outcome.language.to_string()).or_default();
+        entry.measured += 1;
+        if outcome.health.clean() {
+            continue;
+        }
+        entry.files += 1;
+        entry.error_nodes += outcome.health.errors;
+        entry.missing_nodes += outcome.health.missing;
+        unread.push(outcome.path.display().to_string());
+    }
 
     // BTreeMap keeps cohort, provenance and language ordering stable, so
     // snapshots diff cleanly instead of churning on hash order.
@@ -423,6 +436,7 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> (Report, Diagnostics) {
             .map(|p| p.display().to_string())
             .collect(),
         ernestignore_excluded: survey.excluded.len() as u64,
+        grammar,
         total,
         cohorts,
         files,
@@ -443,7 +457,9 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> (Report, Diagnostics) {
             .iter()
             .map(|p| p.display().to_string())
             .collect(),
-        unread: Vec::new(),
+        // Always collected: in the sweeps behind this feature it was 0 files of
+        // 7,048, so there is nothing to gate.
+        unread,
     };
 
     (report, diagnostics)

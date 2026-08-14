@@ -127,34 +127,28 @@ becomes Tier 1 the day such a repository turns up.
 
 ---
 
-## Grammar-health reporting
+## Grammar health — what to do about it
 
-`every_fixture_parses_without_error_nodes` proves the *fixtures* parse. Nothing
-says so about the corpus. A file whose grammar produced `ERROR` nodes has been
-measured against the parser's confusion, and it reports as an ordinary row —
-which is exactly the failure mode the zsh question is about, generalised to
-every profile that borrows a neighbouring dialect's grammar. The report already
-tallies files it could not *identify*; it should also tally files it could not
-*read*.
+The **measurement** landed: `report.grammar` tallies unread files, error nodes
+and missing nodes per language on every run, `-vvv` prints the table, and `-vv`
+names the paths. The sweeps below took two throwaway scripts each; they are now
+a flag.
 
-Swept by hand once, when `tree-sitter-typescript` went in a release behind its
-JavaScript sibling and the lag looked like a risk: **0 of 7,048** hand-written
-files across the benefactor front-ends produced an `ERROR` node. The only eight
-that did were minified vendor bundles, every one of them already gitignored and
-so out of scope by the project's own declaration. Good news, and an argument for
-the feature rather than against it — that took a shell loop over
-`cargo run --example kinds`, which is not something anyone will do twice.
+What is left is the judgement the numbers were gathered for. On this machine
+they read: **0 of 7,048** hand-written front-end files error under the
+JavaScript and TypeScript grammars, while **4 of 50** stylesheets, **7 of 94**
+Twig templates and **6 of 307** Angular templates do — on `@media (width >=
+48rem)`, `@container name (…)`, `{% props a, b = 'x' %}`, Twig's else-less
+ternary, Angular's `@if (x > 0) {`. Every one sits in an expression or an
+at-rule prelude, where nothing is ever prose, and a sweep comparing ernest's
+prose against a regex over each format's comment delimiters found a shortfall of
+**0 characters across all 455 files**. So today the confusion costs tree shape
+rather than classification, and the answer is to do nothing.
 
-Swept again for css, html, twig and xml, and this time the news was mixed:
-**4 of 50** stylesheets, **7 of 94** Twig templates and **6 of 307** Angular
-templates error, on constructs their grammars have not caught up with —
-`@media (width >= 48rem)`, `@container name (…)`, `{% props a, b = 'x' %}`,
-Twig's else-less ternary, Angular's `@if (x > 0) {`. Every one is in an
-expression or an at-rule prelude, so a second sweep comparing ernest's prose
-against a regex over each format's comment delimiters found a shortfall of
-**0 characters across all 455 files** — the confusion costs tree shape, not
-classification. Which is the point: that verdict took two throwaway scripts to
-reach, and nothing in the tool would have said a word.
+Revisit when a tally says otherwise — in particular for a profile that borrows a
+neighbouring dialect's grammar, which is what the open zsh question in the
+format roadmap is really asking. The options, when it comes to that: upgrade the
+grammar, vendor a fork, or give the dialect its own profile.
 
 ---
 

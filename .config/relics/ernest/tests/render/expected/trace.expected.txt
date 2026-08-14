@@ -1,5 +1,9 @@
 prose density  64.8%   (prose 79 / base 122 chars)
 
+  language  unread  measured  error nodes  missing nodes
+  css            1         1            1              0
+  php            0         1            0              0
+
   diagnostic   path                               reason
   unread       tests/render/edge/broken.css       the grammar produced an ERROR or MISSING node
   excluded     tests/render/edge/corpus/story.md  a declared corpus
