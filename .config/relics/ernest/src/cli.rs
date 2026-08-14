@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use ernest::aggregate::Views;
+use ernest::analyze::profiles::PROFILES;
 use ernest::report::Presentation;
 use ernest::span::Unit;
 use ernest::walk::Scope;
@@ -91,7 +92,7 @@ pub struct Measure {
     pub unit: UnitArg,
 
     /// Measure only one language.
-    #[arg(long)]
+    #[arg(long, value_parser = languages(), value_name = "LANG")]
     pub lang: Option<String>,
 
     /// How far to reach. Dependency and build directories are excluded at every
@@ -102,6 +103,21 @@ pub struct Measure {
     /// Exit 1 when density exceeds this percentage. A convenience, not a gate.
     #[arg(long, value_name = "PCT")]
     pub max_density: Option<f64>,
+}
+
+/// Every language the registry names, deduplicated — a dialect that needs a
+/// second grammar is still one language, and listing TypeScript twice would read
+/// as a bug in the error message rather than as the fact it is.
+///
+/// A parser rather than a check in the run: it puts the list in `--help`, in the
+/// refusal, and in the generated completions, and it cannot drift from
+/// `PROFILES`. Before it, `--lang nonsense` matched nothing, reported `n/a` and
+/// exited 0 — a typo indistinguishable from a repository with no prose in it.
+fn languages() -> clap::builder::PossibleValuesParser {
+    let mut names: Vec<&'static str> = PROFILES.iter().map(|profile| profile.language).collect();
+    names.sort_unstable();
+    names.dedup();
+    clap::builder::PossibleValuesParser::new(names)
 }
 
 impl View {

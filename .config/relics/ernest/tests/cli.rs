@@ -162,6 +162,16 @@ fn a_severed_pipe_is_not_a_failure() {
     assert!(!stderr.contains("panicked"), "{stderr}");
 }
 
+/// A name no profile carries used to measure nothing and exit 0, so a typo was
+/// indistinguishable from a repository with no prose in it.
+#[test]
+fn an_unknown_language_is_a_usage_error() {
+    let out = ernest(&[fixtures().to_str().unwrap(), "--lang", "nope"]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("markdown"), "should list what it does take");
+}
+
 /// Every shell clap_complete knows, rather than the ones this machine happens to
 /// run — the enum is taken whole so a shell added upstream arrives for free, and
 /// this is what would notice if one stopped generating.
@@ -711,9 +721,15 @@ fn quiet_writes_the_value_and_nothing_else() {
 
 /// `n/a` rather than a number, matching `null` in the snapshot: nothing
 /// countable was found, which is not the same as no prose.
+///
+/// A tree of one unsupported file, because `--lang` no longer takes a name no
+/// profile carries and every name it does take has a fixture behind it.
 #[test]
 fn quiet_says_n_a_when_nothing_was_countable() {
-    let out = ernest(&[fixtures().to_str().unwrap(), "--lang", "nothing", "-q"]);
+    let dir = scratch("uncountable");
+    std::fs::write(dir.join("package.json"), "{}\n").unwrap();
+
+    let out = ernest(&[dir.to_str().unwrap(), "-q"]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(String::from_utf8(out.stdout).unwrap(), "n/a\n");
 }

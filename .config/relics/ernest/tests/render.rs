@@ -103,9 +103,13 @@ fn the_line_unit_carries_its_caveat() {
 
 /// Nothing found is still a report, and the block that would have held the
 /// breakdown is absent rather than blank.
+///
+/// `rust` because the tree holds no `.rs` file and `--lang` is now validated, so
+/// an unmatchable name is no longer spellable. A language-narrowed file is not
+/// counted as unsupported either, so the census reads exactly as it did.
 #[test]
 fn a_report_of_nothing_leaves_no_gap() {
-    check("empty", &run(&[TREE, "--lang", "nothing"]));
+    check("empty", &run(&[TREE, "--lang", "rust"]));
 }
 
 /// A declared corpus, an overflowing histogram of unsupported extensions, and a
