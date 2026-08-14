@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::analyze::profiles::Cohort;
 use crate::analyze::{analyze_file, analyze_sections};
+use crate::report::Diagnostics;
 use crate::span::{Counts, Unit};
 use crate::walk::{Provenance, Survey};
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// The cohort holding the code that documentation documents. It leads the
 /// breakdown and is the base the docs comparator reads against — but it is no
@@ -23,11 +24,28 @@ pub const SOURCE_COHORT: &str = "source";
 /// counts toward the headline.
 pub const DOCS_COHORT: &str = "docs";
 
+/// The snapshot, and everything a reader needs to know what produced it.
+///
+/// Every field here is an aggregate or a bounded list, and none of them varies
+/// with a presentation flag: `--json -vvv` and `--json` write the same bytes.
+/// An unbounded per-file list — every unsupported path in a `--scope all` run is
+/// sixty thousand of them — belongs in `report::Diagnostics`, which is text-only,
+/// so a snapshot cannot grow with the size of the tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Report {
     pub schema_version: u32,
     pub tool: String,
     pub unit: Unit,
+    /// How far the walk reached, and what it narrowed to. A figure that does not
+    /// name its scope cannot be reasoned about, and two snapshots taken at
+    /// different ones used to compare as though they were one measurement.
+    #[serde(default = "default_scope")]
+    pub scope: String,
+    #[serde(default)]
+    pub lang: Option<String>,
+    /// What was measured, in the order it was named.
+    #[serde(default)]
+    pub roots: Vec<String>,
     pub files_scanned: u64,
     pub files_skipped: u64,
     pub files_failed: u64,
@@ -35,9 +53,32 @@ pub struct Report {
     /// so an unwritten profile skews it; this is what makes that visible.
     #[serde(default)]
     pub unsupported: BTreeMap<String, u64>,
+    /// The paths behind `files_failed`, and why each one stopped. A count says a
+    /// file was lost; this says which, so a file that quietly stops parsing is
+    /// visible in a diff rather than only in a number that moved.
+    #[serde(default)]
+    pub failed: Vec<Failure>,
     /// `.ernestignore` files that were in effect.
     #[serde(default)]
     pub ernestignore: Vec<String>,
+    /// How many files those declarations removed. Excluded paths are never
+    /// measured, so their prose is unknown — but the count separates a declared
+    /// test fixture from half a repository, which is what decides whether the
+    /// exclusion is worth saying out loud.
+    #[serde(default)]
+    pub ernestignore_excluded: u64,
+    /// Languages whose grammar could not read every file it was handed, by
+    /// language. A grammar that fails still returns a tree and the rules still
+    /// classify it, so without this a borrowed grammar's confusion reports as an
+    /// ordinary row.
+    #[serde(default)]
+    pub grammar: BTreeMap<String, GrammarHealth>,
+    /// Whether the ranked views below cover the whole measurement. Absent scope,
+    /// `files` and `sections` are indistinguishable from a smaller repository —
+    /// and a diff of a scoped snapshot against an unscoped one bills every
+    /// out-of-scope file as a deletion.
+    #[serde(default)]
+    pub ranking: RankingScope,
     /// Every cohort summed. The headline: prose is prose wherever it lives, so
     /// moving it between a comment and a document must not move the number.
     pub total: Totals,
@@ -49,6 +90,51 @@ pub struct Report {
     pub files: Option<Vec<FileReport>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sections: Option<Vec<SectionReport>>,
+}
+
+/// A snapshot written before `scope` existed was taken at the default.
+fn default_scope() -> String {
+    "local".to_string()
+}
+
+/// One file the run could not measure, and what stopped it. Three failures used
+/// to collapse into one count, which named none of them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Failure {
+    pub path: String,
+    pub reason: String,
+}
+
+/// What one language's grammar made of the files it was handed. `files` is the
+/// count that failed, of `measured` that were tried — the shape the hand sweeps
+/// in `TODO.md` reported, because it is the one that reads as a proportion.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GrammarHealth {
+    pub files: u64,
+    pub measured: u64,
+    pub error_nodes: u64,
+    pub missing_nodes: u64,
+}
+
+/// What the ranked views cover. `asked` is `None` when they cover the whole
+/// measurement, and otherwise the scope as the caller spelled it — canonical, so
+/// two snapshots can be told apart by a reader and by `ernest diff`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RankingScope {
+    pub asked: Option<String>,
+    pub ranked: u64,
+    pub measured: u64,
+}
+
+impl RankingScope {
+    /// How to name this scope in a refusal, so the two sides of a mismatch read
+    /// as the different questions they are.
+    pub fn label(&self) -> String {
+        match &self.asked {
+            Some(asked) => asked.clone(),
+            None => "the whole measurement".to_string(),
+        }
+    }
 }
 
 /// The figure every cohort rolls up into.
@@ -102,6 +188,33 @@ pub struct SectionReport {
 }
 
 impl Report {
+    /// A report of nothing, for a caller that wants to name two fields and mean
+    /// the defaults for the rest. Every field added here would otherwise be a
+    /// compile error at each literal construction, which is a tax on adding one.
+    pub fn empty(unit: Unit) -> Self {
+        Report {
+            schema_version: SCHEMA_VERSION,
+            tool: "ernest".to_string(),
+            unit,
+            scope: default_scope(),
+            lang: None,
+            roots: Vec::new(),
+            files_scanned: 0,
+            files_skipped: 0,
+            files_failed: 0,
+            unsupported: BTreeMap::new(),
+            failed: Vec::new(),
+            ernestignore: Vec::new(),
+            ernestignore_excluded: 0,
+            grammar: BTreeMap::new(),
+            ranking: RankingScope::default(),
+            total: Totals::default(),
+            cohorts: Vec::new(),
+            files: None,
+            sections: None,
+        }
+    }
+
     pub fn headline(&self) -> &Totals {
         &self.total
     }
@@ -146,23 +259,30 @@ struct Outcome {
 }
 
 /// Analyze every candidate in parallel, then fold the results deterministically.
-pub fn run(survey: &Survey, unit: Unit, views: Views) -> Report {
-    let outcomes: Vec<Option<Outcome>> = survey
+pub fn run(survey: &Survey, unit: Unit, views: Views) -> (Report, Diagnostics) {
+    let attempts: Vec<Result<Outcome, Failure>> = survey
         .candidates
         .par_iter()
         .map(|candidate| {
-            let bytes = std::fs::read(&candidate.path).ok()?;
+            let fail = |reason: &str| Failure {
+                path: candidate.path.display().to_string(),
+                reason: reason.to_string(),
+            };
+            let bytes = std::fs::read(&candidate.path).map_err(|_| fail("unreadable"))?;
             // Byte offsets from tree-sitter are only char boundaries in valid
             // UTF-8, and a file that is not text is not prose either.
-            let src = String::from_utf8(bytes).ok()?;
+            let src = String::from_utf8(bytes).map_err(|_| fail("not utf-8"))?;
             // Sections describe a document; a source file has none worth naming.
             let wants_sections = views.by_section && candidate.profile.cohort == Cohort::Docs;
             let (counts, sections) = if wants_sections {
-                analyze_sections(&src, candidate.profile).ok()?
+                analyze_sections(&src, candidate.profile).map_err(|_| fail("parse failed"))?
             } else {
-                (analyze_file(&src, candidate.profile).ok()?, Vec::new())
+                (
+                    analyze_file(&src, candidate.profile).map_err(|_| fail("parse failed"))?,
+                    Vec::new(),
+                )
             };
-            Some(Outcome {
+            Ok(Outcome {
                 path: candidate.path.clone(),
                 language: candidate.profile.language,
                 cohort: candidate.profile.cohort.label(),
@@ -173,8 +293,17 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> Report {
         })
         .collect();
 
-    let failed = outcomes.iter().filter(|o| o.is_none()).count() as u64;
-    let outcomes: Vec<Outcome> = outcomes.into_iter().flatten().collect();
+    let mut failed: Vec<Failure> = Vec::new();
+    let mut outcomes: Vec<Outcome> = Vec::new();
+    for attempt in attempts {
+        match attempt {
+            Ok(outcome) => outcomes.push(outcome),
+            Err(failure) => failed.push(failure),
+        }
+    }
+    // Candidates arrive sorted, so this already is — asserted rather than
+    // assumed, because a snapshot that reorders on a rerun diffs as noise.
+    failed.sort_by(|a, b| a.path.cmp(&b.path));
 
     // BTreeMap keeps cohort, provenance and language ordering stable, so
     // snapshots diff cleanly instead of churning on hash order.
@@ -275,14 +404,19 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> Report {
         rows
     });
 
-    Report {
-        schema_version: SCHEMA_VERSION,
-        tool: "ernest".to_string(),
-        unit,
+    let report = Report {
+        scope: survey.scope.label().to_string(),
+        lang: survey.lang.clone(),
+        roots: survey
+            .roots
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect(),
         files_scanned: outcomes.len() as u64,
         files_skipped: survey.unsupported.values().sum(),
-        files_failed: failed,
+        files_failed: failed.len() as u64,
         unsupported: survey.unsupported.clone(),
+        failed,
         ernestignore: survey
             .ernestignore
             .iter()
@@ -292,5 +426,8 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> Report {
         cohorts,
         files,
         sections,
-    }
+        ..Report::empty(unit)
+    };
+
+    (report, Diagnostics::default())
 }

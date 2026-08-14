@@ -259,25 +259,10 @@ fn docs_line(report: &Report) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aggregate::{SCHEMA_VERSION, Totals};
     use crate::span::Unit;
-    use std::collections::BTreeMap;
 
     fn empty() -> Report {
-        Report {
-            schema_version: SCHEMA_VERSION,
-            tool: "ernest".to_string(),
-            unit: Unit::Chars,
-            files_scanned: 0,
-            files_skipped: 0,
-            files_failed: 0,
-            unsupported: BTreeMap::new(),
-            ernestignore: Vec::new(),
-            total: Totals::default(),
-            cohorts: Vec::new(),
-            files: None,
-            sections: None,
-        }
+        Report::empty(Unit::Chars)
     }
 
     fn bare() -> Presentation {

@@ -208,9 +208,14 @@ fn json_carries_a_versioned_schema_that_reconciles() {
     assert_eq!(out.status.code(), Some(0));
     let report: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json parses");
 
-    assert_eq!(report["schema_version"], 3);
+    assert_eq!(report["schema_version"], 4);
     assert_eq!(report["tool"], "ernest");
     assert_eq!(report["unit"], "chars");
+    // A snapshot says what produced it, so a reader does not have to have the
+    // command line beside it.
+    assert_eq!(report["scope"], "local");
+    assert_eq!(report["lang"], serde_json::Value::Null);
+    assert_eq!(report["ranking"]["asked"], serde_json::Value::Null);
 
     // Source leads the breakdown, so a documentation format cannot displace it.
     let cohort = &report["cohorts"][0];

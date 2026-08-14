@@ -128,23 +128,11 @@ fn unsupported(report: &Report) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::aggregate::{SCHEMA_VERSION, Totals};
-    use std::collections::BTreeMap;
 
     fn report() -> Report {
         Report {
-            schema_version: SCHEMA_VERSION,
-            tool: "ernest".to_string(),
-            unit: Unit::Chars,
             files_scanned: 1,
-            files_skipped: 0,
-            files_failed: 0,
-            unsupported: BTreeMap::new(),
-            ernestignore: Vec::new(),
-            total: Totals::default(),
-            cohorts: Vec::new(),
-            files: None,
-            sections: None,
+            ..Report::empty(Unit::Chars)
         }
     }
 

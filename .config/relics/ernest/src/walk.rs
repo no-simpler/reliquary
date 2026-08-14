@@ -42,6 +42,16 @@ pub enum Scope {
     All,
 }
 
+impl Scope {
+    pub fn label(self) -> &'static str {
+        match self {
+            Scope::Shared => "shared",
+            Scope::Local => "local",
+            Scope::All => "all",
+        }
+    }
+}
+
 /// Which side of the share a file sits on. Where both rule sets match a path,
 /// `.gitignore` wins and the file never reaches the walk at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -76,6 +86,13 @@ pub struct Survey {
     /// The `.ernestignore` files that were in effect, so an excluded corpus is
     /// declared in the report rather than silently absent from it.
     pub ernestignore: Vec<PathBuf>,
+    /// What the walk was asked for. Carried so the report — and the snapshot it
+    /// serialises — can say what produced it: a figure that does not name its
+    /// scope cannot be reasoned about, and two snapshots taken at different ones
+    /// compare as though they were the same measurement.
+    pub scope: Scope,
+    pub lang: Option<String>,
+    pub roots: Vec<PathBuf>,
 }
 
 /// Every supported file under `roots`, plus what was passed over — so coverage
@@ -121,6 +138,9 @@ pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Survey {
         candidates,
         unsupported: walked.unsupported,
         ernestignore: walked.ernestignore,
+        scope,
+        lang: lang.map(str::to_string),
+        roots: roots.to_vec(),
     }
 }
 

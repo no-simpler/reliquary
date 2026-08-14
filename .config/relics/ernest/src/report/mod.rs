@@ -52,6 +52,24 @@ pub enum Verbosity {
     Trace,
 }
 
+/// What the run saw that is not part of the measurement contract.
+///
+/// These lists are unbounded — a `--scope all` PHP repository passes over sixty
+/// thousand unsupported files — so they live here rather than in `Report`, and a
+/// snapshot cannot grow with the size of the tree. The cost of collecting them is
+/// paid only at `-vv`, which is the one gate allowed to key on verbosity:
+/// anything reaching `Report` must be collected whatever the flags say, or the
+/// contract's shape starts depending on how loud the caller asked to be.
+#[derive(Debug, Default)]
+pub struct Diagnostics {
+    /// Paths a declared corpus removed.
+    pub excluded: Vec<String>,
+    /// Paths no profile claimed.
+    pub unsupported: Vec<String>,
+    /// Paths whose grammar produced an `ERROR` or `MISSING` node.
+    pub unread: Vec<String>,
+}
+
 /// A report is blocks joined by exactly one blank line. An empty block is
 /// dropped rather than separated, so a view that produced no rows cannot leave
 /// a gap behind it — the defect a run finding no supported files used to show.

@@ -93,7 +93,7 @@ fn run(cli: Cli) -> Result<i32> {
         options.scope.into(),
         options.lang.as_deref(),
     );
-    let report = aggregate::run(&survey, unit, show.views);
+    let (report, _diagnostics) = aggregate::run(&survey, unit, show.views);
 
     match format {
         // The pretty-printer supplies no trailing newline, and a snapshot that
