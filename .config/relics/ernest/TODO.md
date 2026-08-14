@@ -182,6 +182,63 @@ Neither touches the headline. The split to make first is between what is
 holds every `Outcome`, so the ranking scope is a predicate applied before the
 `by_file` map, not a second walk.
 
+## Verbosity levels
+
+`--verbose` / `-v`, counted, so the notes register has an axis instead of a
+single default. clap's `ArgAction::Count` on a `u8`, global like the other
+presentation flags, mapped at once into a named enum — a raw count threaded to
+call sites reads as a magic number. Do not take `clap-verbosity-flag`: it exists
+to drive a `log` filter, and there is nothing to log here.
+
+Three levels carry distinct content. A fourth would be padding, so cap at three
+and clamp a fourth `-v` silently rather than erroring, as `ssh` and `rsync` do.
+
+```
+default   the figure, and the notes that change how it should be read
+-v        provenance — what was excluded and by whose declaration
+-vv       per-file diagnostics — which paths, which failures, which profile
+-vvv      parse-level — grammar ERROR tallies, timings
+```
+
+`-vvv` is where "Grammar-health reporting" above lands: a corpus-wide `ERROR`
+node tally is exactly a level-three diagnostic, and giving it a home is half of
+what that item needs.
+
+**Text only.** `--format json` is the contract and its shape cannot depend on a
+presentation flag; `--format value` is one line by definition. Verbosity applies
+to neither, and asking for it with either should be refused rather than ignored.
+
+**`-q` is not the other end of this axis.** In most tools `-q` and `-v` are one
+scale. Here `--quiet` is a *format* — the bare density, for a gate — so the two
+are orthogonal and a caller cannot walk from one to the other. Either accept
+that and say so in `--help`, or rename the format (`--format value` already
+spells it) and free `-q` to mean one step down the verbosity scale. Decide
+before implementing; the second is closer to what a reader expects, and costs
+one alias.
+
+### Moving `.ernestignore` behind a level
+
+The ask, and it reverses a commitment worth restating before it goes: *the
+report names any `.ernestignore` in effect, so an excluded corpus cannot read as
+a repository with less prose in it.* Behind `-v`, a default run under-reports
+silently, which is the failure that line was written to prevent.
+
+The motivating case is real — a test fixture's declared corpus appearing in
+every measurement of the tree above it — but it argues that an exclusion
+removing almost nothing should not announce itself, not that exclusions should
+go quiet. So prefer **materiality over verbosity**: name the corpus at the
+default level when it is large enough to matter, and at `-v` otherwise.
+
+That needs a number the walk does not currently keep. Excluded paths are never
+measured, so their prose is unknown — but `walk::collect` sees every path an
+`.ernestignore` matched and can count them, and a count against `files_scanned`
+is enough to separate "one fixture" from "half the repository". Cheap, no second
+walk, no schema change beyond a field.
+
+If that is judged more machinery than the line is worth, `-v` is the acceptable
+fallback — but then amend the `.ernestignore` section of `CLAUDE.md` in the same
+change, or the doc keeps promising something the tool no longer does.
+
 ## Committed baselines
 
 An `.ernest-baseline` file and `ernest check`, so the before/after loop survives
