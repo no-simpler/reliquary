@@ -153,6 +153,21 @@ pub struct Measure {
     #[arg(long, value_name = "PCT", help_heading = "Measurement")]
     pub max_density: Option<f64>,
 
+    /// Rank only what differs from REF, working tree included, defaulting to
+    /// HEAD. Needs a git repository. The headline stays repository-wide.
+    ///
+    /// The value must be attached — `--changed=main`, not `--changed main` —
+    /// because a bare path follows.
+    #[arg(
+        long,
+        value_name = "REF",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "HEAD",
+        help_heading = "Ranking"
+    )]
+    pub changed: Option<String>,
+
     /// Rank only the paths matching. Repeatable, and gitignore glob syntax — so
     /// `*.php` matches at any depth while `docs/**` is anchored at the working
     /// directory and `**/docs/**` is not. Quote it, or the shell expands it
@@ -184,8 +199,10 @@ impl Cli {
 
         // A ranking scope with no ranked view scopes nothing visible, so the two
         // are the same contradiction as above wearing different clothes.
-        if self.view.format() == Format::Value && !self.measure.focus.is_empty() {
-            return refuse("--focus scopes a ranking, and the value format writes no rows");
+        if self.view.format() == Format::Value && self.scoped() {
+            return refuse(
+                "--changed and --focus scope a ranking, and the value format writes no rows",
+            );
         }
 
         // Not global, so this cannot be reached by parsing — but `Measure` is
@@ -193,9 +210,10 @@ impl Cli {
         // otherwise be silently discarded. The pre-existing measurement flags
         // stay unguarded: they carry defaults, so telling "given" from "absent"
         // needs `ValueSource` plumbing that is not worth it for a no-op.
-        if matches!(self.command, Some(Command::Diff { .. })) && !self.measure.focus.is_empty() {
+        if matches!(self.command, Some(Command::Diff { .. })) && self.scoped() {
             return refuse(
-                "--focus scopes a measurement; a snapshot already records the scope it was taken at",
+                "--changed and --focus scope a measurement; a snapshot already records \
+                 the scope it was taken at",
             );
         }
 
@@ -207,11 +225,17 @@ impl Cli {
         Ok(())
     }
 
+    /// Whether anything narrowed the ranked views. The two flags intersect, so
+    /// they answer this together rather than each on its own.
+    pub fn scoped(&self) -> bool {
+        self.measure.changed.is_some() || !self.measure.focus.is_empty()
+    }
+
     /// A ranking scope with no ranked view scopes nothing visible, and the intent
     /// is not ambiguous — so asking for one asks for the view it narrows.
     pub fn presentation(&self) -> Presentation {
         let mut show = self.view.presentation();
-        if !self.measure.focus.is_empty() && !show.views.any() {
+        if self.scoped() && !show.views.any() {
             show.views.by_file = true;
         }
         show

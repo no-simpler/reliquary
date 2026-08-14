@@ -98,7 +98,12 @@ fn run(cli: Cli) -> Result<i32> {
         options.lang.as_deref(),
         keep_paths,
     );
-    let selection = rank::Selection::build(&options.focus)?;
+    let selection = rank::Selection::build(
+        &options.focus,
+        options.changed.as_deref(),
+        &options.paths,
+        options.scope.into(),
+    )?;
     let (report, diagnostics) = aggregate::run(&survey, unit, show.views, selection.as_ref());
 
     match format {

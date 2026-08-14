@@ -9,10 +9,14 @@
 //! So the two scopes split. The headline stays repository-wide, because
 //! relocation-invariance needs it; only the body narrows.
 
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use ignore::overrides::{Override, OverrideBuilder};
+
+use crate::walk::Scope;
 
 /// A predicate over the files a run measured, and the words the caller used to
 /// ask for it.
@@ -21,37 +25,52 @@ pub struct Selection {
     /// and by `ernest diff`.
     pub asked: String,
     focus: Option<Override>,
+    changed: Option<HashSet<PathBuf>>,
 }
 
 impl Selection {
     /// `None` when nothing narrowed the ranking, so the caller can leave the
     /// whole thing alone rather than build a predicate that admits everything.
-    pub fn build(focus: &[String]) -> Result<Option<Self>> {
-        if focus.is_empty() {
+    pub fn build(
+        focus: &[String],
+        changed: Option<&str>,
+        roots: &[PathBuf],
+        scope: Scope,
+    ) -> Result<Option<Self>> {
+        if focus.is_empty() && changed.is_none() {
             return Ok(None);
         }
 
-        // Rooted at the working directory and matched against the path the walk
-        // produced, which is both what the report prints and what the caller
-        // typed the pathspec against.
-        let cwd = std::env::current_dir().context("resolving the working directory")?;
-        let mut builder = OverrideBuilder::new(&cwd);
-        for pathspec in focus {
-            builder
-                .add(pathspec)
-                .with_context(|| format!("--focus {pathspec}"))?;
+        let mut asked = Vec::new();
+        if let Some(reference) = changed {
+            asked.push(format!("changed={reference}"));
         }
-        let matcher = builder.build().context("building --focus")?;
+        asked.extend(focus.iter().map(|pathspec| format!("focus={pathspec}")));
 
-        let asked = focus
-            .iter()
-            .map(|pathspec| format!("focus={pathspec}"))
-            .collect::<Vec<_>>()
-            .join(" ");
+        let matcher = if focus.is_empty() {
+            None
+        } else {
+            // Rooted at the working directory and matched against the path the
+            // walk produced, which is both what the report prints and what the
+            // caller typed the pathspec against.
+            let cwd = std::env::current_dir().context("resolving the working directory")?;
+            let mut builder = OverrideBuilder::new(&cwd);
+            for pathspec in focus {
+                builder
+                    .add(pathspec)
+                    .with_context(|| format!("--focus {pathspec}"))?;
+            }
+            Some(builder.build().context("building --focus")?)
+        };
+
+        let changed = changed
+            .map(|reference| git::changed(roots, reference, scope))
+            .transpose()?;
 
         Ok(Some(Selection {
-            asked,
-            focus: Some(matcher),
+            asked: asked.join(" "),
+            focus: matcher,
+            changed,
         }))
     }
 
@@ -62,8 +81,119 @@ impl Selection {
         // A non-match comes back as `Match::Ignore`, per the crate's own
         // inversion of gitignore semantics — so the question is whitelisting,
         // not the absence of an ignore.
-        self.focus
+        let focused = self
+            .focus
             .as_ref()
-            .is_none_or(|matcher| matcher.matched(path, false).is_whitelist())
+            .is_none_or(|matcher| matcher.matched(path, false).is_whitelist());
+
+        // Lexical on both sides. `std::path::absolute` never resolves a symlink,
+        // and neither does the repository root this set was built against.
+        let touched = self.changed.as_ref().is_none_or(|set| {
+            std::path::absolute(path).is_ok_and(|absolute| set.contains(&absolute))
+        });
+
+        focused && touched
+    }
+}
+
+/// Asking git what changed, rather than reimplementing it — the same delegation
+/// `.gitignore` already gets.
+mod git {
+    use super::*;
+
+    /// Paths differing from `reference`, plus the untracked files beside them.
+    ///
+    /// Two-dot, not three-dot: `git diff <ref>` compares the **working tree**
+    /// against the reference, while merge-base semantics would answer "what this
+    /// branch added" and drop uncommitted work — which is the very thing ernest's
+    /// measure-edit-measure loop exists to weigh. `--changed=main` therefore
+    /// means "differs from main right now, my uncommitted work included", which
+    /// is the literal reading of the flag.
+    ///
+    /// Untracked files are queried separately because `git diff` never reports
+    /// them, and a document an agent has just written is exactly the change worth
+    /// ranking.
+    pub fn changed(roots: &[PathBuf], reference: &str, scope: Scope) -> Result<HashSet<PathBuf>> {
+        let mut touched = HashSet::new();
+        let mut seen_repos = HashSet::new();
+
+        for root in roots {
+            // A root that names a file is asked about from the directory holding
+            // it; `-C` wants a directory either way.
+            let from = if root.is_dir() {
+                root.clone()
+            } else {
+                root.parent().unwrap_or(Path::new(".")).to_path_buf()
+            };
+            let repo = repo_root(&from)?;
+            if !seen_repos.insert(repo.clone()) {
+                continue;
+            }
+
+            let mut listings = vec![run(&from, &["diff", "--name-only", "-z", reference, "--"])?];
+            // At the widest scope a gitignored file is in the measurement, so it
+            // is in the ranking too if it is new.
+            listings.push(if scope == Scope::All {
+                run(&from, &["ls-files", "-o", "-z", "--"])?
+            } else {
+                run(&from, &["ls-files", "-o", "-z", "--exclude-standard", "--"])?
+            });
+
+            for listing in listings {
+                for name in listing.split('\0').filter(|name| !name.is_empty()) {
+                    // Lexical, to match what `admits` will canonicalize the
+                    // walk's paths with.
+                    if let Ok(absolute) = std::path::absolute(repo.join(name)) {
+                        touched.insert(absolute);
+                    }
+                }
+            }
+        }
+
+        Ok(touched)
+    }
+
+    /// The work tree root, as a path built lexically from `from`.
+    ///
+    /// `--show-cdup` rather than `--show-toplevel`, which prints the *resolved*
+    /// path with symlinks followed. `std::path::absolute` is purely lexical, and
+    /// on macOS a temporary directory sits under `/var`, itself a symlink to
+    /// `/private/var` — so the two spellings would never compare equal and the
+    /// predicate would admit nothing.
+    fn repo_root(from: &Path) -> Result<PathBuf> {
+        let cdup = run(from, &["rev-parse", "--show-cdup"])?;
+        Ok(from.join(cdup.trim_end_matches(['\n', '\r'])))
+    }
+
+    /// The environment is inherited untouched, so `GIT_DIR` and `GIT_WORK_TREE`
+    /// work by themselves. ernest never sets them and never sniffs for yadm:
+    /// that would be guessing at git's job, and would make `--changed` mean
+    /// something other than what `git diff` means in the same directory.
+    fn run(from: &Path, args: &[&str]) -> Result<String> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(from)
+            .args(args)
+            .output()
+            .context("--changed needs git on PATH")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr = stderr.trim();
+            // The one failure worth explaining rather than relaying: this crate
+            // lives in a yadm tree — work tree `$HOME`, git dir elsewhere, no
+            // `.git` anywhere up the path — so the error is otherwise baffling in
+            // exactly the repository ernest was written in.
+            if stderr.contains("not a git repository") {
+                bail!(
+                    "--changed needs a git repository; {} is not in one\n       \
+                     a yadm-managed tree needs GIT_DIR and GIT_WORK_TREE set, or `yadm enter`",
+                    from.display()
+                );
+            }
+            bail!("git {}: {stderr}", args.join(" "));
+        }
+
+        String::from_utf8(output.stdout).context("git wrote a path that is not utf-8")
     }
 }

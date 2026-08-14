@@ -7,8 +7,41 @@ use std::process::{Command, Output};
 fn ernest(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_ernest"))
         .args(args)
+        // `--changed` inherits the environment on purpose, so a shell under
+        // `yadm enter` — a plausible one for anyone working in this repository —
+        // would point every query at $HOME rather than at the scratch repository
+        // the test just built.
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .expect("ernest runs")
+}
+
+/// A repository with no opinions but the ones the test gives it. A developer's
+/// signing key, commit template or global hooks would otherwise decide whether
+/// the suite passes.
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args([
+            "-c",
+            "init.defaultBranch=main",
+            "-c",
+            "user.name=ernest test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .status()
+        .expect("git runs");
+    assert!(status.success(), "git {args:?}");
 }
 
 fn fixtures() -> PathBuf {
@@ -263,6 +296,82 @@ fn focus_narrows_the_ranking_without_moving_the_headline() {
     assert_eq!(scoped["ranking"]["ranked"], 2);
     assert_eq!(scoped["ranking"]["measured"], 3);
     assert_eq!(whole["ranking"]["asked"], serde_json::Value::Null);
+}
+
+/// The scope the whole feature is for: an agent measuring before and after its
+/// own edit wants the ranking to describe the edit, and the headline to describe
+/// the repository.
+///
+/// Two-dot, so uncommitted work counts, and untracked files too — a document
+/// just written is exactly the change worth ranking, and `git diff` never
+/// reports one.
+#[test]
+fn changed_ranks_what_git_reports_and_leaves_the_headline_alone() {
+    let dir = scratch("changed");
+    std::fs::write(dir.join("app.php"), "<?php\n// A note.\n$x = 1;\n").unwrap();
+    std::fs::write(dir.join("lib.php"), "<?php\n$y = 2;\n").unwrap();
+    git(&dir, &["init", "-q", "."]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "one"]);
+
+    // One tracked file edited, one untouched, one never added.
+    std::fs::write(
+        dir.join("app.php"),
+        "<?php\n// A note.\n// And more.\n$x = 1;\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("new.md"), "# New\n\nWords.\n").unwrap();
+    let dir = dir.to_str().unwrap();
+
+    let whole: serde_json::Value =
+        serde_json::from_slice(&ernest(&[dir, "--json", "--by", "file"]).stdout).unwrap();
+    let out = ernest(&[dir, "--json", "--by", "file", "--changed"]);
+    assert_eq!(out.status.code(), Some(0));
+    let scoped: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+
+    assert_eq!(
+        whole["total"], scoped["total"],
+        "the headline must hold still"
+    );
+    assert_eq!(whole["files"].as_array().unwrap().len(), 3);
+
+    let ranked: Vec<&str> = scoped["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(ranked.len(), 2, "{ranked:?}");
+    assert!(
+        ranked.iter().any(|path| path.ends_with("app.php")),
+        "{ranked:?}"
+    );
+    assert!(
+        ranked.iter().any(|path| path.ends_with("new.md")),
+        "{ranked:?}"
+    );
+    assert!(
+        !ranked.iter().any(|path| path.ends_with("lib.php")),
+        "{ranked:?}"
+    );
+
+    assert_eq!(scoped["ranking"]["asked"], "changed=HEAD");
+}
+
+/// `--changed` asks git a question explicitly, so no answer is an error rather
+/// than a silent fall-back to the whole tree. The message names the escape hatch
+/// because this crate lives in a yadm tree, where the failure is otherwise
+/// baffling.
+#[test]
+fn changed_outside_a_repository_is_an_error() {
+    let dir = scratch("changed-bare");
+    std::fs::write(dir.join("app.php"), "<?php\n$x = 1;\n").unwrap();
+
+    let out = ernest(&[dir.to_str().unwrap(), "--changed"]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("git repository"), "{stderr}");
+    assert!(stderr.contains("GIT_WORK_TREE"), "{stderr}");
 }
 
 /// Row by row, a scoped snapshot against an unscoped one bills every
