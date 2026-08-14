@@ -232,6 +232,70 @@ fn the_grammar_tally_names_a_file_the_parser_could_not_read() {
     assert!(!text.contains("no file defeated"), "{text}");
 }
 
+/// The split the ranking scopes exist for: a repository-wide ranking is
+/// stationary on the call site that dominates, and the headline has to stay
+/// repository-wide anyway or it stops being relocation-invariant. So one narrows
+/// and the other does not.
+#[test]
+fn focus_narrows_the_ranking_without_moving_the_headline() {
+    let dir = scratch("focus");
+    std::fs::create_dir_all(dir.join("docs")).unwrap();
+    std::fs::write(dir.join("app.php"), "<?php\n// A note.\n$x = 1;\n").unwrap();
+    std::fs::write(dir.join("lib.php"), "<?php\n$y = 2;\n").unwrap();
+    std::fs::write(dir.join("docs/guide.md"), "# Guide\n\nWords about it.\n").unwrap();
+    let dir = dir.to_str().unwrap();
+
+    let whole: serde_json::Value =
+        serde_json::from_slice(&ernest(&[dir, "--json", "--by", "file"]).stdout).unwrap();
+    let out = ernest(&[dir, "--json", "--by", "file", "--focus", "*.php"]);
+    assert_eq!(out.status.code(), Some(0));
+    let scoped: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+
+    assert_eq!(
+        whole["total"], scoped["total"],
+        "the headline must hold still"
+    );
+    assert_eq!(whole["files"].as_array().unwrap().len(), 3);
+    assert_eq!(scoped["files"].as_array().unwrap().len(), 2);
+
+    // And the snapshot records the scope, so nothing downstream has to guess.
+    assert_eq!(scoped["ranking"]["asked"], "focus=*.php");
+    assert_eq!(scoped["ranking"]["ranked"], 2);
+    assert_eq!(scoped["ranking"]["measured"], 3);
+    assert_eq!(whole["ranking"]["asked"], serde_json::Value::Null);
+}
+
+/// Row by row, a scoped snapshot against an unscoped one bills every
+/// out-of-scope file as a full-weight deletion. At the headline it is a fair
+/// comparison, because the headline is unscoped by construction — so the refusal
+/// is exactly as narrow as the defect.
+#[test]
+fn a_scoped_snapshot_is_not_compared_row_by_row_against_an_unscoped_one() {
+    let dir = scratch("focus-diff");
+    std::fs::write(dir.join("app.php"), "<?php\n// A note.\n$x = 1;\n").unwrap();
+    let path = dir.to_str().unwrap();
+
+    let whole = dir.join("whole.json");
+    std::fs::write(&whole, ernest(&[path, "--json", "--by", "file"]).stdout).unwrap();
+    let scoped = dir.join("scoped.json");
+    std::fs::write(
+        &scoped,
+        ernest(&[path, "--json", "--by", "file", "--focus", "*.php"]).stdout,
+    )
+    .unwrap();
+    let (whole, scoped) = (whole.to_str().unwrap(), scoped.to_str().unwrap());
+
+    let refused = ernest(&["diff", whole, scoped, "--by", "file"]);
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(
+        String::from_utf8(refused.stderr)
+            .unwrap()
+            .contains("rank different scopes")
+    );
+
+    assert_eq!(ernest(&["diff", whole, scoped]).status.code(), Some(0));
+}
+
 /// A name no profile carries used to measure nothing and exit 0, so a typo was
 /// indistinguishable from a repository with no prose in it.
 #[test]

@@ -8,6 +8,7 @@
 pub mod aggregate;
 pub mod analyze;
 pub mod detect;
+pub mod rank;
 pub mod report;
 pub mod span;
 pub mod walk;

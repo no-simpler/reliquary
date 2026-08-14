@@ -24,6 +24,10 @@ pub fn render(before: &Report, after: &Report, show: Presentation) -> Result<Str
     blocks.push(headline(before, after, unit));
     blocks.push(breakdown(before, after, show, unit));
 
+    if show.views.by_file || show.views.by_section {
+        same_ranking(before, after)?;
+    }
+
     if show.views.by_file {
         match (&before.files, &after.files) {
             (Some(b), Some(a)) => blocks.push(movers(
@@ -93,6 +97,26 @@ pub fn quiet(before: &Report, after: &Report) -> Result<String> {
         "{}\n",
         percent_delta(before.headline().density, after.headline().density)
     ))
+}
+
+/// Two snapshots whose ranked views cover different sets cannot be compared row
+/// by row: every file inside one scope and outside the other reports as a
+/// full-weight arrival or deletion, which is a silently wrong answer of exactly
+/// the kind `same_unit` exists to prevent.
+///
+/// Checked only where a ranked view was asked for. The headline is unscoped by
+/// construction, so comparing a scoped snapshot against an unscoped one at the
+/// headline is *correct*, and refusing it would be over-strict — which is why
+/// `quiet`, being headline-only, never calls this.
+fn same_ranking(before: &Report, after: &Report) -> Result<()> {
+    if before.ranking.asked != after.ranking.asked {
+        bail!(
+            "snapshots rank different scopes ({} and {}) — re-measure both the same way",
+            before.ranking.label(),
+            after.ranking.label()
+        );
+    }
+    Ok(())
 }
 
 fn same_unit(before: &Report, after: &Report) -> Result<Unit> {

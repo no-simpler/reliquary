@@ -7,7 +7,7 @@ use clap::Parser;
 
 use cli::{Cli, Command, Format};
 use ernest::report::Verbosity;
-use ernest::{aggregate, report, walk};
+use ernest::{aggregate, rank, report, walk};
 
 /// Density exceeded `--max-density`. Distinct from 2, which means ernest could
 /// not do its job at all.
@@ -54,7 +54,7 @@ fn warn(text: &str) {
 }
 
 fn run(cli: Cli) -> Result<i32> {
-    let show = cli.view.presentation();
+    let show = cli.presentation();
     let format = cli.view.format();
 
     // Before everything else: a completion script is not a measurement, and it
@@ -98,7 +98,8 @@ fn run(cli: Cli) -> Result<i32> {
         options.lang.as_deref(),
         keep_paths,
     );
-    let (report, diagnostics) = aggregate::run(&survey, unit, show.views);
+    let selection = rank::Selection::build(&options.focus)?;
+    let (report, diagnostics) = aggregate::run(&survey, unit, show.views, selection.as_ref());
 
     match format {
         // The pretty-printer supplies no trailing newline, and a snapshot that

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::analyze::profiles::Cohort;
 use crate::analyze::{Health, analyze};
+use crate::rank::Selection;
 use crate::report::Diagnostics;
 use crate::span::{Counts, Unit};
 use crate::walk::{Provenance, Survey};
@@ -260,7 +261,18 @@ struct Outcome {
 }
 
 /// Analyze every candidate in parallel, then fold the results deterministically.
-pub fn run(survey: &Survey, unit: Unit, views: Views) -> (Report, Diagnostics) {
+///
+/// `selection` narrows the ranked views and **nothing else**. Stages one and two
+/// below run over every outcome whatever it says, so `total`, `cohorts` and
+/// `files_scanned` stay repository-wide — which is what keeps the headline
+/// relocation-invariant, and the whole reason the ranking scope is a predicate
+/// here rather than a second walk.
+pub fn run(
+    survey: &Survey,
+    unit: Unit,
+    views: Views,
+    selection: Option<&Selection>,
+) -> (Report, Diagnostics) {
     let attempts: Vec<Result<Outcome, Failure>> = survey
         .candidates
         .par_iter()
@@ -371,9 +383,15 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> (Report, Diagnostics) {
     }
     total.density = total.counts.density(unit);
 
+    // The one line the ranking scope touches, applied identically to both ranked
+    // views because `--by section` is a ranking too.
+    let ranked =
+        |outcome: &&Outcome| selection.is_none_or(|selection| selection.admits(&outcome.path));
+
     let files = views.by_file.then(|| {
         let mut rows: Vec<FileReport> = outcomes
             .iter()
+            .filter(ranked)
             .map(|o| FileReport {
                 path: o.path.display().to_string(),
                 language: o.language.to_string(),
@@ -397,6 +415,7 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> (Report, Diagnostics) {
     let sections = views.by_section.then(|| {
         let mut rows: Vec<SectionReport> = outcomes
             .iter()
+            .filter(ranked)
             .flat_map(|o| {
                 o.sections.iter().map(|(section, counts)| SectionReport {
                     path: o.path.display().to_string(),
@@ -437,6 +456,11 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> (Report, Diagnostics) {
             .collect(),
         ernestignore_excluded: survey.excluded.len() as u64,
         grammar,
+        ranking: RankingScope {
+            asked: selection.map(|selection| selection.asked.clone()),
+            ranked: outcomes.iter().filter(ranked).count() as u64,
+            measured: outcomes.len() as u64,
+        },
         total,
         cohorts,
         files,

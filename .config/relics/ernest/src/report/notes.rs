@@ -140,6 +140,38 @@ impl Notes {
         }
     }
 
+    /// Which files the ranking covered, when it did not cover all of them.
+    ///
+    /// Fires at every rung, Quiet included: it qualifies a block that was
+    /// printed, and a table holding a fraction of the tree with no line saying so
+    /// reads as a measurement rather than as a scope. The zero case matters most
+    /// — an empty ranked view with nothing explaining it reads as a broken tool.
+    ///
+    /// Volume, never a scoped density. A per-change density is not
+    /// relocation-invariant: moving prose out of a changed file into an untouched
+    /// one lowers it for free, which is the gaming vector the summed headline was
+    /// built to close. Prose has no denominator to escape into.
+    pub fn ranking(&mut self, report: &Report, prose: u64) {
+        let Some(asked) = &report.ranking.asked else {
+            return;
+        };
+        let scope = &report.ranking;
+        if scope.ranked == 0 {
+            self.push(format!(
+                "ranking 0 of {} measured files — {asked} matched nothing",
+                thousands(scope.measured)
+            ));
+            return;
+        }
+        self.push(format!(
+            "ranking {} of {} measured files, prose {} {} — {asked}",
+            thousands(scope.ranked),
+            thousands(scope.measured),
+            thousands(prose),
+            report.unit.label(),
+        ));
+    }
+
     /// A clean corpus is a result, not an absence. Without this line, `-vvv` on a
     /// repository whose grammars all coped would look like a rung that failed to
     /// print rather than one that found nothing to report.

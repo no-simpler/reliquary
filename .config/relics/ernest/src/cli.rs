@@ -152,6 +152,13 @@ pub struct Measure {
     /// Exit 1 when density exceeds this percentage. A convenience, not a gate.
     #[arg(long, value_name = "PCT", help_heading = "Measurement")]
     pub max_density: Option<f64>,
+
+    /// Rank only the paths matching. Repeatable, and gitignore glob syntax — so
+    /// `*.php` matches at any depth while `docs/**` is anchored at the working
+    /// directory and `**/docs/**` is not. Quote it, or the shell expands it
+    /// first. The headline stays repository-wide.
+    #[arg(long, value_name = "PATHSPEC", help_heading = "Ranking")]
+    pub focus: Vec<String>,
 }
 
 impl Cli {
@@ -175,12 +182,39 @@ impl Cli {
             );
         }
 
+        // A ranking scope with no ranked view scopes nothing visible, so the two
+        // are the same contradiction as above wearing different clothes.
+        if self.view.format() == Format::Value && !self.measure.focus.is_empty() {
+            return refuse("--focus scopes a ranking, and the value format writes no rows");
+        }
+
+        // Not global, so this cannot be reached by parsing — but `Measure` is
+        // flattened at the root, so it parses *before* the subcommand and would
+        // otherwise be silently discarded. The pre-existing measurement flags
+        // stay unguarded: they carry defaults, so telling "given" from "absent"
+        // needs `ValueSource` plumbing that is not worth it for a no-op.
+        if matches!(self.command, Some(Command::Diff { .. })) && !self.measure.focus.is_empty() {
+            return refuse(
+                "--focus scopes a measurement; a snapshot already records the scope it was taken at",
+            );
+        }
+
         if matches!(self.command, Some(Command::Diff { .. })) && self.view.format() == Format::Json
         {
             return refuse("diff has no --format json; compare the snapshots you already hold");
         }
 
         Ok(())
+    }
+
+    /// A ranking scope with no ranked view scopes nothing visible, and the intent
+    /// is not ambiguous — so asking for one asks for the view it narrows.
+    pub fn presentation(&self) -> Presentation {
+        let mut show = self.view.presentation();
+        if !self.measure.focus.is_empty() && !show.views.any() {
+            show.views.by_file = true;
+        }
+        show
     }
 }
 

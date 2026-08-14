@@ -166,6 +166,21 @@ fn trace_says_so_when_every_grammar_coped() {
     check("trace-clean", &run(&[TREE, "-vvv"]));
 }
 
+/// The body narrows and the headline does not — the split the whole feature is.
+#[test]
+fn focus_scopes_the_ranking_and_leaves_the_headline_alone() {
+    check("focus", &run(&[TREE, "--by", "file", "--focus", "*.php"]));
+}
+
+/// An empty ranked view with nothing explaining it reads as a broken tool.
+#[test]
+fn focus_says_so_when_it_matched_nothing() {
+    check(
+        "focus-empty",
+        &run(&[TREE, "--by", "file", "--focus", "nothing/**"]),
+    );
+}
+
 /// `-q` is the quiet end of the verbosity axis, not a format: the figure stays,
 /// and everything that comments on the run goes.
 #[test]

@@ -309,6 +309,15 @@ fn notes(report: &Report, found: &Diagnostics, show: Presentation) -> Notes {
         let listed = report.failed.len() + found.unread.len() + found.excluded.len();
         notes.truncated(show.top, listed + found.unsupported.len(), "diagnostic");
     }
+    // Volume of what was ranked, summed from the rows themselves rather than
+    // recomputed — the scope has already been applied to them.
+    let prose = report
+        .files
+        .iter()
+        .flatten()
+        .map(|file| file.counts.prose(report.unit))
+        .sum();
+    notes.ranking(report, prose);
     if show.verbosity == Verbosity::Quiet {
         return notes;
     }
