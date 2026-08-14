@@ -358,6 +358,47 @@ fn changed_ranks_what_git_reports_and_leaves_the_headline_alone() {
     assert_eq!(scoped["ranking"]["asked"], "changed=HEAD");
 }
 
+/// Measured from below the repository root, which is where the path arithmetic
+/// goes wrong: git reports root-relative paths and `--show-cdup` walks back up,
+/// so both halves arrive carrying `..` — and `std::path::absolute` documents that
+/// it leaves those in place. Uncollapsed, the two sides never compare equal and
+/// `--changed` silently ranks nothing at all.
+#[test]
+fn changed_ranks_from_below_the_repository_root() {
+    let dir = scratch("changed-subdir");
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/app.php"), "<?php\n// A note.\n$x = 1;\n").unwrap();
+    std::fs::write(dir.join("src/lib.php"), "<?php\n$y = 2;\n").unwrap();
+    git(&dir, &["init", "-q", "."]);
+    git(&dir, &["add", "-A"]);
+    git(&dir, &["commit", "-qm", "one"]);
+    std::fs::write(
+        dir.join("src/app.php"),
+        "<?php\n// A note.\n// More.\n$x = 1;\n",
+    )
+    .unwrap();
+
+    let out = ernest(&[
+        dir.join("src").to_str().unwrap(),
+        "--json",
+        "--by",
+        "file",
+        "--changed",
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    let scoped: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+
+    assert_eq!(scoped["ranking"]["ranked"], 1, "{scoped}");
+    assert_eq!(scoped["ranking"]["measured"], 2, "{scoped}");
+    assert!(
+        scoped["files"][0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("app.php"),
+        "{scoped}"
+    );
+}
+
 /// `--changed` asks git a question explicitly, so no answer is an error rather
 /// than a silent fall-back to the whole tree. The message names the escape hatch
 /// because this crate lives in a yadm tree, where the failure is otherwise

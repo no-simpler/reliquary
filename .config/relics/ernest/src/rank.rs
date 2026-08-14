@@ -86,14 +86,43 @@ impl Selection {
             .as_ref()
             .is_none_or(|matcher| matcher.matched(path, false).is_whitelist());
 
-        // Lexical on both sides. `std::path::absolute` never resolves a symlink,
-        // and neither does the repository root this set was built against.
-        let touched = self.changed.as_ref().is_none_or(|set| {
-            std::path::absolute(path).is_ok_and(|absolute| set.contains(&absolute))
-        });
+        let touched = self
+            .changed
+            .as_ref()
+            .is_none_or(|set| normalize(path).is_some_and(|path| set.contains(&path)));
 
         focused && touched
     }
+}
+
+/// An absolute path with `.` and `..` collapsed, and symlinks left alone.
+///
+/// Neither half can be skipped. `std::path::absolute` is lexical but documents
+/// that it keeps `..` on Unix, and `git rev-parse --show-cdup` hands back exactly
+/// that — `../` from a subdirectory — so without the collapse the two sides never
+/// compare equal and `--changed` silently ranks nothing. `canonicalize` would
+/// collapse them but also resolve symlinks, and on macOS a temporary directory
+/// under `/var` resolves to `/private/var`, which is the disagreement in the
+/// other direction.
+///
+/// Collapsing `..` lexically is not the same question as resolving it, when a
+/// symlink sits in the path. Both sides go through this, so they agree — which is
+/// all a predicate needs.
+fn normalize(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+
+    let absolute = std::path::absolute(path).ok()?;
+    let mut out = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    Some(out)
 }
 
 /// Asking git what changed, rather than reimplementing it — the same delegation
@@ -141,10 +170,11 @@ mod git {
 
             for listing in listings {
                 for name in listing.split('\0').filter(|name| !name.is_empty()) {
-                    // Lexical, to match what `admits` will canonicalize the
-                    // walk's paths with.
-                    if let Ok(absolute) = std::path::absolute(repo.join(name)) {
-                        touched.insert(absolute);
+                    // git reports repository-root-relative paths, and the root
+                    // itself came back as a relative walk up from `from` — so
+                    // both halves need the same collapse `admits` applies.
+                    if let Some(path) = normalize(&repo.join(name)) {
+                        touched.insert(path);
                     }
                 }
             }
