@@ -709,11 +709,12 @@ fn lang_narrows_the_measurement() {
     );
 }
 
-/// The gate's dialect. `--quiet` writes what `--max-density` reads, so the two
-/// sides of a threshold speak the same language and neither needs stripping.
+/// The gate's dialect. `--format value` writes what `--max-density` reads, so
+/// the two sides of a threshold speak the same language and neither needs
+/// stripping.
 #[test]
-fn quiet_writes_the_value_and_nothing_else() {
-    let out = ernest(&[fixtures().to_str().unwrap(), "--quiet"]);
+fn the_value_format_writes_the_number_and_nothing_else() {
+    let out = ernest(&[fixtures().to_str().unwrap(), "-f", "value"]);
     assert_eq!(out.status.code(), Some(0));
     let text = String::from_utf8(out.stdout).unwrap();
     assert_eq!(text, "38.2\n");
@@ -725,27 +726,37 @@ fn quiet_writes_the_value_and_nothing_else() {
 /// A tree of one unsupported file, because `--lang` no longer takes a name no
 /// profile carries and every name it does take has a fixture behind it.
 #[test]
-fn quiet_says_n_a_when_nothing_was_countable() {
+fn the_value_format_says_n_a_when_nothing_was_countable() {
     let dir = scratch("uncountable");
     std::fs::write(dir.join("package.json"), "{}\n").unwrap();
 
-    let out = ernest(&[dir.to_str().unwrap(), "-q"]);
+    let out = ernest(&[dir.to_str().unwrap(), "-f", "value"]);
     assert_eq!(out.status.code(), Some(0));
     assert_eq!(String::from_utf8(out.stdout).unwrap(), "n/a\n");
 }
 
 #[test]
-fn quiet_still_reports_the_verdict_through_the_exit_code() {
-    let out = ernest(&[fixtures().to_str().unwrap(), "-q", "--max-density", "0"]);
+fn the_value_format_still_reports_the_verdict_through_the_exit_code() {
+    let out = ernest(&[
+        fixtures().to_str().unwrap(),
+        "-f",
+        "value",
+        "--max-density",
+        "0",
+    ]);
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(String::from_utf8(out.stdout).unwrap(), "38.2\n");
     assert!(String::from_utf8(out.stderr).unwrap().contains("exceeds"));
 }
 
-/// The alias and the format it names are one flag with two spellings, and
-/// asking for both is a contradiction rather than a preference.
+/// `--json` and the format it names are one flag with two spellings, and asking
+/// for both is a contradiction rather than a preference.
+///
+/// The refusal below is keyed on the *resolved* format rather than on which
+/// spelling reached it — the defect that let `-q --by file` be refused while
+/// `--format value --by file`, the same output mode, was allowed.
 #[test]
-fn the_format_aliases_agree_and_refuse_to_be_combined() {
+fn the_format_aliases_agree_and_refuse_a_body_they_cannot_write() {
     let dir = fixtures();
     let dir = dir.to_str().unwrap();
     assert_eq!(
@@ -753,15 +764,58 @@ fn the_format_aliases_agree_and_refuse_to_be_combined() {
         ernest(&[dir, "--format", "json"]).stdout
     );
     assert_eq!(
-        ernest(&[dir, "--quiet"]).stdout,
+        ernest(&[dir, "-f", "value"]).stdout,
         ernest(&[dir, "--format", "value"]).stdout
     );
     for argv in [
         vec![dir, "--json", "--format", "text"],
-        vec![dir, "--quiet", "--json"],
-        vec![dir, "--quiet", "--by", "file"],
+        vec![dir, "--json", "--format", "json"],
+        vec![dir, "--format", "value", "--by", "file"],
+        vec![dir, "-f", "value", "--by", "section"],
     ] {
         assert_eq!(ernest(&argv).status.code(), Some(2), "{argv:?}");
+    }
+    // A snapshot with a body is the documented workflow, not a contradiction.
+    assert_eq!(
+        ernest(&[dir, "--json", "--by", "file"]).status.code(),
+        Some(0)
+    );
+}
+
+/// One axis counted from both ends, and a caller leaning on the key is not
+/// making a mistake worth refusing.
+#[test]
+fn the_verbosity_axis_is_counted_and_clamps_silently() {
+    let dir = fixtures();
+    let dir = dir.to_str().unwrap();
+
+    assert_eq!(
+        ernest(&[dir, "-vvvv"]).stdout,
+        ernest(&[dir, "-vvv"]).stdout
+    );
+    assert_eq!(ernest(&[dir, "-qq"]).stdout, ernest(&[dir, "-q"]).stdout);
+    assert_eq!(ernest(&[dir, "-qqq"]).status.code(), Some(0));
+    // The two ends net off: one of each is where it started.
+    assert_eq!(ernest(&[dir, "-v", "-q"]).stdout, ernest(&[dir]).stdout);
+}
+
+/// Verbosity is presentation, and the machine formats have none: `--json` is a
+/// contract whose shape cannot depend on a flag, and `value` is one line by
+/// definition. Accepted rather than refused, so a wrapper can pass a flag set it
+/// did not assemble without the combination becoming a hard failure.
+#[test]
+fn verbosity_never_refuses_a_machine_format() {
+    let dir = fixtures();
+    let dir = dir.to_str().unwrap();
+
+    for format in ["json", "value"] {
+        let plain = ernest(&[dir, "-f", format]);
+        assert_eq!(plain.status.code(), Some(0), "{format}");
+        for level in ["-q", "-v", "-vv", "-vvv"] {
+            let loud = ernest(&[dir, "-f", format, level]);
+            assert_eq!(loud.status.code(), Some(0), "{format} {level}");
+            assert_eq!(loud.stdout, plain.stdout, "{format} {level}");
+        }
     }
 }
 

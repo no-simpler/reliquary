@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::error::ErrorKind;
+use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
 use ernest::aggregate::Views;
 use ernest::analyze::profiles::PROFILES;
-use ernest::report::Presentation;
+use ernest::report::{Presentation, Verbosity};
 use ernest::span::Unit;
 use ernest::walk::Scope;
 
@@ -23,11 +24,14 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
-    #[command(flatten)]
-    pub view: View,
-
+    // Flatten order sets the order `--help` prints the headings in, and
+    // measurement is what a reader looks for first. Safe to reorder: `paths` is
+    // the only positional in the parser, so nothing can be reassigned an index.
     #[command(flatten)]
     pub measure: Measure,
+
+    #[command(flatten)]
+    pub view: View,
 }
 
 /// How to present a report. Global, because `diff` presents one too and a view
@@ -41,26 +45,62 @@ pub struct View {
         global = true,
         value_enum,
         value_delimiter = ',',
-        value_name = "VIEW"
+        value_name = "VIEW",
+        help_heading = "Ranking"
     )]
     pub by: Vec<ViewArg>,
 
     /// Rows in each ranked view, most prose first. 0 shows every row.
-    #[arg(long, global = true, default_value_t = 20, value_name = "N")]
+    #[arg(
+        long,
+        global = true,
+        default_value_t = 20,
+        value_name = "N",
+        help_heading = "Ranking"
+    )]
     pub top: usize,
 
     /// What to write. `value` is the density alone, for a caller that acts on
     /// the exit code.
-    #[arg(long, global = true, value_enum, value_name = "FORMAT")]
+    #[arg(
+        long,
+        short,
+        global = true,
+        value_enum,
+        value_name = "FORMAT",
+        help_heading = "Output"
+    )]
     pub format: Option<FormatArg>,
 
     /// Emit a machine-readable snapshot instead of a report.
-    #[arg(long, global = true, conflicts_with_all = ["format", "quiet"])]
+    #[arg(
+        long,
+        global = true,
+        conflicts_with = "format",
+        help_heading = "Output"
+    )]
     pub json: bool,
 
-    /// Write the density and nothing else.
-    #[arg(long, short, global = true, conflicts_with_all = ["format", "by"])]
-    pub quiet: bool,
+    /// Say more. Repeatable: provenance, then per-file diagnostics, then
+    /// parse-level.
+    #[arg(
+        long,
+        short,
+        global = true,
+        action = ArgAction::Count,
+        help_heading = "Output"
+    )]
+    pub verbose: u8,
+
+    /// Say less. The figure, and nothing that comments on the run.
+    #[arg(
+        long,
+        short,
+        global = true,
+        action = ArgAction::Count,
+        help_heading = "Output"
+    )]
+    pub quiet: u8,
 }
 
 #[derive(Debug, Subcommand)]
@@ -83,26 +123,65 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct Measure {
+    // No heading: clap sorts positionals after options within one, which would
+    // bury the argument every invocation starts with. Left alone it keeps its own
+    // `Arguments:` section at the top, where a reader looks for it.
     /// Directories or files to measure.
     #[arg(default_value = ".")]
     pub paths: Vec<PathBuf>,
 
     /// What to count. Characters are canonical; lines are the familiar proxy.
-    #[arg(long, value_enum, default_value_t = UnitArg::Chars)]
+    #[arg(long, value_enum, default_value_t = UnitArg::Chars, help_heading = "Measurement")]
     pub unit: UnitArg,
 
     /// Measure only one language.
-    #[arg(long, value_parser = languages(), value_name = "LANG")]
+    #[arg(long, value_parser = languages(), value_name = "LANG", help_heading = "Measurement")]
     pub lang: Option<String>,
 
     /// How far to reach. Dependency and build directories are excluded at every
     /// level.
-    #[arg(long, value_enum, default_value_t = ScopeArg::Local, value_name = "LEVEL")]
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = ScopeArg::Local,
+        value_name = "LEVEL",
+        help_heading = "Measurement"
+    )]
     pub scope: ScopeArg,
 
     /// Exit 1 when density exceeds this percentage. A convenience, not a gate.
-    #[arg(long, value_name = "PCT")]
+    #[arg(long, value_name = "PCT", help_heading = "Measurement")]
     pub max_density: Option<f64>,
+}
+
+impl Cli {
+    /// Every refusal that is about what was *asked for* rather than how it was
+    /// spelled, checked on the resolved `Format` so an alias and the format it
+    /// names cannot disagree about what is allowed. `-q` used to refuse `--by`
+    /// while `--format value` — the same output mode — accepted it.
+    ///
+    /// `clap::Error` rather than `anyhow`: it already exits 2, and it renders
+    /// with the same prefix, usage line and `--help` hint as a parse failure, so
+    /// a conflict clap catches and a conflict ernest catches look alike.
+    /// `ArgGroup` would be the wrong tool — a group reasons about which args
+    /// were present, which is the spelling-level check being retired.
+    pub fn validate(&self) -> Result<(), clap::Error> {
+        let refuse =
+            |message: &str| Err(Cli::command().error(ErrorKind::ArgumentConflict, message));
+
+        if self.view.format() == Format::Value && !self.view.by.is_empty() {
+            return refuse(
+                "the value format writes one number, and --by has nothing to write it to",
+            );
+        }
+
+        if matches!(self.command, Some(Command::Diff { .. })) && self.view.format() == Format::Json
+        {
+            return refuse("diff has no --format json; compare the snapshots you already hold");
+        }
+
+        Ok(())
+    }
 }
 
 /// Every language the registry names, deduplicated — a dialect that needs a
@@ -137,17 +216,27 @@ impl View {
             // `--by`, so the spare value buys the reading that has no other
             // spelling.
             top: if self.top == 0 { usize::MAX } else { self.top },
+            verbosity: self.verbosity(),
         }
     }
 
-    /// The one place output mode is decided. The two booleans are the shorter
-    /// spellings of the formats they name, and clap refuses them together.
+    /// One axis, so the two counts net off before the clamp and a caller can
+    /// walk from either end to the other. Both ends clamp silently.
+    pub fn verbosity(&self) -> Verbosity {
+        match i32::from(self.verbose) - i32::from(self.quiet) {
+            ..=-1 => Verbosity::Quiet,
+            0 => Verbosity::Normal,
+            1 => Verbosity::Verbose,
+            2 => Verbosity::Debug,
+            _ => Verbosity::Trace,
+        }
+    }
+
+    /// The one place output mode is decided. `--json` is the shorter spelling of
+    /// the format it names, and clap refuses the two together.
     pub fn format(&self) -> Format {
         if self.json {
             return Format::Json;
-        }
-        if self.quiet {
-            return Format::Value;
         }
         match self.format {
             Some(FormatArg::Json) => Format::Json,

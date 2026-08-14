@@ -15,6 +15,11 @@ const EXIT_ERROR: i32 = 2;
 
 fn main() {
     let cli = Cli::parse();
+    // Before any work: a refusal is a usage error, and clap's own exit renders it
+    // the way every other usage error is rendered.
+    if let Err(err) = cli.validate() {
+        err.exit();
+    }
     match run(cli) {
         Ok(code) => std::process::exit(code),
         Err(err) => {
@@ -66,11 +71,9 @@ fn run(cli: Cli) -> Result<i32> {
         let before = report::json::load(&before)?;
         let after = report::json::load(&after)?;
         match format {
-            // A diff is not a measurement, so there is no snapshot to write. Say
-            // so rather than write a report the caller did not ask for.
-            Format::Json => {
-                anyhow::bail!("diff has no --format json; compare the snapshots you already hold")
-            }
+            // Refused in `Cli::validate`: a diff is not a measurement, so there
+            // is no snapshot to write.
+            Format::Json => unreachable!("refused before the walk"),
             Format::Value => emit(&report::diff::quiet(&before, &after)?)?,
             Format::Text => emit(&report::diff::render(&before, &after, show)?)?,
         }

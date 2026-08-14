@@ -14,7 +14,7 @@ use crate::walk::Provenance;
 
 use super::notes::Notes;
 use super::table::{Column, Table};
-use super::{Blocks, Presentation, count, percent, percent_delta, signed, thousands};
+use super::{Blocks, Presentation, Verbosity, count, percent, percent_delta, signed, thousands};
 
 pub fn render(before: &Report, after: &Report, show: Presentation) -> Result<String> {
     let unit = same_unit(before, after)?;
@@ -55,6 +55,14 @@ pub fn render(before: &Report, after: &Report, show: Presentation) -> Result<Str
             }
             _ => notes.push("per-section movement needs both snapshots taken with --by section"),
         }
+    }
+
+    // Quiet keeps what qualifies a block that was printed — the truncation notes
+    // `movers` collected above, and the two lines explaining a block that could
+    // not be — and drops what comments on the run.
+    if show.verbosity == Verbosity::Quiet {
+        blocks.push(notes.render());
+        return Ok(blocks.render());
     }
 
     // A density delta is only about prose if the corpus behind it held still.

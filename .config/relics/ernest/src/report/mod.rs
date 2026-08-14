@@ -21,6 +21,35 @@ use crate::aggregate::Views;
 pub struct Presentation {
     pub views: Views,
     pub top: usize,
+    pub verbosity: Verbosity,
+}
+
+/// How loud the text report is. One axis, counted from both ends as `ssh` and
+/// `rsync` spell it — `-q` steps down, `-v` steps up — because a caller who has
+/// used either expects to walk from one to the other. `--format value` is the
+/// bare number, so `-q` is free to mean this and nothing else.
+///
+/// Ordered rather than counted at the call sites: `verbosity >= Verbosity::Debug`
+/// says what it means, where a bare `2` would not. A fourth `-v` clamps silently
+/// rather than erroring — leaning on the key is not a mistake worth refusing.
+///
+/// Presentation only. `--format json` carries the same fields whatever this is
+/// set to, and `--format value` is one line by definition; verbosity is accepted
+/// with both rather than refused, so a wrapper can pass a flag set it did not
+/// assemble.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Verbosity {
+    /// The figure, and only what qualifies a block that was printed.
+    Quiet,
+    /// The figure and the caveats on how to read it.
+    #[default]
+    Normal,
+    /// Provenance: what was excluded, at what scope, by whose declaration.
+    Verbose,
+    /// Per-file diagnostics: which paths, which failures, which profile.
+    Debug,
+    /// Parse-level: which files the grammar could not read.
+    Trace,
 }
 
 /// A report is blocks joined by exactly one blank line. An empty block is

@@ -1,0 +1,8 @@
+prose density  54.5%   (prose 272 / base 499 chars)
+  docs prose 183 chars — 88.4% of source code
+
+  density  prose  code  file
+   100.0%    150     0  tests/render/tree/docs/guide.md
+    34.2%     50    96  tests/render/tree/app.php
+
+  … 3 more files — --top 0 shows every row

@@ -121,7 +121,25 @@ fn the_caveats_stack_without_crowding_each_other() {
 
 #[test]
 fn the_value_format_is_one_line() {
-    check("value", &run(&[TREE, "--quiet"]));
+    check("value", &run(&[TREE, "--format", "value"]));
+}
+
+/// `-q` is the quiet end of the verbosity axis, not a format: the figure stays,
+/// and everything that comments on the run goes.
+#[test]
+fn quiet_keeps_the_figure_and_drops_the_commentary() {
+    check("quiet", &run(&[TREE, "-q"]));
+}
+
+/// A bounded list that looks complete is worse than no list, so the truncation
+/// note survives Quiet while the census does not. `--by` is a separate axis, and
+/// an explicit request for a body outranks a request for less commentary.
+#[test]
+fn quiet_still_says_what_a_bounded_view_withheld() {
+    check(
+        "quiet-by-file",
+        &run(&[TREE, "-q", "--by", "file", "--top", "2"]),
+    );
 }
 
 #[test]
@@ -138,7 +156,10 @@ fn a_diff_carries_the_same_registers_as_a_report() {
     // A view asked for that the snapshots cannot serve is said out loud rather
     // than silently absent.
     check("diff-by-section", &run(&["diff", b, a, "--by", "section"]));
-    check("diff-value", &run(&["diff", b, a, "--quiet"]));
+    check("diff-value", &run(&["diff", b, a, "--format", "value"]));
+    // The axis reaches the diff renderer too, and it is global, so it parses on
+    // either side of the subcommand.
+    check("diff-quiet", &run(&["diff", b, a, "-q"]));
 }
 
 /// Both sides measured from inside themselves, so the keys match and the movers

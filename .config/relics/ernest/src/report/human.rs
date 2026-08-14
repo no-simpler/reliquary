@@ -9,7 +9,7 @@ use crate::span::Counts;
 
 use super::notes::Notes;
 use super::table::{Column, Table};
-use super::{Blocks, Presentation, percent, thousands};
+use super::{Blocks, Presentation, Verbosity, percent, thousands};
 
 pub fn render(report: &Report, show: Presentation) -> String {
     let mut blocks = Blocks::default();
@@ -185,6 +185,10 @@ fn ranked(report: &Report, show: Presentation, rank: Rank) -> String {
     table.render()
 }
 
+/// Verbosity governs this register; `--by` governs the body. Quiet keeps the
+/// notes that qualify a block that *was* printed — a bounded list that looks
+/// complete is worse than no list, whatever was asked for — and drops the ones
+/// that comment on the run.
 fn notes(report: &Report, show: Presentation) -> Notes {
     let mut notes = Notes::default();
     if let Some(files) = &report.files
@@ -196,6 +200,9 @@ fn notes(report: &Report, show: Presentation) -> Notes {
         && show.views.by_section
     {
         notes.truncated(show.top, sections.len(), "section");
+    }
+    if show.verbosity == Verbosity::Quiet {
+        return notes;
     }
     notes.census(report);
     notes.corpora(report);
@@ -277,6 +284,7 @@ mod tests {
         Presentation {
             views: Default::default(),
             top: 20,
+            verbosity: Verbosity::default(),
         }
     }
 
@@ -301,7 +309,7 @@ mod tests {
                 by_language: true,
                 ..Default::default()
             },
-            top: 20,
+            ..bare()
         };
         assert!(!render(&empty(), show).contains("--by file"));
     }
