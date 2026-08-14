@@ -430,5 +430,21 @@ pub fn run(survey: &Survey, unit: Unit, views: Views) -> (Report, Diagnostics) {
         ..Report::empty(unit)
     };
 
-    (report, Diagnostics::default())
+    // Whatever the walk kept. Empty unless `keep_paths` asked for it, which is
+    // the one thing allowed to key on verbosity — none of this reaches `Report`.
+    let diagnostics = Diagnostics {
+        excluded: survey
+            .excluded
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect(),
+        unsupported: survey
+            .unsupported_paths
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect(),
+        unread: Vec::new(),
+    };
+
+    (report, diagnostics)
 }

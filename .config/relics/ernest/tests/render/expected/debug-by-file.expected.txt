@@ -1,0 +1,17 @@
+prose density  54.5%   (prose 272 / base 499 chars)
+  docs prose 183 chars — 88.4% of source code
+
+  density  prose  code  language  file
+   100.0%    150     0  markdown  tests/render/tree/docs/guide.md
+    34.2%     50    96  php       tests/render/tree/app.php
+    59.6%     34    23  yaml      tests/render/tree/config.yaml
+    62.3%     33    20  markdown  tests/render/tree/README.md
+     5.4%      5    88  php       tests/render/tree/lib.php
+
+  diagnostic   path                             reason
+  unsupported  tests/render/tree/package.json   no profile claims this extension
+  unsupported  tests/render/tree/tsconfig.json  no profile claims this extension
+
+  5 files measured, 2 unsupported (json 2)
+  measuring tests/render/tree
+  --scope local — locally-excluded files included, gitignored files not

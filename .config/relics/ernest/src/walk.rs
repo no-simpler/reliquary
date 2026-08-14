@@ -91,6 +91,10 @@ pub struct Survey {
     /// number that decides whether to say anything is what *would* have been
     /// measured. Empty unless an `.ernestignore` was found.
     pub excluded: Vec<PathBuf>,
+    /// The paths behind the `unsupported` tally, sorted, and empty unless
+    /// `keep_paths` asked for them — a `--scope all` PHP repository has sixty
+    /// thousand of these, which is why they are not kept by default.
+    pub unsupported_paths: Vec<PathBuf>,
     /// What the walk was asked for. Carried so the report — and the snapshot it
     /// serialises — can say what produced it: a figure that does not name its
     /// scope cannot be reasoned about, and two snapshots taken at different ones
@@ -102,14 +106,19 @@ pub struct Survey {
 
 /// Every supported file under `roots`, plus what was passed over — so coverage
 /// is visible rather than assumed.
-pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Survey {
-    let walked = files(roots, scope, lang, Corpus::Excluded);
+/// `keep_paths` decides whether the unbounded per-path lists are kept as well as
+/// counted. A `--scope all` PHP repository passes over sixty thousand unsupported
+/// files, so this is asked for rather than assumed — and it may only ever reach
+/// `report::Diagnostics`, never the snapshot, whose shape must not depend on how
+/// loud the caller asked to be.
+pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>, keep_paths: bool) -> Survey {
+    let walked = files(roots, scope, lang, Corpus::Excluded, keep_paths);
     let excludes = LocalExcludes::for_roots(roots);
 
     // At the widest scope a file may be hidden by `.gitignore` instead, which
     // no single matcher answers; the narrower walk is what names those.
     let reference: Option<HashSet<PathBuf>> = (scope == Scope::All).then(|| {
-        files(roots, Scope::Local, lang, Corpus::Excluded)
+        files(roots, Scope::Local, lang, Corpus::Excluded, false)
             .found
             .into_iter()
             .map(|(path, _)| path)
@@ -127,7 +136,7 @@ pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Survey {
         Vec::new()
     } else {
         let seen: HashSet<&PathBuf> = walked.found.iter().map(|(path, _)| path).collect();
-        let mut removed: Vec<PathBuf> = files(roots, scope, lang, Corpus::Included)
+        let mut removed: Vec<PathBuf> = files(roots, scope, lang, Corpus::Included, false)
             .found
             .into_iter()
             .map(|(path, _)| path)
@@ -165,6 +174,7 @@ pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>) -> Survey {
         unsupported: walked.unsupported,
         ernestignore: walked.ernestignore,
         excluded,
+        unsupported_paths: walked.unsupported_paths,
         scope,
         lang: lang.map(str::to_string),
         roots: roots.to_vec(),
@@ -233,6 +243,8 @@ fn matcher(repo: &Path) -> Option<Gitignore> {
 struct Walked {
     found: Vec<(PathBuf, &'static Profile)>,
     unsupported: BTreeMap<String, u64>,
+    /// The paths behind that tally, kept only when asked for.
+    unsupported_paths: Vec<PathBuf>,
     ernestignore: Vec<PathBuf>,
 }
 
@@ -245,7 +257,13 @@ enum Corpus {
     Included,
 }
 
-fn files(roots: &[PathBuf], scope: Scope, lang: Option<&str>, corpus: Corpus) -> Walked {
+fn files(
+    roots: &[PathBuf],
+    scope: Scope,
+    lang: Option<&str>,
+    corpus: Corpus,
+    keep_paths: bool,
+) -> Walked {
     let respect = scope != Scope::All;
     let mut builder = WalkBuilder::new(&roots[0]);
     for root in &roots[1..] {
@@ -284,6 +302,7 @@ fn files(roots: &[PathBuf], scope: Scope, lang: Option<&str>, corpus: Corpus) ->
     let mut walked = Walked {
         found: Vec::new(),
         unsupported: BTreeMap::new(),
+        unsupported_paths: Vec::new(),
         ernestignore: Vec::new(),
     };
 
@@ -306,11 +325,17 @@ fn files(roots: &[PathBuf], scope: Scope, lang: Option<&str>, corpus: Corpus) ->
             // Narrowed away by `--lang`, not unsupported: counting it would
             // read as a coverage gap that is not there.
             Some(_) => {}
-            None => *walked.unsupported.entry(extension_of(&path)).or_insert(0) += 1,
+            None => {
+                *walked.unsupported.entry(extension_of(&path)).or_insert(0) += 1;
+                if keep_paths {
+                    walked.unsupported_paths.push(path);
+                }
+            }
         }
     }
 
     walked.ernestignore.sort();
+    walked.unsupported_paths.sort();
     walked
 }
 

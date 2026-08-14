@@ -138,6 +138,20 @@ fn verbose_uncaps_the_unsupported_histogram() {
     check("verbose-edge", &run(&[EDGE, "-v"]));
 }
 
+/// The census says how many were set aside; this says which. The edge tree
+/// carries a declared corpus and seven unsupported files, so both classes show.
+#[test]
+fn debug_names_every_path_the_run_set_aside() {
+    check("debug", &run(&[EDGE, "-vv"]));
+}
+
+/// Which profile read a file answers "why is this row's density what it is", and
+/// it is a per-file diagnostic rather than part of the ranking.
+#[test]
+fn debug_names_the_profile_behind_each_ranked_file() {
+    check("debug-by-file", &run(&[TREE, "-vv", "--by", "file"]));
+}
+
 /// `-q` is the quiet end of the verbosity axis, not a format: the figure stays,
 /// and everything that comments on the run goes.
 #[test]

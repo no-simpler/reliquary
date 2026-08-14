@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 
 use cli::{Cli, Command, Format};
+use ernest::report::Verbosity;
 use ernest::{aggregate, report, walk};
 
 /// Density exceeded `--max-density`. Distinct from 2, which means ernest could
@@ -88,19 +89,23 @@ fn run(cli: Cli) -> Result<i32> {
     }
 
     let unit = options.unit.into();
+    // Per-path diagnostics are unbounded, so they are collected only for the rung
+    // that prints them.
+    let keep_paths = show.verbosity >= Verbosity::Debug;
     let survey = walk::collect(
         &options.paths,
         options.scope.into(),
         options.lang.as_deref(),
+        keep_paths,
     );
-    let (report, _diagnostics) = aggregate::run(&survey, unit, show.views);
+    let (report, diagnostics) = aggregate::run(&survey, unit, show.views);
 
     match format {
         // The pretty-printer supplies no trailing newline, and a snapshot that
         // ends mid-line is awkward in every reader that is not a parser.
         Format::Json => emit(&format!("{}\n", report::json::render(&report)?))?,
         Format::Value => emit(&report::human::value(&report))?,
-        Format::Text => emit(&report::human::render(&report, show))?,
+        Format::Text => emit(&report::human::render(&report, &diagnostics, show))?,
     }
 
     if let Some(limit) = options.max_density

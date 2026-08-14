@@ -9,15 +9,16 @@ use crate::span::Counts;
 
 use super::notes::Notes;
 use super::table::{Column, Table};
-use super::{Blocks, Presentation, Verbosity, percent, thousands};
+use super::{Blocks, Diagnostics, Presentation, Verbosity, percent, thousands};
 
-pub fn render(report: &Report, show: Presentation) -> String {
+pub fn render(report: &Report, found: &Diagnostics, show: Presentation) -> String {
     let mut blocks = Blocks::default();
     blocks.push(headline(report));
     blocks.push(breakdown(report, show));
     blocks.push(ranked(report, show, Rank::File));
     blocks.push(ranked(report, show, Rank::Section));
-    blocks.push(notes(report, show).render());
+    blocks.push(diagnostics(report, found, show));
+    blocks.push(notes(report, found, show).render());
     blocks.render()
 }
 
@@ -136,7 +137,13 @@ fn ranked(report: &Report, show: Presentation, rank: Rank) -> String {
     if !wanted {
         return String::new();
     }
-    let rows: Vec<(Option<f64>, u64, u64, String)> = match rank {
+    // Which profile read a file is a per-file diagnostic, and it is the answer to
+    // "why is this row's density what it is" when a dialect borrowed a
+    // neighbouring grammar. Off below `-vv`: on a bare ranking it is a column of
+    // repetition.
+    let profiles = show.verbosity >= Verbosity::Debug && matches!(rank, Rank::File);
+
+    let rows: Vec<(Option<f64>, u64, u64, String, String)> = match rank {
         Rank::File => report
             .files
             .iter()
@@ -147,6 +154,7 @@ fn ranked(report: &Report, show: Presentation, rank: Rank) -> String {
                     f.counts.prose(unit),
                     f.counts.code(unit),
                     f.path.clone(),
+                    f.language.clone(),
                 )
             })
             .collect(),
@@ -160,26 +168,85 @@ fn ranked(report: &Report, show: Presentation, rank: Rank) -> String {
                     s.counts.prose(unit),
                     s.counts.code(unit),
                     format!("{}#{}", s.path, s.section),
+                    String::new(),
                 )
             })
             .collect(),
     };
 
-    let mut table = Table::new(vec![
+    let mut columns = vec![
         Column::right("density"),
         Column::right("prose"),
         Column::right("code"),
-        Column::left(noun),
+    ];
+    if profiles {
+        columns.push(Column::left("language"));
+    }
+    columns.push(Column::left(noun));
+    let mut table = Table::new(columns);
+
+    for (density, prose, code, key, language) in rows.iter().take(show.top) {
+        let mut row = vec![percent(*density), thousands(*prose), thousands(*code)];
+        if profiles {
+            row.push(language.clone());
+        }
+        row.push(key.clone());
+        table.push(0, row);
+    }
+    table.render()
+}
+
+/// One line per path the run set aside, and why. The census above says how many;
+/// this says which, which is what a caller reaches for when the count is not the
+/// number they expected.
+///
+/// Bounded by `--top`, like every other listing: a `--scope all` run passes over
+/// tens of thousands of files, and `--top 0` already spells "show me all of it".
+/// Ordered by how much each class is worth acting on — a file that could not be
+/// read is a defect, a corpus is a decision, an unsupported extension is a
+/// profile someone could write.
+fn diagnostics(report: &Report, found: &Diagnostics, show: Presentation) -> String {
+    if show.verbosity < Verbosity::Debug {
+        return String::new();
+    }
+    let rows: Vec<(&str, &str, &str)> = report
+        .failed
+        .iter()
+        .map(|f| ("unreadable", f.path.as_str(), f.reason.as_str()))
+        .chain(found.unread.iter().map(|p| {
+            (
+                "unread",
+                p.as_str(),
+                "the grammar produced an ERROR or MISSING node",
+            )
+        }))
+        .chain(
+            found
+                .excluded
+                .iter()
+                .map(|p| ("excluded", p.as_str(), "a declared corpus")),
+        )
+        .chain(found.unsupported.iter().map(|p| {
+            (
+                "unsupported",
+                p.as_str(),
+                "no profile claims this extension",
+            )
+        }))
+        .collect();
+    if rows.is_empty() {
+        return String::new();
+    }
+
+    let mut table = Table::new(vec![
+        Column::left("diagnostic"),
+        Column::left("path"),
+        Column::left("reason"),
     ]);
-    for (density, prose, code, key) in rows.iter().take(show.top) {
+    for (kind, path, reason) in rows.iter().take(show.top) {
         table.push(
             0,
-            vec![
-                percent(*density),
-                thousands(*prose),
-                thousands(*code),
-                key.clone(),
-            ],
+            vec![kind.to_string(), path.to_string(), reason.to_string()],
         );
     }
     table.render()
@@ -189,7 +256,7 @@ fn ranked(report: &Report, show: Presentation, rank: Rank) -> String {
 /// notes that qualify a block that *was* printed — a bounded list that looks
 /// complete is worse than no list, whatever was asked for — and drops the ones
 /// that comment on the run.
-fn notes(report: &Report, show: Presentation) -> Notes {
+fn notes(report: &Report, found: &Diagnostics, show: Presentation) -> Notes {
     let mut notes = Notes::default();
     if let Some(files) = &report.files
         && show.views.by_file
@@ -200,6 +267,10 @@ fn notes(report: &Report, show: Presentation) -> Notes {
         && show.views.by_section
     {
         notes.truncated(show.top, sections.len(), "section");
+    }
+    if show.verbosity >= Verbosity::Debug {
+        let listed = report.failed.len() + found.unread.len() + found.excluded.len();
+        notes.truncated(show.top, listed + found.unsupported.len(), "diagnostic");
     }
     if show.verbosity == Verbosity::Quiet {
         return notes;
@@ -278,14 +349,17 @@ mod tests {
     /// where the unrequested table would have gone.
     #[test]
     fn a_report_of_nothing_has_no_gap_in_it() {
-        let text = render(&empty(), bare());
+        let text = render(&empty(), &Diagnostics::default(), bare());
         assert!(!text.contains("\n\n\n"), "{text:?}");
         assert!(text.ends_with('\n'));
     }
 
     #[test]
     fn a_bare_run_names_the_views_it_did_not_show() {
-        assert!(render(&empty(), bare()).contains("--by file|section|cohort|language"));
+        assert!(
+            render(&empty(), &Diagnostics::default(), bare())
+                .contains("--by file|section|cohort|language")
+        );
     }
 
     #[test]
@@ -297,7 +371,7 @@ mod tests {
             },
             ..bare()
         };
-        assert!(!render(&empty(), show).contains("--by file"));
+        assert!(!render(&empty(), &Diagnostics::default(), show).contains("--by file"));
     }
 
     #[test]
