@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# Two GitHub accounts share this machine: a personal one and a benefactor one. `gh`
+# stores its credentials per config directory, so which account a command acts as is
+# decided by GH_CONFIG_DIR. Selecting it by hand (`gh auth switch`) is global mutable
+# state — one forgotten switch acts on benefactor repositories as the personal user.
+# This shim makes the choice from the working directory instead, so it cannot be
+# forgotten, and it works in non-interactive shells where a prompt hook never fires.
+#
+# Fail-safe by construction: outside the benefactor tree you get the personal account,
+# which is the one with no benefactor access.
+
+# Path to the actual gh executable.
+# This shim is itself on PATH as `gh`, ahead of Homebrew, so a plain `type -p gh`
+# would resolve back to us and recurse. Scan PATH for the first real gh OUTSIDE
+# ~/.config/bin. Mirrors yadm-wrapper.
+GH_BIN=""
+_self_dir="$HOME/.config/bin"
+_oldifs=$IFS
+IFS=:
+for _d in $PATH; do
+    if [ "$_d" != "$_self_dir" ] && [ -x "$_d/gh" ]; then
+        GH_BIN="$_d/gh"
+        break
+    fi
+done
+IFS=$_oldifs
+unset _self_dir _oldifs _d
+
+if [ -z "$GH_BIN" ]; then
+    echo "gh shim: real gh not found on PATH (outside ~/.config/bin)." >&2
+    exit 1
+fi
+
+# Compare the PHYSICAL path, not $PWD: a symlinked route into the tree would leave
+# $PWD naming the link and silently select the wrong account. Trailing slashes on both
+# sides so a sibling like `benefactor-notes` cannot match.
+_cwd=$(pwd -P 2>/dev/null || pwd)
+case "$_cwd/" in
+    "$HOME/Developer/benefactor/"*)
+        export GH_CONFIG_DIR="$HOME/.config/gh-benefactor"
+        ;;
+esac
+unset _cwd
+
+exec "$GH_BIN" "$@"

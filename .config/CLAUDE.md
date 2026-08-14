@@ -102,6 +102,7 @@ Pre/post hooks: `~/.pre.{zsh,sh}` and `~/.post.{zsh,sh}` are sourced if present 
 
 Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `bbs` - interactive Brewfile scope selector (applies `Brewfile@<scope>` files)
+- `gh` - shadows Homebrew's `gh` (same PATH trick as `yadm-wrapper`); exports `GH_CONFIG_DIR` to the benefactor profile when the *physical* cwd is under `~/Developer/benefactor/`, else leaves the personal default. See "Two GitHub identities" below
 - `pb` - lists personal bin executables, shows which are yadm-managed
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm); writes timestamp to `~/.local/state/up/last_upped_at`
 - `check-shell-parity` - detects POSIX↔fish alias/abbr/function name drift across the paired `shell/interactive.d/*.sh` ↔ `fish/conf.d/*.fish` files; exits non-zero on drift (run by the dream procedure in `~/.config/.claude/DREAM.md`)
@@ -189,6 +190,36 @@ status and the append-only log at `~/.local/state/ske/log`. `ske off` cannot flu
 own ~10-min per-TTY cache and says so. **ske is an interactive convenience, never an
 unattended/CI auth path.**
 
+### Two GitHub identities
+
+A personal account and a benefactor account share `github.com`. Three independent mechanisms keep
+them apart, and **all three must be right** — verify each separately, since any one of them can be
+correct while another silently is not.
+
+- **SSH key** — `~/.ssh/config` pins one key per host with `IdentitiesOnly`: `github.com` gets
+  `id_personal.pub`, the `github-benefactor` alias gets `id_benefactor.pub` with
+  `HostName github.com`. Both keys are valid GitHub credentials, so without the pin the *first key
+  an agent offers* decides which account you are — and neither agent's offer order is declared
+  policy (ske's follows `ske.conf`; 1Password has no `agent.toml`). The `IdentityFile` entries name
+  **public** keys: with `IdentitiesOnly` they select which agent identity to offer, and the private
+  halves never leave 1Password. `github-benefactor` is also in the ske `Match host` list.
+- **git identity** — `includeIf gitdir:~/Developer/benefactor/` swaps in the benefactor name, email,
+  and signing key, and rewrites the organization's remotes onto the `github-benefactor` alias via
+  `url.insteadOf`. Scoped by directory, so nothing needs per-repository setup.
+- **`gh` token** — the `gh` shim above, keyed on the physical cwd.
+
+Both `.pub` files ride the encrypted archive, arriving in the same `yadm decrypt` as `~/.ssh/config`
+itself — so there is never a moment on a fresh machine where the config pins an `IdentityFile` that
+does not exist yet, which would offer no keys at all and break every SSH git operation.
+
+The one manual step on a new machine is `gh auth login` for the benefactor profile (run it from
+inside the benefactor tree so the shim points it at the right config dir), plus authorizing the SSH
+authentication key for the organization's SSO. Both are interactive by nature.
+
+Check them with `ssh -T git@github.com`, `ssh -T git@github-benefactor`, and `gh auth status` run
+from inside and outside the tree. Note that `ssh -T` proves *which account*, not organization
+access — SSO authorization only shows up on a real repository operation.
+
 ### Agentic templates (`~/.config/reliquary/templates/`)
 
 Canonical bank of reusable templates for recurring agentic project patterns — the hub that pattern knowledge flows out of and back into, so per-project second brains stop drifting laterally. Each template is a **menu with a spine**: `[CORE]` directives every project keeps, `[OPTIONAL — <when>]` modules a project keeps only if applicable; instantiate by subtraction. Public-repo rule: templates are 100% domain-free (source projects are idea-sources only). Members: `DREAM.md` (dreaming procedure), `ROOT-CLAUDE.md` (root standing directives + satellites; `ROOT-` prefix prevents auto-load), `PROPAGATE.md` (centralized fan-out runbook) + `bin/discover-template-targets` (read-only target enumeration). Usage and governance live in `templates/CLAUDE.md`.
@@ -221,7 +252,7 @@ Sourcing order: `lib/` -> `util/` -> OS-specific (`macos/` or `linux/`) -> `shar
 Snippet dirs live under `~/.config/yadm/snippets/`. Files are `NN-name.sh`, sorted and sourced in order.
 
 Key macOS snippets: homebrew install, brewfile apply, mas (App Store), directory creation, quartz filters, tilde-switch.
-Shared snippets: pbin setup, tpm (tmux plugin manager), rustup.
+Shared snippets: pbin setup, tpm (tmux plugin manager), rustup, benefactor `gh` profile seeding.
 Util snippets: print helpers, copy helpers, symlink helpers.
 
 ### Brewfiles (`~/.config/brew/`)
@@ -290,7 +321,8 @@ These were reviewed and **intentionally excluded** — neither plaintext-tracked
 - `~/.config/raycast/config.json` - holds a live `rca_…` access token; regenerable, machine-local.
 - `~/.kube/config` - embeds a live orbstack `client-key-data` and benefactor GKE cluster names; GKE contexts re-fetch via `gcloud container clusters get-credentials`, orbstack regenerates its own.
 - `~/.docker/config.json` - no secrets today (`auths: {}`, osxkeychain + gcloud credHelpers), but tracking it risks a future `docker login` writing base64 creds into `auths{}`; the credHelper config regenerates on setup.
-- `~/.config/gh/hosts.yml` - just SSH-protocol pref + public username; `gh auth login` regenerates it, and tracking risks `gh` writing an `oauth_token` into a plaintext file.
+- `~/.config/gh/hosts.yml` - just SSH-protocol pref + public username; `gh auth login` regenerates it, and tracking risks `gh` writing an `oauth_token` into a plaintext file. (`~/.config/gh/config.yml` — protocol pref plus aliases, no credentials — *is* tracked.)
+- `~/.config/gh-benefactor/` - the benefactor `gh` profile; same reasoning as `hosts.yml`, and the non-secret half is regenerated by `yadm/snippets/shared/15-gh-benefactor.sh`.
 - `~/.gnupg/gpg-agent.conf` + `~/.gnupg/pinentry-ide.sh` - IDE-generated (PhpStorm) GPG-signing pinentry config and its shim. No secrets, but both hardcode absolute `$HOME` paths carrying the local username, which the `pre_commit` identity guard bars from the public plaintext tree; encrypting them isn't worth it since the IDE regenerates both on its next GPG run.
 
 ### Repository documentation (`~/.github/`)
