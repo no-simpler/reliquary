@@ -71,6 +71,13 @@ pub enum Command {
         /// Snapshot taken after it.
         after: PathBuf,
     },
+
+    /// Write a shell completion script to stdout.
+    Completions {
+        /// Which shell to write for.
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Debug, Args)]

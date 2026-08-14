@@ -51,6 +51,17 @@ fn run(cli: Cli) -> Result<i32> {
     let show = cli.view.presentation();
     let format = cli.view.format();
 
+    // Before everything else: a completion script is not a measurement, and it
+    // is the one subcommand that wants no walk, no snapshot and no flags.
+    if let Some(Command::Completions { shell }) = cli.command {
+        let mut command = <Cli as clap::CommandFactory>::command();
+        let name = command.get_name().to_string();
+        let mut script = Vec::new();
+        clap_complete::generate(shell, &mut command, name, &mut script);
+        emit(&String::from_utf8(script).context("generating the completion script")?)?;
+        return Ok(0);
+    }
+
     if let Some(Command::Diff { before, after }) = cli.command {
         let before = report::json::load(&before)?;
         let after = report::json::load(&after)?;

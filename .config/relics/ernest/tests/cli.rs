@@ -162,6 +162,19 @@ fn a_severed_pipe_is_not_a_failure() {
     assert!(!stderr.contains("panicked"), "{stderr}");
 }
 
+/// Every shell clap_complete knows, rather than the ones this machine happens to
+/// run — the enum is taken whole so a shell added upstream arrives for free, and
+/// this is what would notice if one stopped generating.
+#[test]
+fn completions_are_written_for_every_shell() {
+    for shell in ["bash", "elvish", "fish", "powershell", "zsh"] {
+        let out = ernest(&["completions", shell]);
+        assert_eq!(out.status.code(), Some(0), "{shell}");
+        let script = String::from_utf8(out.stdout).unwrap();
+        assert!(script.contains("ernest"), "{shell}: {script}");
+    }
+}
+
 #[test]
 fn the_threshold_separates_exceeded_from_broken() {
     let dir = fixtures();
