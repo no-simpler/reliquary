@@ -36,6 +36,7 @@ PAIRS=(
     "shell/interactive.d/100-aliases-docker.sh|fish/conf.d/100-aliases-docker.fish|docker"
     "shell/interactive.d/100-aliases-git.sh|fish/conf.d/100-aliases-git.fish|git"
     "shell/interactive.d/100-aliases-yadm.sh|fish/conf.d/100-aliases-yadm.fish|yadm"
+    "shell/interactive.d/150-benefactor.sh|fish/conf.d/150-benefactor.fish|benefactor"
 )
 
 # --- Allowlist -------------------------------------------------------------

@@ -23,6 +23,7 @@
 .config/mm/vpn/*.ovpn
 .config/phpstorm/*.xml
 .config/shell/env.d/150-benefactor.*
+.config/shell/interactive.d/150-benefactor.sh
 .config/fish/conf.d/150-benefactor.fish
 .ssh/config
 .ssh/*.pub

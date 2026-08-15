@@ -32,9 +32,13 @@ if [ -z "$GH_BIN" ]; then
     exit 1
 fi
 
-# Compare the PHYSICAL path, not $PWD: a symlinked route into the tree would leave
-# $PWD naming the link and silently select the wrong account. Trailing slashes on both
-# sides so a sibling like `benefactor-notes` cannot match.
+# Compare the PHYSICAL path, not $PWD: any symlinked route into the tree would leave
+# $PWD naming the link and silently select the wrong account. No such link exists at
+# the tree root today, but `.claude/worktrees/` and /tmp -> /private/tmp both reach
+# repositories through symlinks, and the failure is asymmetric — a false negative acts
+# on benefactor repositories as the personal user. `pwd -P` costs one syscall, so it
+# stays regardless of what the tree looks like. Trailing slashes on both sides so a
+# sibling like `benefactor-notes` cannot match.
 _cwd=$(pwd -P 2>/dev/null || pwd)
 case "$_cwd/" in
     "$HOME/Developer/benefactor/"*)
