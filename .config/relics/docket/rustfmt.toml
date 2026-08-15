@@ -1,0 +1,2 @@
+# Intentionally empty `rustfmt.toml` to indicate that this project adheres to
+# default code formatting rules of the Rust community.

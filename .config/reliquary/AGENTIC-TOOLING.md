@@ -45,6 +45,23 @@ So the rule is: **one line stating the tool exists; never a directive to use it.
 `~/.claude/skills/php-lsp/SKILL.md` is the reference length — frontmatter `description` plus one
 sentence. Resist the urge to explain when to reach for it; that is the agent's call.
 
+## Agent-aware output
+
+A tool agents invoke should detect that and change shape. Claude Code exports **`CLAUDECODE`** into
+every subprocess it spawns, which is the signal — a tool run through the `Bash` tool sees it, and a
+tool run by a person at a terminal does not. Non-TTY stdout is the backstop for agentic callers that
+set nothing.
+
+The resolution order, in the order a caller expects to win: an explicit flag, then the tool's own
+`<NAME>_UI` environment variable, then `CLAUDECODE`, then whether stdout is a terminal.
+
+Agent shape means no colour, no alignment padding, no box drawing, and a stable field order.
+Alignment is paid for twice — once written, once read — and buys a model nothing. Human shape may
+spend freely on tables and colour. Keep `--json` a separate, explicit opt-in: it is for scripts, and
+it costs more tokens than a terse line format.
+
+`docket` is the reference implementation.
+
 ## Registration protocol
 
 The language-server admission is the reference implementation. Five steps:

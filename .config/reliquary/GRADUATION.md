@@ -11,7 +11,7 @@ This is the canonical reference. For benefactor-specific deltas, see
 | Stage | Where it lives                    | Status                          | Examples              |
 |-------|-----------------------------------|---------------------------------|-----------------------|
 | 1     | `~/.config/bin/<name>`            | one-shot util, yadm-tracked     | `bbs`, `pb`, `up`     |
-| 2     | `~/.config/relics/<name>/`        | in-house relic, yadm-tracked    | `relic`               |
+| 2     | `~/.config/relics/<name>/`        | in-house relic, yadm-tracked    | `relic`, `ernest`, `docket` |
 | 3     | `~/Developer/<name>/`             | external relic, own git repo    | `bb`, `halo`          |
 
 **Stage 1 → 2**: `relic scaffold <name>` — scaffolds from

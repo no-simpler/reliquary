@@ -138,6 +138,30 @@ The `relic` CLI (`relic list|status|publish|test|update|scaffold|registry|migrat
 
 `~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`, `AGENTIC-TOOLING.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton), and deferred-work handoffs (`design/`: `relic graduate`).
 
+### Session docket (`docket`)
+
+Machine-wide handoffs, relays and specs — the transient items that bridge agentic sessions.
+Public relic (`~/.config/relics/docket/`, Rust).
+
+Items live in a per-machine depot at `~/.claude/docket/`, grouped by project and deliberately
+untracked; the system around them (relic, hook, skill) is tracked and travels between machines.
+A project keys to the **main checkout root** of its git repository, so worktrees share one docket,
+and to the resolved working directory outside a repository. Ids are four characters and unique
+across the machine, so one resolves from any directory.
+
+A `SessionStart` hook in `~/.claude/settings.json` runs `docket announce --hook`, which is silent
+when nothing is outstanding. Workflow directives live in the skill at `~/.claude/skills/docket/`.
+
+**The binary is the single source of truth for its own surface** — `docket --help`, and
+`docket help ladder|metadata|keys|agent`. Do not restate its usage here or anywhere else; the
+relic's `CLAUDE.md` records why.
+
+The four older conventions it supersedes are still in place and unmigrated: Pillar's
+`.claude/handoffs/` and `.claude/specs/`, the `bb`/`halo` depot inboxes under
+`~/.local/share/<meta>/.handoffs/`, the `.claude/handoffs/` references in
+`~/.claude/commands/modes/{afk,tree}.md`, and `~/.config/reliquary/design/`. Migration is
+deliberate and one at a time.
+
 ### Touch ID window (`ske`)
 
 `ske` ("skeleton key") opens a **time-boxed window** in which 1Password Touch ID prompts are

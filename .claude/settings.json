@@ -6,7 +6,10 @@
       "Bash(find:*)",
       "Bash(cat:*)",
       "Bash(grep:*)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(docket:*)",
+      "Edit(~/.claude/docket/**)",
+      "Write(~/.claude/docket/**)"
     ],
     "deny": [
       "Bash(php:*)",
@@ -21,6 +24,16 @@
           {
             "type": "command",
             "command": "python3 \"$HOME/.claude/hooks/modes.py\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.local/bin/docket\" announce --hook || true"
           }
         ]
       }
