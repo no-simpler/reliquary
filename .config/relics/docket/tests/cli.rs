@@ -137,13 +137,13 @@ fn tail(path: &Path, depth: usize) -> String {
     parts.join("/")
 }
 
-/// An item's frontmatter, without its body.
+/// An item's metadata, without its body.
 fn front(path: &Path) -> String {
     let text = fs::read_to_string(path).expect("reading the item");
     let rest = text
         .strip_prefix("---\n")
         .expect("the file opens with a `---` line");
-    let end = rest.find("\n---\n").expect("the frontmatter is terminated");
+    let end = rest.find("\n---\n").expect("the metadata is terminated");
     rest[..=end].to_owned()
 }
 
@@ -164,7 +164,7 @@ fn listed_ids(stdout: &str) -> Vec<String> {
         .collect()
 }
 
-/// Where closing an item puts it: same filename, one level down under
+/// Where archiving an item puts it: same filename, one level down under
 /// `archive/`.
 fn archived_beside(path: &Path) -> PathBuf {
     let kind_dir = path.parent().expect("an item sits in a kind directory");
@@ -176,7 +176,7 @@ fn archived_beside(path: &Path) -> PathBuf {
         .join(path.file_name().expect("the item has a filename"))
 }
 
-/// Deletes one frontmatter key, which is how an item falls out of schema in the
+/// Deletes one metadata key, which is how an item falls out of schema in the
 /// wild.
 fn drop_key(path: &Path, key: &str) {
     let text = fs::read_to_string(path).expect("reading the item");
@@ -393,6 +393,70 @@ fn help_states_the_limits_it_enforces() {
 }
 
 #[test]
+fn every_guide_topic_prints_and_an_unknown_one_lists_them() {
+    let docket = Docket::new();
+
+    let root = docket.run(&["guide"]);
+    assert!(root.ok(), "guide failed: {}", root.stderr());
+    let root = root.stdout();
+    assert!(root.contains("DOCKET"), "{root}");
+    assert!(
+        root.contains("docket help"),
+        "the usage block is always last: {root}"
+    );
+    for absent in ["HANDOFF", "RELAY", "SPEC"] {
+        assert!(!root.contains(absent), "unasked topic leaked: {root}");
+    }
+
+    for (topic, anchor) in [("handoff", "HANDOFF"), ("relay", "RELAY"), ("spec", "SPEC")] {
+        let run = docket.run(&["guide", topic]);
+        assert!(run.ok(), "guide {topic} failed: {}", run.stderr());
+        let out = run.stdout();
+        assert!(
+            out.contains("DOCKET"),
+            "every guide carries the frame: {out}"
+        );
+        let body = out.find(anchor).unwrap_or_else(|| panic!("{out}"));
+        let usage = out
+            .find("  docket create")
+            .unwrap_or_else(|| panic!("{out}"));
+        assert!(body < usage, "a topic sits above the usage block: {out}");
+    }
+
+    // Several topics render in canonical order, whatever order they were asked
+    // for, so one guide always reads the same way.
+    let many = docket.run(&["guide", "spec", "handoff"]);
+    assert!(many.ok(), "guide failed: {}", many.stderr());
+    let many = many.stdout();
+    assert!(
+        many.find("HANDOFF") < many.find("SPEC"),
+        "topics are ordered by the ladder, not by the argument list: {many}"
+    );
+
+    let unknown = docket.run(&["guide", "nonsense"]);
+    assert!(
+        !unknown.ok(),
+        "unknown topic succeeded: {}",
+        unknown.stdout()
+    );
+    let stderr = unknown.stderr();
+    for topic in ["handoff", "relay", "spec"] {
+        assert!(stderr.contains(topic), "{stderr}");
+    }
+}
+
+#[test]
+fn doctrine_lives_only_in_the_guide() {
+    let docket = Docket::new();
+
+    let agent = docket.run(&["help", "agent"]);
+    assert!(!agent.ok(), "help agent still resolves: {}", agent.stdout());
+
+    let ladder = docket.run(&["help", "ladder"]).stdout();
+    assert!(!ladder.contains("Reach for"), "{ladder}");
+}
+
+#[test]
 fn ids_resolve_from_any_project() {
     let docket = Docket::new();
     let alpha = docket.project("alpha");
@@ -455,7 +519,7 @@ fn promotion_climbs_the_ladder_and_stops_at_the_top() {
     let past_the_top = docket.run(&["promote", &id, "-q"]);
     assert!(!past_the_top.ok());
     assert!(
-        past_the_top.stderr().contains("docket close"),
+        past_the_top.stderr().contains("docket archive"),
         "stderr should point at close: {}",
         past_the_top.stderr()
     );
@@ -618,7 +682,10 @@ fn an_invalid_item_stays_listed_and_fails_doctor() {
     let listed = docket.run(&["list", "--project", &project]);
     assert!(listed.ok(), "list failed: {}", listed.stderr());
     assert!(
-        listed.stdout().contains(&format!("! {id} INVALID")),
+        listed
+            .stdout()
+            .lines()
+            .any(|line| line.starts_with('!') && line.contains(&id) && line.contains("INVALID")),
         "an unparseable item is never hidden: {}",
         listed.stdout()
     );
@@ -730,13 +797,17 @@ fn reorder_places_one_item_top_bottom_or_at_a_position() {
 }
 
 #[test]
-fn close_archives_an_item() {
+fn archive_files_an_item_away() {
     let docket = Docket::new();
     let project = docket.project("proj");
     let (id, path) = docket.create(&project, "handoff", "Finished work");
 
-    let closed = docket.run(&["close", &id, "-q"]);
-    assert!(closed.ok(), "close failed: {}", closed.stderr());
+    let archived_run = docket.run(&["archive", &id, "-q"]);
+    assert!(
+        archived_run.ok(),
+        "archive failed: {}",
+        archived_run.stderr()
+    );
     assert!(!path.exists());
     assert!(archived_beside(&path).is_file());
 
@@ -744,23 +815,6 @@ fn close_archives_an_item() {
     assert!(!listed_ids(&open.stdout()).contains(&id));
     let archived = docket.run(&["list", "--archived", "--project", &project]);
     assert_eq!(listed_ids(&archived.stdout()), vec![id]);
-}
-
-#[test]
-fn delete_removes_an_item_outright() {
-    let docket = Docket::new();
-    let project = docket.project("proj");
-    let (id, path) = docket.create(&project, "handoff", "Opened by mistake");
-
-    let deleted = docket.run(&["delete", &id, "--force", "-q"]);
-    assert!(deleted.ok(), "delete failed: {}", deleted.stderr());
-    assert!(!path.exists());
-    assert!(!archived_beside(&path).exists(), "delete leaves no copy");
-
-    let open = docket.run(&["list", "--project", &project]);
-    assert!(!listed_ids(&open.stdout()).contains(&id));
-    let archived = docket.run(&["list", "--archived", "--project", &project]);
-    assert!(!listed_ids(&archived.stdout()).contains(&id));
 }
 
 #[test]
@@ -776,7 +830,7 @@ fn announce_is_silent_when_empty_and_emits_hook_json_when_not() {
 
     let roster = docket.run(&["announce", "--project", &project]);
     assert!(roster.ok(), "announce failed: {}", roster.stderr());
-    assert!(roster.stdout().contains(&format!("[{id}]")));
+    assert!(roster.stdout().contains(&id));
     assert!(roster.stdout().contains("Outstanding work"));
 
     let hook = docket.run(&["announce", "--hook", "--project", &project]);
@@ -836,7 +890,7 @@ fn agent_and_uncoloured_human_output_carry_no_escapes() {
 fn help_serves_topics_and_commands_and_rejects_neither() {
     let docket = Docket::new();
 
-    for topic in ["ladder", "metadata", "keys", "agent"] {
+    for topic in ["ladder", "metadata"] {
         let run = docket.run(&["help", topic]);
         assert!(run.ok(), "help {topic} failed: {}", run.stderr());
         assert!(!run.stdout().trim().is_empty(), "help {topic} said nothing");
@@ -851,24 +905,24 @@ fn help_serves_topics_and_commands_and_rejects_neither() {
     assert!(!unknown.ok());
     assert_ne!(unknown.code(), 0);
     assert!(
-        unknown.stderr().contains("ladder, metadata, keys, agent"),
+        unknown.stderr().contains("ladder, metadata"),
         "stderr should list the topics: {}",
         unknown.stderr()
     );
 }
 
-/// Kind is taken from the directory an item sits in, not from frontmatter that
-/// may no longer parse. Otherwise closing a damaged spec files it as a handoff,
+/// Kind is taken from the directory an item sits in, not from metadata that may
+/// no longer parse. Otherwise archiving a damaged spec files it as a handoff,
 /// which loses the id from the filename and makes the item unreachable.
 #[test]
-fn closing_an_invalid_spec_keeps_it_reachable() {
+fn archiving_an_invalid_spec_keeps_it_reachable() {
     let docket = Docket::new();
     let project = docket.project("damaged-spec");
     let (id, path) = docket.create(&project, "spec", "A spec that will be damaged");
     drop_key(&path, "stage");
 
-    let closed = docket.run(&["close", &id, "--project", &project, "-q"]);
-    assert!(closed.ok(), "close failed: {}", closed.stderr());
+    let run = docket.run(&["archive", &id, "--project", &project, "-q"]);
+    assert!(run.ok(), "archive failed: {}", run.stderr());
 
     let located = docket.run(&["path", &id]);
     assert!(
@@ -892,12 +946,12 @@ fn closing_an_invalid_spec_keeps_it_reachable() {
     );
 }
 
-/// Deleting a damaged spec takes its whole directory, not just the file inside
+/// Archiving a damaged spec moves its whole directory, not just the file inside
 /// it, for the same reason.
 #[test]
-fn deleting_an_invalid_spec_removes_its_directory() {
+fn archiving_an_invalid_spec_moves_its_directory() {
     let docket = Docket::new();
-    let project = docket.project("damaged-spec-delete");
+    let project = docket.project("damaged-spec-archive");
     let (id, path) = docket.create(&project, "spec", "Another damaged spec");
     drop_key(&path, "stage");
     let spec_dir = path
@@ -905,7 +959,7 @@ fn deleting_an_invalid_spec_removes_its_directory() {
         .expect("a spec lives in its own directory")
         .to_owned();
 
-    let removed = docket.run(&["delete", &id, "--force", "--project", &project, "-q"]);
-    assert!(removed.ok(), "delete failed: {}", removed.stderr());
+    let run = docket.run(&["archive", &id, "--project", &project, "-q"]);
+    assert!(run.ok(), "archive failed: {}", run.stderr());
     assert!(!spec_dir.exists(), "the spec directory was left behind");
 }

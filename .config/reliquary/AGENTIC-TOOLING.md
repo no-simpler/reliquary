@@ -42,6 +42,8 @@ That was measured: a silently-installed language server saw **0/10 adoption**, n
 including in a run that made 31 tool calls. A single line naming it flipped that reliably.
 
 So the rule is: **one line stating the tool exists; never a directive to use it.**
+A relic the author writes is held to the same rule and one more — it hosts its own doctrine in a
+`guide` namespace in the binary, so the skill stays a stub. See `GRADUATION.md`.
 `~/.claude/skills/php-lsp/SKILL.md` is the reference length — frontmatter `description` plus one
 sentence. Resist the urge to explain when to reach for it; that is the agent's call.
 

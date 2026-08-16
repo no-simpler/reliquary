@@ -23,6 +23,80 @@ pub fn list(view: &View<'_>, format: Format) -> Result<()> {
     }
 }
 
+/// One item as the fixed cells that precede its title. Columns run in order of
+/// increasing variability so the title, the only unbounded cell, comes last and
+/// is never padded — alignment then costs nothing at the end of a line.
+pub struct Row {
+    pub cells: Vec<String>,
+    pub title: String,
+    pub tagline: String,
+    pub notes: Vec<String>,
+}
+
+pub fn row(position: usize, record: &Record) -> Row {
+    match &record.item {
+        Ok(item) => {
+            let mut notes = Vec::new();
+            if let Some(reason) = item
+                .blocked
+                .as_deref()
+                .map(str::trim)
+                .filter(|r| !r.is_empty())
+            {
+                notes.push(format!("blocked: {reason}"));
+            }
+            Row {
+                cells: vec![
+                    position.to_string(),
+                    record.id.to_string(),
+                    kind_badge(item),
+                    crate::ui::age(item.created),
+                ],
+                title: item.title.clone(),
+                tagline: item.tagline.trim().to_owned(),
+                notes,
+            }
+        }
+        Err(error) => Row {
+            cells: vec![
+                "!".to_owned(),
+                record.id.to_string(),
+                "INVALID".to_owned(),
+                String::new(),
+            ],
+            title: error.to_string(),
+            tagline: String::new(),
+            notes: vec![record.path.display().to_string()],
+        },
+    }
+}
+
+/// Renders rows with every fixed column padded to its widest value, and returns
+/// the column at which titles start, so a caller can indent continuation lines
+/// under them.
+pub fn aligned(rows: &[Row], indent: &str) -> (Vec<String>, usize) {
+    let mut widths = vec![0usize; rows.iter().map(|r| r.cells.len()).max().unwrap_or(0)];
+    for row in rows {
+        for (index, cell) in row.cells.iter().enumerate() {
+            widths[index] = widths[index].max(cell.chars().count());
+        }
+    }
+    let head = indent.chars().count() + widths.iter().map(|w| w + 2).sum::<usize>();
+
+    let lines = rows
+        .iter()
+        .map(|row| {
+            let mut line = String::from(indent);
+            for (index, cell) in row.cells.iter().enumerate() {
+                line.push_str(&format!("{cell:<width$}  ", width = widths[index]));
+            }
+            line.push_str(&row.title);
+            line
+        })
+        .collect();
+    (lines, head)
+}
+
 /// The badge every renderer shows for an item's rung: kind, plus the one
 /// qualifier that rung carries.
 pub fn kind_badge(item: &crate::item::Item) -> String {

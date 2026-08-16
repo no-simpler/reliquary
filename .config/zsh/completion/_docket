@@ -15,14 +15,12 @@ _docket() {
 
     local context curcontext="$curcontext" state line
     _arguments "${_arguments_options[@]}" : \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 '-V[Print version]' \
@@ -39,18 +37,16 @@ json\:"Machine-readable, for scripting"))' \
             (list)
 _arguments "${_arguments_options[@]}" : \
 '--kind=[Only this kind]:KIND:(handoff relay spec)' \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '--all[Every project on this machine, not just this one]' \
 '--blocked[Only items carrying a block]' \
-'--invalid[Only items whose frontmatter will not parse]' \
-'--archived[What has been closed, instead of what is open]' \
+'--invalid[Only items whose metadata will not parse]' \
+'--archived[What has been archived, instead of what is open]' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
@@ -58,67 +54,59 @@ json\:"Machine-readable, for scripting"))' \
 (ls)
 _arguments "${_arguments_options[@]}" : \
 '--kind=[Only this kind]:KIND:(handoff relay spec)' \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '--all[Every project on this machine, not just this one]' \
 '--blocked[Only items carrying a block]' \
-'--invalid[Only items whose frontmatter will not parse]' \
-'--archived[What has been closed, instead of what is open]' \
+'--invalid[Only items whose metadata will not parse]' \
+'--archived[What has been archived, instead of what is open]' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (create)
 _arguments "${_arguments_options[@]}" : \
-'--title=[The item'\''s name, at most 72 characters. \`-\` reads standard input]:TITLE:_default' \
-'--tagline=[One line under the title, at most 80 characters. \`-\` reads standard input]:TAGLINE:_default' \
+'--title=[The item'\''s name, at most 72 characters. Use - for standard input]:TITLE:_default' \
+'--tagline=[One line under the title, at most 80 characters. Use - for standard input]:TAGLINE:_default' \
 '--to=[Open it for another project. Defaults to this one]:PATH:_files' \
-'--body=[Body to write, instead of leaving the file for you to fill in. \`-\` reads standard input]:BODY:_default' \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--body=[Body to write, instead of leaving the file for you to fill in. Use - for standard input]:BODY:_default' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '--allow-missing[Allow a target directory that does not exist yet]' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
-'-h[Print help (see more with '\''--help'\'')]' \
-'--help[Print help (see more with '\''--help'\'')]' \
-':kind -- Which rung to open at:(handoff relay spec)' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':kind -- Which kind to open at:(handoff relay spec)' \
 && ret=0
 ;;
 (show)
 _arguments "${_arguments_options[@]}" : \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
-'-h[Print help (see more with '\''--help'\'')]' \
-'--help[Print help (see more with '\''--help'\'')]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help]' \
+'--help[Print help]' \
 ':id -- Four-character item id, as printed by any listing:_default' \
 && ret=0
 ;;
 (path)
 _arguments "${_arguments_options[@]}" : \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 ':id -- Four-character item id, as printed by any listing:_default' \
@@ -126,21 +114,19 @@ json\:"Machine-readable, for scripting"))' \
 ;;
 (set)
 _arguments "${_arguments_options[@]}" : \
-'--title=[Replace the title. \`-\` reads standard input]:TITLE:_default' \
-'--tagline=[Replace the tagline. \`-\` reads standard input]:TAGLINE:_default' \
-'(--clear-blocked)--blocked=[Record what must clear before this item can move, in one line. \`-\` reads standard input]:BLOCKED:_default' \
+'--title=[Replace the title. Use - for standard input]:TITLE:_default' \
+'--tagline=[Replace the tagline. Use - for standard input]:TAGLINE:_default' \
+'(--clear-blocked)--blocked=[Record what must clear before this item can move, in one line. Use - for standard input]:BLOCKED:_default' \
 '*--tags=[Replace the tags wholesale]:TAGS:_default' \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '--clear-blocked[Drop the block]' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
-'-h[Print help (see more with '\''--help'\'')]' \
-'--help[Print help (see more with '\''--help'\'')]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help]' \
+'--help[Print help]' \
 ':id -- Four-character item id, as printed by any listing:_default' \
 && ret=0
 ;;
@@ -150,141 +136,121 @@ _arguments "${_arguments_options[@]}" : \
 '--before=[Move it directly ahead of this item]:ID:_default' \
 '--after=[Move it directly behind this item]:ID:_default' \
 '(--top --bottom --position --before --after)*--sequence=[Reorder in bulk. Listed items move to the front in this order]:SEQUENCE:_default' \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '--top[Move it to the front]' \
 '--bottom[Move it to the back]' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
-'-h[Print help (see more with '\''--help'\'')]' \
-'--help[Print help (see more with '\''--help'\'')]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help]' \
+'--help[Print help]' \
 '::id -- Four-character item id. Omit only with --sequence:_default' \
 && ret=0
 ;;
 (promote)
 _arguments "${_arguments_options[@]}" : \
-'--to=[Jump to a rung instead of advancing one step]:TO:(handoff relay spec)' \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--to=[Jump to a kind instead of advancing one step]:TO:(handoff relay spec)' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
-'-h[Print help (see more with '\''--help'\'')]' \
-'--help[Print help (see more with '\''--help'\'')]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help]' \
+'--help[Print help]' \
 ':id -- Four-character item id, as printed by any listing:_default' \
 && ret=0
 ;;
 (relay)
 _arguments "${_arguments_options[@]}" : \
-'--title=[Title of the successor. \`-\` reads standard input]:TITLE:_default' \
-'--tagline=[Tagline of the successor. \`-\` reads standard input]:TAGLINE:_default' \
-'--body=[Body of the successor. \`-\` reads standard input]:BODY:_default' \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--title=[Title of the successor. Use - for standard input]:TITLE:_default' \
+'--tagline=[Tagline of the successor. Use - for standard input]:TAGLINE:_default' \
+'--body=[Body of the successor. Use - for standard input]:BODY:_default' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
-'-h[Print help (see more with '\''--help'\'')]' \
-'--help[Print help (see more with '\''--help'\'')]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help]' \
+'--help[Print help]' \
 ':id -- The relay being consumed:_default' \
 && ret=0
 ;;
-(close)
+(archive)
 _arguments "${_arguments_options[@]}" : \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
-'-h[Print help (see more with '\''--help'\'')]' \
-'--help[Print help (see more with '\''--help'\'')]' \
-':id -- Four-character item id, as printed by any listing:_default' \
-&& ret=0
-;;
-(delete)
-_arguments "${_arguments_options[@]}" : \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
-'-f[Skip the confirmation]' \
-'--force[Skip the confirmation]' \
-'(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
-'-h[Print help (see more with '\''--help'\'')]' \
-'--help[Print help (see more with '\''--help'\'')]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help]' \
+'--help[Print help]' \
 ':id -- Four-character item id, as printed by any listing:_default' \
 && ret=0
 ;;
 (doctor)
 _arguments "${_arguments_options[@]}" : \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
-'-h[Print help (see more with '\''--help'\'')]' \
-'--help[Print help (see more with '\''--help'\'')]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help]' \
+'--help[Print help]' \
 && ret=0
 ;;
 (announce)
 _arguments "${_arguments_options[@]}" : \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '--hook[Emit Claude Code SessionStart hook JSON]' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
-'-h[Print help (see more with '\''--help'\'')]' \
-'--help[Print help (see more with '\''--help'\'')]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help]' \
+'--help[Print help]' \
 && ret=0
 ;;
 (help)
 _arguments "${_arguments_options[@]}" : \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
-'-h[Print help (see more with '\''--help'\'')]' \
-'--help[Print help (see more with '\''--help'\'')]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help]' \
+'--help[Print help]' \
 '::topic -- A topic, or a command name:_default' \
+&& ret=0
+;;
+(guide)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
+'(--format)--json[Shorthand for --format json]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'*::topics -- Any of handoff, relay, spec. Omit for orientation alone:_default' \
 && ret=0
 ;;
 (completions)
 _arguments "${_arguments_options[@]}" : \
-'--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
-agent\:"Unaligned, uncoloured lines with a stable field order"
-json\:"Machine-readable, for scripting"))' \
-'--color=[When to colour. Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
-'--project=[Act on this project'\''s docket instead of the one for the working directory]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
 '(--format)--json[Shorthand for --format json]' \
-'-q[Print only what was asked for, with no confirmations]' \
-'--quiet[Print only what was asked for, with no confirmations]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
 ':shell -- Shell to generate for:(bash elvish fish powershell zsh)' \
@@ -300,18 +266,18 @@ _docket_commands() {
     local commands; commands=(
 'list:List outstanding items' \
 'ls:List outstanding items' \
-'create:Open a new item and print where to write its body' \
+'create:New docket item; returns path' \
 'show:Print an item'\''s body' \
 'path:Print an item'\''s file path, for writing or editing its body' \
-'set:Change an item'\''s descriptive metadata' \
-'reorder:Change where an item sits in the order' \
-'promote:Advance an item one rung along the ladder' \
-'relay:Consume a relay\: open its successor and archive it' \
-'close:Archive an item whose work is done' \
-'delete:Remove an item outright, leaving no archive copy' \
-'doctor:Check the depot for damage' \
-'announce:Emit the session-start announcement' \
+'set:Edit docket item metadata' \
+'reorder:Change order of docket items' \
+'promote:Advance docket item kind' \
+'relay:Replace relay with successor' \
+'archive:Archive a docket item whose work is done' \
+'doctor:Report invalid metadata for fixing' \
+'announce:Emit banner of outstanding work, if any' \
 'help:Explain a topic, or a command' \
+'guide:Doctrine\: what to write, and when. Name kinds to append their guidance' \
 'completions:Print a shell completion script' \
     )
     _describe -t commands 'docket commands' commands "$@"
@@ -321,10 +287,10 @@ _docket__subcmd__announce_commands() {
     local commands; commands=()
     _describe -t commands 'docket announce commands' commands "$@"
 }
-(( $+functions[_docket__subcmd__close_commands] )) ||
-_docket__subcmd__close_commands() {
+(( $+functions[_docket__subcmd__archive_commands] )) ||
+_docket__subcmd__archive_commands() {
     local commands; commands=()
-    _describe -t commands 'docket close commands' commands "$@"
+    _describe -t commands 'docket archive commands' commands "$@"
 }
 (( $+functions[_docket__subcmd__completions_commands] )) ||
 _docket__subcmd__completions_commands() {
@@ -336,15 +302,15 @@ _docket__subcmd__create_commands() {
     local commands; commands=()
     _describe -t commands 'docket create commands' commands "$@"
 }
-(( $+functions[_docket__subcmd__delete_commands] )) ||
-_docket__subcmd__delete_commands() {
-    local commands; commands=()
-    _describe -t commands 'docket delete commands' commands "$@"
-}
 (( $+functions[_docket__subcmd__doctor_commands] )) ||
 _docket__subcmd__doctor_commands() {
     local commands; commands=()
     _describe -t commands 'docket doctor commands' commands "$@"
+}
+(( $+functions[_docket__subcmd__guide_commands] )) ||
+_docket__subcmd__guide_commands() {
+    local commands; commands=()
+    _describe -t commands 'docket guide commands' commands "$@"
 }
 (( $+functions[_docket__subcmd__help_commands] )) ||
 _docket__subcmd__help_commands() {

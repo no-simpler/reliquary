@@ -143,10 +143,6 @@ impl Record {
     pub fn order(&self) -> i64 {
         self.item.as_ref().map(|i| i.order).unwrap_or(i64::MAX)
     }
-
-    pub fn title(&self) -> &str {
-        self.item.as_ref().map(|i| i.title.as_str()).unwrap_or("")
-    }
 }
 
 pub struct Depot {
@@ -259,7 +255,7 @@ impl Depot {
                 }
             }
         }
-        bail!("no item with id {id}. Run `docket list --all` to see every open item")
+        bail!("no item with id {id}. Run docket list --all to see every open item")
     }
 
     /// Unique across every project and every archive, so an id is never reused
@@ -357,19 +353,6 @@ impl Depot {
         }
         fs::rename(&source, &target).with_context(|| format!("archiving {}", source.display()))?;
         Ok(target)
-    }
-
-    pub fn delete(&self, record: &Record) -> Result<()> {
-        let _guard = self.lock(&record.project)?;
-        let target = match record.kind {
-            Kind::Spec => record
-                .path
-                .parent()
-                .ok_or_else(|| anyhow!("spec has no directory"))?
-                .to_owned(),
-            _ => record.path.clone(),
-        };
-        remove_item(&target)
     }
 
     pub fn next_order(&self, project: &Path) -> i64 {
@@ -489,7 +472,7 @@ pub fn split(text: &str) -> Result<(&str, &str)> {
     let rest = text
         .strip_prefix("---\n")
         .or_else(|| text.strip_prefix("---\r\n"))
-        .ok_or_else(|| anyhow!("no frontmatter: the file must open with a `---` line"))?;
+        .ok_or_else(|| anyhow!("no metadata: the file must open with a --- line"))?;
 
     let mut offset = 0;
     for line in rest.split_inclusive('\n') {
@@ -498,7 +481,7 @@ pub fn split(text: &str) -> Result<(&str, &str)> {
         }
         offset += line.len();
     }
-    bail!("unterminated frontmatter: no closing `---` line")
+    bail!("unterminated metadata: no closing --- line")
 }
 
 pub fn load(path: &Path) -> Result<Item> {

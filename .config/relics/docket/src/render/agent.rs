@@ -1,10 +1,10 @@
 use anyhow::Result;
 
-use super::{View, kind_badge};
-use crate::ui::age;
+use super::{View, aligned, row};
 
-/// Unaligned and uncoloured: padding buys nothing when the reader is a model,
-/// and every column of whitespace is paid for twice, once written and once read.
+/// Aligned and uncoloured. Padding is worth its bytes here because it is what
+/// lets a reader — model or person — scan one column instead of parsing every
+/// line, and the unbounded title column is never padded.
 pub fn list(view: &View<'_>) -> Result<()> {
     println!("docket {}", view.project.display());
     if view.records.is_empty() {
@@ -12,32 +12,20 @@ pub fn list(view: &View<'_>) -> Result<()> {
         return Ok(());
     }
 
-    for (index, record) in view.records.iter().enumerate() {
-        match &record.item {
-            Ok(item) => {
-                let blocked = if item.is_blocked() { " blocked" } else { "" };
-                println!(
-                    "{} {} {} {}{} {}",
-                    index + 1,
-                    record.id,
-                    kind_badge(item),
-                    age(item.created),
-                    blocked,
-                    item.title
-                );
-                println!("    {}", item.tagline.trim());
-                if let Some(reason) = item
-                    .blocked
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|r| !r.is_empty())
-                {
-                    println!("    blocked: {reason}");
-                }
-            }
-            Err(error) => {
-                println!("! {} INVALID {}", record.id, error);
-                println!("    {}", record.path.display());
+    let rows: Vec<_> = view
+        .records
+        .iter()
+        .enumerate()
+        .map(|(index, record)| row(index + 1, record))
+        .collect();
+    let (lines, head) = aligned(&rows, "");
+    let pad = " ".repeat(head);
+
+    for (line, row) in lines.iter().zip(&rows) {
+        println!("{line}");
+        for note in std::iter::once(&row.tagline).chain(&row.notes) {
+            if !note.is_empty() {
+                println!("{pad}{note}");
             }
         }
     }

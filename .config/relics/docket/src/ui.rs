@@ -4,11 +4,8 @@ use clap::ValueEnum;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, ValueEnum)]
 pub enum Format {
-    /// Aligned, coloured table. The default when a person is watching.
     Human,
-    /// Unaligned, uncoloured lines with a stable field order.
     Agent,
-    /// Machine-readable, for scripting.
     Json,
 }
 

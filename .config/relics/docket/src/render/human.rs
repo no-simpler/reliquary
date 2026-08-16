@@ -35,7 +35,7 @@ pub fn list(view: &View<'_>) -> Result<()> {
     table
         .load_style(UTF8_HORIZONTAL_ONLY)
         .set_content_arrangement(ContentArrangement::Dynamic)
-        .set_header(vec!["#", "ID", "KIND", "AGE", "TITLE", "DETAIL"]);
+        .set_header(vec!["#", "ID", "KIND", "AGE", "TITLE", "TAGLINE"]);
 
     // The display bound is the stored bound: a title and a tagline that pass
     // validation each occupy one row, and only a narrow terminal wraps them.

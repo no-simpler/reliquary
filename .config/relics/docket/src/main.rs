@@ -1,6 +1,7 @@
 mod cli;
 mod cmd;
 mod field;
+mod guide;
 mod help;
 mod id;
 mod item;
@@ -34,6 +35,9 @@ fn run(cli: Cli) -> anyhow::Result<bool> {
         Some(Command::Help(args)) => {
             return cmd::help_topic(args, &mut Cli::command()).map(|()| true);
         }
+        Some(Command::Guide(args)) => {
+            return cmd::guide_topic(args).map(|()| true);
+        }
         _ => {}
     }
 
@@ -48,11 +52,12 @@ fn run(cli: Cli) -> anyhow::Result<bool> {
         Some(Command::Reorder(args)) => cmd::reorder(&ctx, args)?,
         Some(Command::Promote(args)) => cmd::promote(&ctx, args)?,
         Some(Command::Relay(args)) => cmd::relay(&ctx, args)?,
-        Some(Command::Close(args)) => cmd::close(&ctx, args)?,
-        Some(Command::Delete(args)) => cmd::delete(&ctx, args)?,
+        Some(Command::Archive(args)) => cmd::archive(&ctx, args)?,
         Some(Command::Announce(args)) => cmd::announce(&ctx, args)?,
         Some(Command::Doctor) => return cmd::doctor(&ctx),
-        Some(Command::Completions(_) | Command::Help(_)) => unreachable!("handled above"),
+        Some(Command::Completions(_) | Command::Help(_) | Command::Guide(_)) => {
+            unreachable!("handled above")
+        }
     }
     Ok(true)
 }

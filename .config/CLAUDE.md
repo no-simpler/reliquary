@@ -150,11 +150,12 @@ and to the resolved working directory outside a repository. Ids are four charact
 across the machine, so one resolves from any directory.
 
 A `SessionStart` hook in `~/.claude/settings.json` runs `docket announce --hook`, which is silent
-when nothing is outstanding. Workflow directives live in the skill at `~/.claude/skills/docket/`.
+when nothing is outstanding. The skill at `~/.claude/skills/docket/` is a trigger stub, and its
+`description` is the only channel that reaches an agent without a tool call.
 
-**The binary is the single source of truth for its own surface** — `docket --help`, and
-`docket help ladder|metadata|keys|agent`. Do not restate its usage here or anywhere else; the
-relic's `CLAUDE.md` records why.
+**The binary is the single source of truth for its own surface** — reference in `docket --help` and
+`docket help`, doctrine in `docket guide`. Do not restate either here or anywhere else; the relic's
+`CLAUDE.md` records why.
 
 The four older conventions it supersedes are still in place and unmigrated: Pillar's
 `.claude/handoffs/` and `.claude/specs/`, the `bb`/`halo` depot inboxes under

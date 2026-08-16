@@ -5,52 +5,15 @@ use clap::{Args, Parser, Subcommand};
 use crate::item::Kind;
 use crate::ui::{ColorChoice, Format};
 
-pub const ROOT_LONG_ABOUT: &str = "\
-Outstanding agentic work for one project, kept out of the project itself.
-
-A docket item is a handoff, a relay, or a spec, and promotion runs one way:
-
-    handoff ──▶ relay ──▶ spec:design ──▶ spec:implementation
-       └────────────────▶
-
-A handoff is read once and closed. A relay is read and owes a successor, so a
-chain of sessions can plan one step at a time. A spec is a multi-session
-initiative that designs first and implements second.
-
-Items live under ~/.claude/docket, grouped by project, and never inside the
-project itself — so they can be written for a directory that does not exist
-yet, and they never reach a commit. They are transient by design: write one,
-act on it, close it. Ids are four characters and unique across every project on
-this machine, so `docket show <id>` works from anywhere.";
-
 pub const ROOT_AFTER_LONG_HELP: &str = "\
-Commands by purpose:
-
-  inspect   docket (bare), list, show, path
-  create    create, relay
-  advance   promote, set, reorder, close, delete
-  maintain  doctor, announce, completions, help
-
-Topics:
-
-  docket help ladder     the three kinds and every promotion between them
-  docket help metadata   the frontmatter schema, kind by kind
-  docket help keys       how a project directory becomes a docket
-  docket help agent      writing an item body, and output modes
-
-Getting started:
-
-  docket                                     what is outstanding here
-  docket create handoff --title '...' --tagline '...'
-  docket show b71c                           read one
-  docket close b71c                          done with it";
+docket guide handoff|relay|spec = doctrine
+docket help ladder|metadata = reference topics";
 
 #[derive(Parser)]
 #[command(
     name = "docket",
     version,
-    about = "Outstanding agentic work, per project, bridging sessions.",
-    long_about = ROOT_LONG_ABOUT,
+    about = "Outstanding agentic work per project, kept out of the project itself.",
     after_long_help = ROOT_AFTER_LONG_HELP,
     disable_help_subcommand = true,
     infer_subcommands = true
@@ -65,8 +28,7 @@ pub struct Cli {
 
 #[derive(Args)]
 pub struct Global {
-    /// Output shape. Defaults to human at a terminal and agent everywhere else,
-    /// including under Claude Code.
+    /// Defaults to agent under Claude Code or off a terminal, human otherwise.
     #[arg(long, global = true, value_enum)]
     pub format: Option<Format>,
 
@@ -74,16 +36,15 @@ pub struct Global {
     #[arg(long, global = true, conflicts_with = "format")]
     pub json: bool,
 
-    /// When to colour. Honours NO_COLOR and CLICOLOR_FORCE.
+    /// Honours NO_COLOR and CLICOLOR_FORCE.
     #[arg(long, global = true, value_enum, default_value = "auto")]
     pub color: ColorChoice,
 
-    /// Act on this project's docket instead of the one for the working
-    /// directory.
+    /// Act on another project's docket.
     #[arg(long, global = true, value_name = "PATH")]
     pub project: Option<PathBuf>,
 
-    /// Print only what was asked for, with no confirmations.
+    /// Print only what was asked for.
     #[arg(short, long, global = true)]
     pub quiet: bool,
 }
@@ -99,33 +60,12 @@ Examples:
   docket list                    this project, open items
   docket list --all              every project on this machine
   docket list --kind spec        specs only
-  docket list --invalid          only items whose frontmatter will not parse
-  docket list --archived         what has been closed here"
+  docket list --invalid          only items whose metadata will not parse
+  docket list --archived         what has been archived here"
     )]
     List(ListArgs),
 
-    /// Open a new item and print where to write its body.
-    #[command(
-        long_about = "\
-Opens an item and prints its id and the file to write the body into. The CLI
-owns placement and metadata; the body is ordinary Markdown you write with your
-editor or your file tools.
-
-Title and tagline are both required, and both are one line: the title names the
-item in at most 72 characters, and the tagline says in at most 80 whether this
-is the thing a session came for. Neither is the place for detail — that is what
-the body is for. Either may be `-` to read from standard input.",
-        after_long_help = "\
-Examples:
-
-  docket create handoff --title 'Settle the Postgres intent' \\
-      --tagline 'Two candidate intents, neither committed to.'
-
-  docket create spec --title 'Rosetta messenger integration' --tagline -
-
-  docket create handoff --title '...' --tagline '...' \\
-      --to ~/Developer/new-thing --allow-missing"
-    )]
+    /// New docket item; returns path.
     Create(CreateArgs),
 
     /// Print an item's body.
@@ -138,110 +78,32 @@ Example:
   docket path b71c            /Users/you/.claude/docket/<project>/handoffs/b71c-....md")]
     Path(IdArgs),
 
-    /// Change an item's descriptive metadata.
-    #[command(
-        long_about = "\
-Rewrites frontmatter in canonical order, which also repairs an item whose
-frontmatter was hand-edited into something that no longer parses. A value too
-long to accept is cut to fit rather than refused, so a damaged item is always
-recoverable.
-
-Use `promote` to change kind or spec stage; this command never moves an item
-along the ladder.",
-        after_long_help = "\
-Examples:
-
-  docket set b71c --title 'Settle what the connection is for'
-  docket set b71c --tagline 'Two candidate intents, neither committed to.'
-  docket set b71c --blocked 'Awaiting the upstream fix in rvben/rumdl#812.'
-  docket set b71c --clear-blocked
-  docket set b71c --tags ci,postgres"
-    )]
+    /// Edit docket item metadata.
     Set(SetArgs),
 
-    /// Change where an item sits in the order.
-    #[command(
-        long_about = "\
-Position is what a person reorders by: it is the number in the first column of
-a listing, counting from one.
-
-Give an item and one placement, or give --sequence to reorder in bulk. Items
-named in --sequence move to the front in the order given; everything else keeps
-its relative order behind them.",
-        after_long_help = "\
-Examples:
-
-  docket reorder b71c --top
-  docket reorder b71c --position 2
-  docket reorder b71c --after a3f9
-  docket reorder --sequence k7m2,b71c,a3f9"
-    )]
+    /// Change order of docket items.
     Reorder(ReorderArgs),
 
-    /// Advance an item one rung along the ladder.
-    #[command(
-        long_about = "\
-Promotion runs forward only:
-
-    handoff ──▶ relay ──▶ spec:design ──▶ spec:implementation
-       └────────────────▶
-
-With no flag, an item advances one step — including a spec moving from design
-to implementation. Use --to spec on a handoff when the relay rung is not the
-right intermediate step.
-
-Promotion is additive: every field an item already carries survives, so a spec
-reached through a relay keeps its whole chain provenance.",
-        after_long_help = "\
-Examples:
-
-  docket promote b71c              one rung
-  docket promote b71c --to spec    straight to a spec, skipping the relay rung"
-    )]
+    /// Advance docket item kind.
     Promote(PromoteArgs),
 
-    /// Consume a relay: open its successor and archive it.
-    #[command(
-        long_about = "\
-A relay owes a successor. This mints it — same chain, next hop, superseding the
-item it came from — and archives the predecessor in one step, so a chain can
-never end by accident or double up.
-
-Only a relay can be relayed. Promote a handoff first.",
-        after_long_help = "\
-Example:
-
-  docket relay a3f9 --title 'Wave 2: migrate the remaining suites' \\
-      --tagline 'Wave 1 landed green. Xdebug is wired; the fixtures are not.'"
-    )]
+    /// Replace relay with successor.
     Relay(RelayArgs),
 
-    /// Archive an item whose work is done.
-    Close(IdArgs),
+    /// Archive a docket item whose work is done.
+    Archive(IdArgs),
 
-    /// Remove an item outright, leaving no archive copy.
-    #[command(after_long_help = "\
-Prefer `close`, which archives. This is for an item opened by mistake.")]
-    Delete(DeleteArgs),
-
-    /// Check the depot for damage.
-    #[command(long_about = "\
-Reports items whose frontmatter will not parse, items whose recorded project no
-longer matches where they sit, stale items, and whether the session-start
-announcement is wired up.
-
-Read-only. Nothing here changes the depot.")]
+    /// Report invalid metadata for fixing.
     Doctor,
 
-    /// Emit the session-start announcement.
-    #[command(long_about = "\
-Prints the outstanding work for the working directory's project. With --hook it
-emits the JSON a Claude Code SessionStart hook consumes, stays silent when
-nothing is outstanding, and always exits zero.")]
+    /// Emit banner of outstanding work, if any.
     Announce(AnnounceArgs),
 
     /// Explain a topic, or a command.
     Help(HelpArgs),
+
+    /// Doctrine: what to write, and when. Name kinds to append their guidance.
+    Guide(GuideArgs),
 
     /// Print a shell completion script.
     #[command(after_long_help = "\
@@ -266,26 +128,26 @@ pub struct ListArgs {
     #[arg(long)]
     pub blocked: bool,
 
-    /// Only items whose frontmatter will not parse.
+    /// Only items whose metadata will not parse.
     #[arg(long)]
     pub invalid: bool,
 
-    /// What has been closed, instead of what is open.
+    /// What has been archived, instead of what is open.
     #[arg(long)]
     pub archived: bool,
 }
 
 #[derive(Args)]
 pub struct CreateArgs {
-    /// Which rung to open at.
+    /// Which kind to open at.
     #[arg(value_enum)]
     pub kind: Kind,
 
-    /// The item's name, at most 72 characters. `-` reads standard input.
+    /// The item's name, at most 72 characters. Use - for standard input.
     #[arg(long)]
     pub title: String,
 
-    /// One line under the title, at most 80 characters. `-` reads standard
+    /// One line under the title, at most 80 characters. Use - for standard
     /// input.
     #[arg(long)]
     pub tagline: String,
@@ -298,8 +160,8 @@ pub struct CreateArgs {
     #[arg(long)]
     pub allow_missing: bool,
 
-    /// Body to write, instead of leaving the file for you to fill in. `-`
-    /// reads standard input.
+    /// Body to write, instead of leaving the file for you to fill in. Use -
+    /// for standard input.
     #[arg(long)]
     pub body: Option<String>,
 }
@@ -311,30 +173,20 @@ pub struct IdArgs {
 }
 
 #[derive(Args)]
-pub struct DeleteArgs {
-    /// Four-character item id, as printed by any listing.
-    pub id: String,
-
-    /// Skip the confirmation.
-    #[arg(short, long)]
-    pub force: bool,
-}
-
-#[derive(Args)]
 pub struct SetArgs {
     /// Four-character item id, as printed by any listing.
     pub id: String,
 
-    /// Replace the title. `-` reads standard input.
+    /// Replace the title. Use - for standard input.
     #[arg(long)]
     pub title: Option<String>,
 
-    /// Replace the tagline. `-` reads standard input.
+    /// Replace the tagline. Use - for standard input.
     #[arg(long)]
     pub tagline: Option<String>,
 
-    /// Record what must clear before this item can move, in one line. `-` reads
-    /// standard input.
+    /// Record what must clear before this item can move, in one line. Use -
+    /// for standard input.
     #[arg(long, conflicts_with = "clear_blocked")]
     pub blocked: Option<String>,
 
@@ -383,7 +235,7 @@ pub struct PromoteArgs {
     /// Four-character item id, as printed by any listing.
     pub id: String,
 
-    /// Jump to a rung instead of advancing one step.
+    /// Jump to a kind instead of advancing one step.
     #[arg(long, value_enum)]
     pub to: Option<Kind>,
 }
@@ -393,15 +245,15 @@ pub struct RelayArgs {
     /// The relay being consumed.
     pub id: String,
 
-    /// Title of the successor. `-` reads standard input.
+    /// Title of the successor. Use - for standard input.
     #[arg(long)]
     pub title: String,
 
-    /// Tagline of the successor. `-` reads standard input.
+    /// Tagline of the successor. Use - for standard input.
     #[arg(long)]
     pub tagline: String,
 
-    /// Body of the successor. `-` reads standard input.
+    /// Body of the successor. Use - for standard input.
     #[arg(long)]
     pub body: Option<String>,
 }
@@ -417,6 +269,12 @@ pub struct AnnounceArgs {
 pub struct HelpArgs {
     /// A topic, or a command name.
     pub topic: Option<String>,
+}
+
+#[derive(Args)]
+pub struct GuideArgs {
+    /// Any of handoff, relay, spec. Omit for orientation alone.
+    pub topics: Vec<String>,
 }
 
 #[derive(Args)]

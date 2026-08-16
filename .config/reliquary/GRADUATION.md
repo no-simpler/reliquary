@@ -77,6 +77,27 @@ entrypoints/blab -> ../src/blab.py     # `which blab` → ~/.local/bin/blab
 
 Multi-entrypoint relics just drop more files into `entrypoints/`.
 
+### Doctrine belongs to the binary
+
+A relic that **agents operate** owns its own doctrine — not just its usage.
+Reference (flags, contracts, schemas) goes in `--help`; doctrine (what the thing
+is for, when to reach for which shape) goes in a `guide` namespace in the same
+binary. Nothing that teaches the tool lives in a file the binary does not ship.
+
+The machine-wide skill at `~/.claude/skills/<name>/` is then a **trigger stub**:
+its `description` is the only channel that reaches an agent's context without a
+tool call, and its body is two sentences pointing at `<name> guide`. That split
+is what `AGENTIC-TOOLING.md` already demands of third-party tools ("one line
+stating the tool exists"), and it holds for in-house relics for two further
+reasons — a skill is a Claude Code artifact while the binary is harness-agnostic,
+and Stage-3 graduation moves the binary to its own repository and would otherwise
+strand the prose behind in Reliquary.
+
+Keep both namespaces at the floor of what an agent needs to act correctly; prose
+that will not fit belongs to a different owner, not to a longer page. `docket` is
+the reference implementation: `docket guide` and `docket help` are disjoint, and
+`src/guide.rs` sits beside `src/help.rs` so the two never blur.
+
 ## Shared library: `~/.config/reliquary/lib/relic.sh`
 
 Thin defaults so most relics need zero `scripts/` overrides.

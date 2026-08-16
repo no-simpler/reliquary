@@ -146,8 +146,8 @@ impl Item {
             (None, _) => match self.next_step() {
                 Some(step) => step,
                 None => bail!(
-                    "{} is already a spec in implementation — the top of the ladder. \
-                     Close it when its work lands: `docket close {}`",
+                    "{} is already a spec in implementation, the top of the ladder. \
+                     Archive it when its work lands: docket archive {}",
                     self.id,
                     self.id
                 ),
@@ -167,7 +167,7 @@ impl Item {
                 rung.kind()
             ),
             (Some(Kind::Spec), Rung::Spec { .. }) => bail!(
-                "{} is already a spec. To advance its stage, drop the flag: `docket promote {}`",
+                "{} is already a spec. To advance its stage, drop the flag: docket promote {}",
                 self.id,
                 self.id
             ),
@@ -201,7 +201,7 @@ impl Item {
     pub fn successor(&self, id: Id, title: String, tagline: String) -> Result<Item> {
         let Rung::Relay(chain) = &self.rung else {
             bail!(
-                "{} is a {}; only a relay owes a successor. Promote it first: `docket promote {}`",
+                "{} is a {}; only a relay owes a successor. Promote it first: docket promote {}",
                 self.id,
                 self.kind(),
                 self.id

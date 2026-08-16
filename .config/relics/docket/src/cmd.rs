@@ -1,10 +1,11 @@
-use std::io::{IsTerminal, Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
 use crate::cli::*;
 use crate::field;
+use crate::guide;
 use crate::help;
 use crate::id::Id;
 use jiff::Timestamp;
@@ -43,16 +44,6 @@ fn text(value: &str) -> Result<String> {
 
 fn parse_id(raw: &str) -> Result<Id> {
     raw.parse()
-}
-
-fn tilde(path: &Path) -> String {
-    let display = path.display().to_string();
-    match std::env::var("HOME") {
-        Ok(home) if !home.is_empty() && display.starts_with(&home) => {
-            format!("~{}", &display[home.len()..])
-        }
-        _ => display,
-    }
 }
 
 pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
@@ -98,7 +89,7 @@ pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
     if !target.exists() && !args.allow_missing {
         bail!(
             "{} does not exist. If you are about to create it, say so: \
-             `docket create {} --to {} --allow-missing ...`",
+             docket create {} --to {} --allow-missing ...",
             target.display(),
             args.kind,
             target.display()
@@ -156,7 +147,7 @@ fn report_created(ctx: &Ctx, item: &Item, path: &Path, empty: bool) {
     }
     println!("{}\t{}", item.id, path.display());
     if empty {
-        ctx.note("write the body at that path; the frontmatter above it belongs to docket");
+        ctx.note("write the body at that path; the metadata above it belongs to docket");
     }
 }
 
@@ -205,7 +196,7 @@ pub fn set(ctx: &Ctx, args: &SetArgs) -> Result<()> {
         let value = text(value)?;
         if value.trim().is_empty() {
             bail!(
-                "--blocked says what must clear. To drop the block: `docket set {id} --clear-blocked`",
+                "--blocked says what must clear. To drop the block: docket set {id} --clear-blocked",
                 id = record.id
             );
         }
@@ -277,7 +268,7 @@ fn recover(record: &Record) -> Result<Item> {
         tagline: get("tagline")
             .or_else(|| get("description"))
             .map(|t| field::clamp(&t, field::TAGLINE_MAX))
-            .unwrap_or_else(|| "Recovered from damaged frontmatter.".to_owned()),
+            .unwrap_or_else(|| "Recovered from damaged metadata.".to_owned()),
         project: record.project.clone(),
         created: stamp("created"),
         updated: now,
@@ -373,7 +364,7 @@ pub fn promote(ctx: &Ctx, args: &PromoteArgs) -> Result<()> {
         .as_ref()
         .map_err(|error| {
             anyhow!(
-                "{} will not parse ({error}), so it cannot be promoted. Repair it first: `docket set {}`",
+                "{} will not parse ({error}), so it cannot be promoted. Repair it first: docket set {}",
                 record.id,
                 record.id
             )
@@ -395,16 +386,13 @@ pub fn promote(ctx: &Ctx, args: &PromoteArgs) -> Result<()> {
 
 pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
     let record = ctx.depot.find(parse_id(&args.id)?)?;
-    let item = record
-        .item
-        .as_ref()
-        .map_err(|error| {
-            anyhow!(
-                "{} will not parse ({error}), so it cannot be relayed. Repair it first: `docket set {}`",
-                record.id,
-                record.id
-            )
-        })?;
+    let item = record.item.as_ref().map_err(|error| {
+        anyhow!(
+            "{} will not parse ({error}), so it cannot be relayed. Repair it first: docket set {}",
+            record.id,
+            record.id
+        )
+    })?;
 
     let title = field::one_line("--title", &text(&args.title)?, field::TITLE_MAX)?;
     let tagline = field::one_line("--tagline", &text(&args.tagline)?, field::TAGLINE_MAX)?;
@@ -430,37 +418,16 @@ pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
     Ok(())
 }
 
-pub fn close(ctx: &Ctx, args: &IdArgs) -> Result<()> {
+pub fn archive(ctx: &Ctx, args: &IdArgs) -> Result<()> {
     let record = ctx.depot.find(parse_id(&args.id)?)?;
     let archived = ctx.depot.archive(&record)?;
-    ctx.note(&format!("{} closed", record.id));
+    ctx.note(&format!("{} archived", record.id));
     if ctx.format == Format::Json {
         println!(
             "{}",
             serde_json::json!({ "id": record.id.to_string(), "archived": archived })
         );
     }
-    Ok(())
-}
-
-pub fn delete(ctx: &Ctx, args: &DeleteArgs) -> Result<()> {
-    let record = ctx.depot.find(parse_id(&args.id)?)?;
-    if !args.force && std::io::stdin().is_terminal() {
-        eprint!(
-            "delete {} ({}) with no archive copy? [y/N] ",
-            record.id,
-            record.title()
-        );
-        std::io::stderr().flush()?;
-        let mut answer = String::new();
-        std::io::stdin().read_line(&mut answer)?;
-        if !matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-            ctx.note("left alone");
-            return Ok(());
-        }
-    }
-    ctx.depot.delete(&record)?;
-    ctx.note(&format!("{} deleted", record.id));
     Ok(())
 }
 
@@ -475,7 +442,7 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
         for record in ctx.depot.list(&project, false) {
             match &record.item {
                 Err(error) => report(format!(
-                    "invalid  {} {}\n         {error}\n         repair: `docket set {}`",
+                    "invalid  {} {}\n         {error}\n         repair: docket set {}",
                     record.id,
                     record.path.display(),
                     record.id
@@ -509,7 +476,7 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
                         if field::is_overlong(value, max) {
                             report(format!(
                                 "overlong {} has a {} of {} characters, over the limit of {max}\n         \
-                                 repair: `docket set {} --{label} '...'`",
+                                 repair: docket set {} --{label} '...'",
                                 record.id,
                                 label,
                                 value.chars().count(),
@@ -570,58 +537,34 @@ pub fn announce(ctx: &Ctx, args: &AnnounceArgs) -> Result<()> {
         return Ok(());
     }
 
-    let mut lines = Vec::new();
-    let mut specs = Vec::new();
-    let mut invalid = 0usize;
+    let rows: Vec<_> = records
+        .iter()
+        .enumerate()
+        .map(|(index, record)| render::row(index + 1, record))
+        .collect();
+    let (lines, head) = render::aligned(&rows, "  ");
+    let pad = " ".repeat(head);
+    let invalid = records.iter().filter(|r| r.item.is_err()).count();
 
-    for record in &records {
-        match &record.item {
-            Err(_) => invalid += 1,
-            Ok(item) if item.kind() == Kind::Spec => {
-                let stage = match &item.rung {
-                    Rung::Spec { stage, .. } => stage.to_string(),
-                    _ => String::new(),
-                };
-                let blocked = if item.is_blocked() { ", blocked" } else { "" };
-                specs.push(format!("[{}] {} ({stage}{blocked})", item.id, item.title));
-            }
-            Ok(item) => {
-                let mut marks = vec![ui::age(item.created)];
-                if let Rung::Relay(chain) = &item.rung {
-                    marks.push(format!("relay hop={}", chain.hop));
-                }
-                if item.is_blocked() {
-                    marks.push("blocked".to_owned());
-                }
-                lines.push(format!(
-                    "  [{}] {}   {}",
-                    item.id,
-                    item.title,
-                    marks.join("  ")
-                ));
-            }
+    let mut out = format!(
+        "{} on the docket (see: docket):\n",
+        plural(records.len(), "item", "items")
+    );
+    for (line, row) in lines.iter().zip(&rows) {
+        out.push_str(line);
+        out.push('\n');
+        for note in &row.notes {
+            out.push_str(&format!("{pad}{note}\n"));
         }
     }
-
-    let mut out = String::new();
-    if !lines.is_empty() {
-        out.push_str(&format!(
-            "{} on the docket for {} (`docket` to list):\n{}\n",
-            plural(lines.len(), "item", "items"),
-            tilde(&ctx.project),
-            lines.join("\n")
-        ));
-    }
-    if !specs.is_empty() {
-        out.push_str(&format!("Specs: {}\n", specs.join(", ")));
-    }
+    out.push_str("Items ordered, top normally first.\n");
     if invalid > 0 {
         out.push_str(&format!(
-            "{} — run `docket doctor`\n",
+            "{} (see: docket doctor)\n",
             plural(invalid, "invalid item", "invalid items")
         ));
     }
-    out.push_str("Workflow directives: /docket\n");
+    out.push_str("See: docket guide handoff|relay|spec\n");
 
     if args.hook {
         println!(
@@ -668,6 +611,11 @@ pub fn help_topic(args: &HelpArgs, command: &mut clap::Command) -> Result<()> {
         "no topic or command called {name:?}. Topics: {}",
         help::topic_names()
     )
+}
+
+pub fn guide_topic(args: &GuideArgs) -> Result<()> {
+    println!("{}", guide::render(&args.topics)?);
+    Ok(())
 }
 
 pub fn completions(args: &CompletionArgs, command: &mut clap::Command) -> Result<()> {
