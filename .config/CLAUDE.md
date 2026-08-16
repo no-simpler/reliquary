@@ -176,8 +176,8 @@ into one note rather than three.
 
 Nothing announces it. There is **no hook and no skill**: `SessionEnd` is observe-only and cannot
 inject context, `Stop` fires every turn, and a corpus filled reflexively is one nobody reads. The
-sole surface is `~/.claude/commands/modes/midden.md` — `+midden` as a standing directive, or
-`/modes:midden` invoked once at session end.
+sole surface is `~/.claude/commands/modes/feedback.md` — `+feedback` as a standing directive, or
+`/modes:feedback` invoked once at session end.
 
 Size is policed at write time, not only by `gc`: field caps, plus a fingerprint over kind, target and
 claim so a recurrence bumps a counter instead of writing a second file. `midden gc` runs from the

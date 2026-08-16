@@ -13,7 +13,7 @@ comments on the command structs *are* the help text, so there is one copy by
 construction.
 
 There is deliberately no skill. Nothing announces midden ambiently: it is
-reached for through the `+midden` mode, or not at all. A trigger stub would put
+reached for through the `+feedback` mode, or not at all. A trigger stub would put
 it in front of every session, and a corpus filled reflexively is one nobody
 reads.
 

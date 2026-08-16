@@ -1,9 +1,9 @@
 ---
-description: Midden mode
+description: Feedback mode
 disable-model-invocation: true
 ---
 
-# Midden mode
+# Feedback mode
 
 Give user your feedback about this session.
 What agentic directives can be improved, and how?
