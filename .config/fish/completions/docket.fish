@@ -82,8 +82,8 @@ complete -c docket -n "__fish_docket_using_subcommand ls" -l invalid -d 'Only it
 complete -c docket -n "__fish_docket_using_subcommand ls" -l json -d 'Shorthand for --format json'
 complete -c docket -n "__fish_docket_using_subcommand ls" -s q -l quiet -d 'Print only what was asked for'
 complete -c docket -n "__fish_docket_using_subcommand ls" -s h -l help -d 'Print help (see more with \'--help\')'
-complete -c docket -n "__fish_docket_using_subcommand create" -l title -d 'The item\'s name, at most 72 characters. Use - for standard input' -r
-complete -c docket -n "__fish_docket_using_subcommand create" -l tagline -d 'One line under the title, at most 80 characters. Use - for standard input' -r
+complete -c docket -n "__fish_docket_using_subcommand create" -l name -d 'Up to three words of A-Z, 0-9 and underscore, at most 20 characters. Case and separators are normalised, so rosetta-messenger stores as ROSETTA_MESSENGER' -r
+complete -c docket -n "__fish_docket_using_subcommand create" -l tagline -d 'One line under the name, at most 80 characters. Use - for standard input' -r
 complete -c docket -n "__fish_docket_using_subcommand create" -l to -d 'Open it for another project. Defaults to this one' -r -F
 complete -c docket -n "__fish_docket_using_subcommand create" -l body -d 'Body to write, instead of leaving the file for you to fill in. Use - for standard input' -r
 complete -c docket -n "__fish_docket_using_subcommand create" -l format -d 'Defaults to agent under Claude Code or off a terminal, human otherwise' -r -f -a "human\t''
@@ -117,7 +117,7 @@ complete -c docket -n "__fish_docket_using_subcommand path" -l project -d 'Act o
 complete -c docket -n "__fish_docket_using_subcommand path" -l json -d 'Shorthand for --format json'
 complete -c docket -n "__fish_docket_using_subcommand path" -s q -l quiet -d 'Print only what was asked for'
 complete -c docket -n "__fish_docket_using_subcommand path" -s h -l help -d 'Print help (see more with \'--help\')'
-complete -c docket -n "__fish_docket_using_subcommand set" -l title -d 'Replace the title. Use - for standard input' -r
+complete -c docket -n "__fish_docket_using_subcommand set" -l name -d 'Replace the name' -r
 complete -c docket -n "__fish_docket_using_subcommand set" -l tagline -d 'Replace the tagline. Use - for standard input' -r
 complete -c docket -n "__fish_docket_using_subcommand set" -l blocked -d 'Record what must clear before this item can move, in one line. Use - for standard input' -r
 complete -c docket -n "__fish_docket_using_subcommand set" -l tags -d 'Replace the tags wholesale' -r
@@ -161,7 +161,7 @@ complete -c docket -n "__fish_docket_using_subcommand promote" -l project -d 'Ac
 complete -c docket -n "__fish_docket_using_subcommand promote" -l json -d 'Shorthand for --format json'
 complete -c docket -n "__fish_docket_using_subcommand promote" -s q -l quiet -d 'Print only what was asked for'
 complete -c docket -n "__fish_docket_using_subcommand promote" -s h -l help -d 'Print help'
-complete -c docket -n "__fish_docket_using_subcommand relay" -l title -d 'Title of the successor. Use - for standard input' -r
+complete -c docket -n "__fish_docket_using_subcommand relay" -l name -d 'Name of the successor, under the same rules as create' -r
 complete -c docket -n "__fish_docket_using_subcommand relay" -l tagline -d 'Tagline of the successor. Use - for standard input' -r
 complete -c docket -n "__fish_docket_using_subcommand relay" -l body -d 'Body of the successor. Use - for standard input' -r
 complete -c docket -n "__fish_docket_using_subcommand relay" -l format -d 'Defaults to agent under Claude Code or off a terminal, human otherwise' -r -f -a "human\t''

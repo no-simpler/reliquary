@@ -129,13 +129,13 @@ impl Docket {
 
     /// Opens an item with a body, and returns its id and the path `create`
     /// printed for it.
-    fn create(&self, project: &str, kind: &str, title: &str) -> (String, PathBuf) {
-        let body = format!("Body of {title}.\n");
+    fn create(&self, project: &str, kind: &str, name: &str) -> (String, PathBuf) {
+        let body = format!("Body of {name}.\n");
         let run = self.run(&[
             "create",
             kind,
-            "--title",
-            title,
+            "--name",
+            name,
             "--tagline",
             "What a future session reads first.",
             "--body",
@@ -274,21 +274,21 @@ fn creating_each_kind_lands_in_its_own_directory() {
     let docket = Docket::new();
     let project = docket.project("proj");
 
-    let (handoff, handoff_path) = docket.create(&project, "handoff", "Settle the intent");
-    let (relay, relay_path) = docket.create(&project, "relay", "Carry the chain");
-    let (spec, spec_path) = docket.create(&project, "spec", "Rosetta messenger");
+    let (handoff, handoff_path) = docket.create(&project, "handoff", "SETTLE_INTENT");
+    let (relay, relay_path) = docket.create(&project, "relay", "CARRY_CHAIN");
+    let (spec, spec_path) = docket.create(&project, "spec", "ROSETTA_MESSENGER");
 
     assert_eq!(
         tail(&handoff_path, 2),
-        format!("handoffs/{handoff}-settle-the-intent.md")
+        format!("handoffs/{handoff}-SETTLE_INTENT.md")
     );
     assert_eq!(
         tail(&relay_path, 2),
-        format!("relays/{relay}-carry-the-chain.md")
+        format!("relays/{relay}-CARRY_CHAIN.md")
     );
     assert_eq!(
         tail(&spec_path, 3),
-        format!("specs/{spec}-rosetta-messenger/spec.md")
+        format!("specs/{spec}-ROSETTA_MESSENGER/spec.md")
     );
     for path in [&handoff_path, &relay_path, &spec_path] {
         assert!(path.is_file(), "{} was not written", path.display());
@@ -303,8 +303,8 @@ fn creating_for_a_missing_target_demands_allow_missing() {
     let run = docket.run(&[
         "create",
         "handoff",
-        "--title",
-        "Settle the intent",
+        "--name",
+        "SETTLE_INTENT",
         "--tagline",
         "Two candidates, neither committed to.",
         "--to",
@@ -327,15 +327,15 @@ Far past every limit this tool enforces, and written as prose because prose is \
 exactly what does not belong in a field that has to be skimmed in one glance.";
 
 #[test]
-fn creating_rejects_an_empty_or_overlong_title_or_tagline() {
+fn creating_rejects_a_malformed_name_or_an_overlong_tagline() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let create = |title: &str, tagline: &str| {
+    let create = |name: &str, tagline: &str| {
         docket.run(&[
             "create",
             "handoff",
-            "--title",
-            title,
+            "--name",
+            name,
             "--tagline",
             tagline,
             "--project",
@@ -345,30 +345,71 @@ fn creating_rejects_an_empty_or_overlong_title_or_tagline() {
         ])
     };
 
-    for (title, tagline, expected) in [
-        ("   ", "A tagline.", "--title is required"),
-        ("A title", "", "--tagline is required"),
-        (TOO_LONG, "A tagline.", "--title is 156 characters"),
-        ("A title", TOO_LONG, "--tagline is 156 characters"),
+    for (name, tagline, expected) in [
+        ("   ", "A tagline.", "--name is required"),
+        ("A_NAME", "", "--tagline is required"),
+        ("one two three four", "A tagline.", "is 4 words"),
+        ("SOMETHING_RATHER_LONGER", "A tagline.", "the limit is 20"),
+        ("A_NAME.md", "A tagline.", "drop the .md"),
+        (TOO_LONG, "A tagline.", "A-Z, 0-9 and underscore"),
+        ("A_NAME", TOO_LONG, "--tagline is 156 characters"),
     ] {
-        let run = create(title, tagline);
+        let run = create(name, tagline);
         assert!(!run.ok(), "expected a refusal: {}", run.stdout());
         assert!(run.stderr().contains(expected), "{}", run.stderr());
     }
-    assert!(create("A title", "A tagline.").ok());
+    assert!(create("A_NAME", "A tagline.").ok());
+}
+
+#[test]
+fn a_name_is_stored_in_one_spelling_however_it_was_typed() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+
+    for typed in ["dream residue", "dream-residue", "DREAM_RESIDUE"] {
+        let run = docket.run(&[
+            "create",
+            "handoff",
+            "--name",
+            typed,
+            "--tagline",
+            "One spelling, whatever was typed.",
+            "--project",
+            &project,
+            "--allow-missing",
+            "-q",
+        ]);
+        assert!(run.ok(), "create failed: {}", run.stderr());
+        let (id, path) = id_and_path(&run.stdout());
+        assert!(
+            front(&path).contains("name: DREAM_RESIDUE\n"),
+            "{typed:?} stored as {}",
+            front(&path)
+        );
+        assert_eq!(tail(&path, 2), format!("handoffs/{id}-DREAM_RESIDUE.md"));
+        // Only the first is closed, so the rest exercise the duplicate report.
+        if typed == "DREAM_RESIDUE" {
+            let doctor = docket.run(&["doctor"]);
+            assert!(
+                doctor.stdout().contains("repeated DREAM_RESIDUE"),
+                "{}",
+                doctor.stdout()
+            );
+        }
+    }
 }
 
 #[test]
 fn set_and_relay_hold_the_same_limits_as_create() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (handoff, _) = docket.create(&project, "handoff", "A handoff");
-    let (relay, _) = docket.create(&project, "relay", "A relay");
+    let (handoff, _) = docket.create(&project, "handoff", "A_HANDOFF");
+    let (relay, _) = docket.create(&project, "relay", "A_RELAY");
 
     for (flag, value, expected) in [
-        ("--title", TOO_LONG, "--title is 156 characters"),
+        ("--name", TOO_LONG, "A-Z, 0-9 and underscore"),
         ("--tagline", TOO_LONG, "--tagline is 156 characters"),
-        ("--title", "  ", "--title is required"),
+        ("--name", "  ", "--name is required"),
         ("--blocked", "  ", "--clear-blocked"),
         ("--blocked", TOO_LONG, "--blocked is 156 characters"),
     ] {
@@ -380,8 +421,8 @@ fn set_and_relay_hold_the_same_limits_as_create() {
     let run = docket.run(&[
         "relay",
         &relay,
-        "--title",
-        "A successor",
+        "--name",
+        "A_SUCCESSOR",
         "--tagline",
         TOO_LONG,
         "-q",
@@ -404,7 +445,7 @@ fn a_wrapped_tagline_is_stored_as_one_line() {
     let run = docket.run(&[
         "create",
         "handoff",
-        "--title",
+        "--name",
         "A title",
         "--tagline",
         "Two   lines\nof it.",
@@ -426,7 +467,7 @@ fn a_wrapped_tagline_is_stored_as_one_line() {
 fn a_legacy_description_key_loads_and_is_rewritten_as_a_tagline() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, path) = docket.create(&project, "handoff", "A handoff");
+    let (id, path) = docket.create(&project, "handoff", "A_HANDOFF");
 
     let text = fs::read_to_string(&path).expect("reading the item");
     let overlong = format!("description: {}\n", TOO_LONG);
@@ -466,10 +507,97 @@ fn a_legacy_description_key_loads_and_is_rewritten_as_a_tagline() {
 }
 
 #[test]
+fn a_legacy_title_key_loads_and_is_rewritten_as_a_name() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (id, path) = docket.create(&project, "handoff", "A_HANDOFF");
+
+    let text = fs::read_to_string(&path).expect("reading the item");
+    fs::write(
+        &path,
+        text.lines()
+            .map(|line| match line.strip_prefix("name: ") {
+                Some(_) => "title: Migrate the four legacy conventions\n".to_owned(),
+                None => format!("{line}\n"),
+            })
+            .collect::<String>(),
+    )
+    .expect("rewriting the item");
+
+    // Lenient on the way in: the item still parses and still lists.
+    let listed = docket.run(&["list", "--project", &project, "-q"]);
+    assert!(listed.ok(), "list failed: {}", listed.stderr());
+    assert!(listed.stdout().contains(&id), "{}", listed.stdout());
+
+    // Reported on the way past, with the command that fixes it.
+    let doctor = docket.run(&["doctor"]);
+    assert!(!doctor.ok(), "doctor should fail: {}", doctor.stdout());
+    assert!(
+        doctor.stdout().contains("malformed") && doctor.stdout().contains("--name"),
+        "{}",
+        doctor.stdout()
+    );
+
+    let set = docket.run(&["set", &id, "--name", "LEGACY_MIGRATION", "-q"]);
+    assert!(set.ok(), "set failed: {}", set.stderr());
+    let front = front(&path);
+    assert!(front.contains("name: LEGACY_MIGRATION\n"), "{front}");
+    assert!(!front.contains("title:"), "{front}");
+}
+
+#[test]
+fn a_name_resolves_an_item_wherever_an_id_does() {
+    let docket = Docket::new();
+    let alpha = docket.project("alpha");
+    let beta = docket.project("beta");
+    let (id, path) = docket.create(&alpha, "handoff", "ROSETTA");
+
+    // Normalised on the way in, so a name resolves however it was typed.
+    for typed in ["ROSETTA", "rosetta", "Rosetta"] {
+        let located = docket.run(&["path", typed]);
+        assert!(located.ok(), "path {typed} failed: {}", located.stderr());
+        assert_eq!(located.stdout().trim_end(), path.to_str().unwrap());
+    }
+
+    let missing = docket.run(&["show", "NOT_OPEN"]);
+    assert!(!missing.ok());
+    assert!(
+        missing.stderr().contains("no open item named NOT_OPEN"),
+        "{}",
+        missing.stderr()
+    );
+
+    let nonsense = docket.run(&["show", "not an id or a name"]);
+    assert!(!nonsense.ok());
+    assert!(
+        nonsense.stderr().contains("neither an id nor a name"),
+        "{}",
+        nonsense.stderr()
+    );
+
+    // A name is not unique, so a second one is a refusal rather than a guess.
+    let (twin, _) = docket.create(&beta, "spec", "ROSETTA");
+    let ambiguous = docket.run(&["close", "ROSETTA", "-q"]);
+    assert!(!ambiguous.ok(), "an ambiguous name should refuse");
+    let stderr = ambiguous.stderr();
+    for named in [&id, &twin] {
+        assert!(stderr.contains(named.as_str()), "{stderr}");
+    }
+    assert!(path.exists(), "nothing was closed");
+
+    // The id still discriminates, and the name resolves again once it is free.
+    let closed = docket.run(&["close", &twin, "-q"]);
+    assert!(closed.ok(), "close failed: {}", closed.stderr());
+    let closed = docket.run(&["close", "ROSETTA", "-q"]);
+    assert!(closed.ok(), "close failed: {}", closed.stderr());
+    assert!(footprint_gone(&path));
+}
+
+#[test]
 fn help_states_the_limits_it_enforces() {
     let docket = Docket::new();
     let metadata = docket.run(&["help", "metadata"]).stdout();
-    assert!(metadata.contains("72"), "{metadata}");
+    assert!(metadata.contains("20"), "{metadata}");
     assert!(metadata.contains("80"), "{metadata}");
 }
 
@@ -543,18 +671,18 @@ fn ids_resolve_from_any_project() {
     let alpha = docket.project("alpha");
     let beta = docket.project("beta");
 
-    let (first, first_path) = docket.create(&alpha, "handoff", "Alpha work");
-    let (second, second_path) = docket.create(&beta, "spec", "Beta work");
+    let (first, first_path) = docket.create(&alpha, "handoff", "ALPHA_WORK");
+    let (second, second_path) = docket.create(&beta, "spec", "BETA_WORK");
     assert_ne!(first, second);
 
     // No --project anywhere below: an id is enough to find an item.
-    for (id, path, title) in [
-        (&first, &first_path, "Alpha work"),
-        (&second, &second_path, "Beta work"),
+    for (id, path, name) in [
+        (&first, &first_path, "ALPHA_WORK"),
+        (&second, &second_path, "BETA_WORK"),
     ] {
         let shown = docket.run(&["show", id]);
         assert!(shown.ok(), "show failed: {}", shown.stderr());
-        assert_eq!(shown.stdout(), format!("Body of {title}.\n"));
+        assert_eq!(shown.stdout(), format!("Body of {name}.\n"));
 
         let located = docket.run(&["path", id]);
         assert!(located.ok(), "path failed: {}", located.stderr());
@@ -566,15 +694,12 @@ fn ids_resolve_from_any_project() {
 fn promotion_climbs_the_ladder_and_stops_at_the_top() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, handoff_path) = docket.create(&project, "handoff", "Climb the ladder");
+    let (id, handoff_path) = docket.create(&project, "handoff", "CLIMB_LADDER");
 
     let to_relay = docket.run(&["promote", &id, "-q"]);
     assert!(to_relay.ok(), "promote failed: {}", to_relay.stderr());
     let relay_path = promoted_path(&to_relay.stdout());
-    assert_eq!(
-        tail(&relay_path, 2),
-        format!("relays/{id}-climb-the-ladder.md")
-    );
+    assert_eq!(tail(&relay_path, 2), format!("relays/{id}-CLIMB_LADDER.md"));
     assert!(relay_path.is_file());
     assert!(!handoff_path.exists(), "the handoff file should have moved");
 
@@ -583,7 +708,7 @@ fn promotion_climbs_the_ladder_and_stops_at_the_top() {
     let spec_path = promoted_path(&to_spec.stdout());
     assert_eq!(
         tail(&spec_path, 3),
-        format!("specs/{id}-climb-the-ladder/spec.md")
+        format!("specs/{id}-CLIMB_LADDER/spec.md")
     );
     assert!(spec_path.is_file());
     assert!(!relay_path.exists(), "the relay file should have moved");
@@ -610,14 +735,14 @@ fn promotion_climbs_the_ladder_and_stops_at_the_top() {
 fn promoting_a_handoff_straight_to_spec_carries_no_chain() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, _) = docket.create(&project, "handoff", "Skip the relay rung");
+    let (id, _) = docket.create(&project, "handoff", "SKIP_RELAY_RUNG");
 
     let run = docket.run(&["promote", &id, "--to", "spec", "-q"]);
     assert!(run.ok(), "promote failed: {}", run.stderr());
     let spec_path = promoted_path(&run.stdout());
     assert_eq!(
         tail(&spec_path, 3),
-        format!("specs/{id}-skip-the-relay-rung/spec.md")
+        format!("specs/{id}-SKIP_RELAY_RUNG/spec.md")
     );
 
     let front = front(&spec_path);
@@ -635,7 +760,7 @@ fn promoting_a_handoff_straight_to_spec_carries_no_chain() {
 fn promotion_is_additive() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, _) = docket.create(&project, "handoff", "Additive climb");
+    let (id, _) = docket.create(&project, "handoff", "ADDITIVE_CLIMB");
 
     let to_relay = docket.run(&["promote", &id, "-q"]);
     assert!(to_relay.ok(), "promote failed: {}", to_relay.stderr());
@@ -656,13 +781,13 @@ fn promotion_is_additive() {
 fn relaying_mints_a_successor_and_closes_the_predecessor() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (first, first_path) = docket.create(&project, "relay", "Wave one");
+    let (first, first_path) = docket.create(&project, "relay", "WAVE_ONE");
 
     let second_run = docket.run(&[
         "relay",
         &first,
-        "--title",
-        "Wave two",
+        "--name",
+        "WAVE_TWO",
         "--tagline",
         "Wave one landed green.",
         "-q",
@@ -678,8 +803,8 @@ fn relaying_mints_a_successor_and_closes_the_predecessor() {
     let third_run = docket.run(&[
         "relay",
         &second,
-        "--title",
-        "Wave three",
+        "--name",
+        "WAVE_THREE",
         "--tagline",
         "Wave two landed green.",
         "-q",
@@ -709,12 +834,12 @@ fn relaying_mints_a_successor_and_closes_the_predecessor() {
 fn relaying_a_handoff_points_at_promote() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, _) = docket.create(&project, "handoff", "Not a relay");
+    let (id, _) = docket.create(&project, "handoff", "NOT_A_RELAY");
 
     let run = docket.run(&[
         "relay",
         &id,
-        "--title",
+        "--name",
         "Successor",
         "--tagline",
         "Owed by nothing.",
@@ -738,8 +863,8 @@ fn body_bytes_survive_a_metadata_rewrite() {
     let created = docket.run(&[
         "create",
         "handoff",
-        "--title",
-        "Body fidelity",
+        "--name",
+        "BODY_FIDELITY",
         "--tagline",
         "The body is not the CLI's to touch.",
         "--body",
@@ -752,8 +877,8 @@ fn body_bytes_survive_a_metadata_rewrite() {
     assert!(created.ok(), "create failed: {}", created.stderr());
     let (id, _) = id_and_path(&created.stdout());
 
-    let retitled = docket.run(&["set", &id, "--title", "Body fidelity, retitled", "-q"]);
-    assert!(retitled.ok(), "set failed: {}", retitled.stderr());
+    let renamed = docket.run(&["set", &id, "--name", "BODY_FIDELITY_TWO", "-q"]);
+    assert!(renamed.ok(), "set failed: {}", renamed.stderr());
 
     let shown = docket.run(&["show", &id, "-q"]);
     assert!(shown.ok(), "show failed: {}", shown.stderr());
@@ -764,7 +889,7 @@ fn body_bytes_survive_a_metadata_rewrite() {
 fn an_invalid_item_stays_listed_and_fails_doctor() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, path) = docket.create(&project, "spec", "Damaged spec");
+    let (id, path) = docket.create(&project, "spec", "DAMAGED_SPEC");
     drop_key(&path, "stage:");
 
     let listed = docket.run(&["list", "--project", &project]);
@@ -788,7 +913,7 @@ fn an_invalid_item_stays_listed_and_fails_doctor() {
 fn set_repairs_invalid_frontmatter() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, path) = docket.create(&project, "spec", "Damaged spec");
+    let (id, path) = docket.create(&project, "spec", "DAMAGED_SPEC");
     drop_key(&path, "stage:");
 
     let healed = docket.run(&["set", &id, "-q"]);
@@ -804,9 +929,9 @@ fn set_repairs_invalid_frontmatter() {
 fn reorder_sequence_moves_named_ids_to_the_front() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let ids: Vec<String> = ["First", "Second", "Third", "Fourth"]
+    let ids: Vec<String> = ["FIRST", "SECOND", "THIRD", "FOURTH"]
         .iter()
-        .map(|title| docket.create(&project, "handoff", title).0)
+        .map(|name| docket.create(&project, "handoff", name).0)
         .collect();
 
     let sequence = format!("{},{}", ids[2], ids[0]);
@@ -836,9 +961,9 @@ fn reorder_sequence_moves_named_ids_to_the_front() {
 fn reorder_places_one_item_top_bottom_or_at_a_position() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let ids: Vec<String> = ["First", "Second", "Third", "Fourth"]
+    let ids: Vec<String> = ["FIRST", "SECOND", "THIRD", "FOURTH"]
         .iter()
-        .map(|title| docket.create(&project, "handoff", title).0)
+        .map(|name| docket.create(&project, "handoff", name).0)
         .collect();
     let listing = || {
         let listed = docket.run(&["list", "--project", &project]);
@@ -888,7 +1013,7 @@ fn reorder_places_one_item_top_bottom_or_at_a_position() {
 fn closing_removes_an_item_and_history_keeps_it() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, path) = docket.create(&project, "handoff", "Finished work");
+    let (id, path) = docket.create(&project, "handoff", "FINISHED_WORK");
 
     let closed = docket.run(&["close", &id, "-q"]);
     assert!(closed.ok(), "close failed: {}", closed.stderr());
@@ -900,7 +1025,7 @@ fn closing_removes_an_item_and_history_keeps_it() {
     let subjects = docket.history();
     assert_eq!(
         subjects.first().map(String::as_str),
-        Some(format!("close {id}: Finished work").as_str()),
+        Some(format!("close {id}: FINISHED_WORK").as_str()),
         "the close is the top commit — {subjects:?}"
     );
     assert!(
@@ -915,7 +1040,7 @@ fn closing_removes_an_item_and_history_keeps_it() {
 fn closing_is_refused_without_git() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, path) = docket.create(&project, "handoff", "Unrecorded work");
+    let (id, path) = docket.create(&project, "handoff", "UNRECORDED_WORK");
 
     let run = docket.run_with(&["close", &id, "-q"], &[("DOCKET_GIT", "")]);
     assert!(!run.ok(), "close should refuse without git");
@@ -935,7 +1060,7 @@ fn a_closed_id_is_never_minted_again() {
     let project = docket.project("proj");
     let mut seen = Vec::new();
     for round in 0..8 {
-        let (id, _) = docket.create(&project, "handoff", &format!("Round {round}"));
+        let (id, _) = docket.create(&project, "handoff", &format!("ROUND_{round}"));
         assert!(!seen.contains(&id), "{id} was minted twice");
         seen.push(id.clone());
         let closed = docket.run(&["close", &id, "-q"]);
@@ -949,8 +1074,8 @@ fn a_closed_id_is_never_minted_again() {
 fn outside_edits_are_recorded_before_the_next_change() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (first, path) = docket.create(&project, "handoff", "Has a body");
-    let (second, _) = docket.create(&project, "handoff", "Written later");
+    let (first, path) = docket.create(&project, "handoff", "HAS_A_BODY");
+    let (second, _) = docket.create(&project, "handoff", "WRITTEN_LATER");
 
     let text = fs::read_to_string(&path).expect("reading the item");
     fs::write(&path, format!("{text}\nAn agent wrote this.\n")).expect("editing the body");
@@ -977,7 +1102,7 @@ fn outside_edits_are_recorded_before_the_next_change() {
 fn announce_records_drift_and_stays_quiet_about_it() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, path) = docket.create(&project, "handoff", "Drifts");
+    let (id, path) = docket.create(&project, "handoff", "DRIFTS");
 
     let text = fs::read_to_string(&path).expect("reading the item");
     fs::write(&path, format!("{text}\nEdited between sessions.\n")).expect("editing the body");
@@ -1015,12 +1140,24 @@ fn announce_is_silent_when_empty_and_emits_hook_json_when_not() {
     assert!(silent.ok());
     assert_eq!(silent.stdout(), "");
 
-    let (id, _) = docket.create(&project, "handoff", "Outstanding work");
+    let (id, _) = docket.create(&project, "handoff", "OUTSTANDING_WORK");
 
     let roster = docket.run(&["announce", "--project", &project]);
     assert!(roster.ok(), "announce failed: {}", roster.stderr());
     assert!(roster.stdout().contains(&id));
-    assert!(roster.stdout().contains("Outstanding work"));
+    assert!(roster.stdout().contains("OUTSTANDING_WORK"));
+    // A name says which item; only the tagline says what it is, so the banner
+    // carries both on the row itself.
+    let row = roster
+        .stdout()
+        .lines()
+        .find(|line| line.contains("OUTSTANDING_WORK"))
+        .expect("the item is listed")
+        .to_owned();
+    assert!(
+        row.contains("What a future session reads first."),
+        "the row carries its tagline: {row}"
+    );
 
     let hook = docket.run(&["announce", "--hook", "--project", &project]);
     assert!(hook.ok(), "announce failed: {}", hook.stderr());
@@ -1040,7 +1177,7 @@ fn announce_is_silent_when_empty_and_emits_hook_json_when_not() {
 fn json_format_and_json_flag_agree() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, _) = docket.create(&project, "handoff", "Machine readable");
+    let (id, _) = docket.create(&project, "handoff", "MACHINE_READABLE");
 
     let formatted = docket.run(&["list", "--format", "json", "--project", &project]);
     assert!(formatted.ok(), "list failed: {}", formatted.stderr());
@@ -1056,7 +1193,7 @@ fn json_format_and_json_flag_agree() {
 fn agent_and_uncoloured_human_output_carry_no_escapes() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    docket.create(&project, "handoff", "Plain text only");
+    docket.create(&project, "handoff", "PLAIN_TEXT_ONLY");
 
     let agent = docket.run(&["--project", &project]);
     assert!(agent.ok(), "the bare listing failed: {}", agent.stderr());
@@ -1107,7 +1244,7 @@ fn help_serves_topics_and_commands_and_rejects_neither() {
 fn closing_an_invalid_spec_removes_its_directory() {
     let docket = Docket::new();
     let project = docket.project("damaged-spec");
-    let (id, path) = docket.create(&project, "spec", "A spec that will be damaged");
+    let (id, path) = docket.create(&project, "spec", "DAMAGED_SPEC_DIR");
     drop_key(&path, "stage");
     let spec_dir = path
         .parent()
@@ -1120,7 +1257,7 @@ fn closing_an_invalid_spec_removes_its_directory() {
 
     let removed = docket.removed_paths();
     assert!(
-        removed.contains(&format!("specs/{id}-a-spec-that-will-be-damaged/spec.md")),
+        removed.contains(&format!("specs/{id}-DAMAGED_SPEC_DIR/spec.md")),
         "history should hold the whole spec — {removed}"
     );
 }
@@ -1130,7 +1267,7 @@ fn closing_an_invalid_spec_removes_its_directory() {
 fn a_closed_id_points_at_history() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, _) = docket.create(&project, "handoff", "Done and gone");
+    let (id, _) = docket.create(&project, "handoff", "DONE_AND_GONE");
     assert!(docket.run(&["close", &id, "-q"]).ok());
 
     let located = docket.run(&["path", &id]);
@@ -1178,8 +1315,8 @@ fn a_linked_worktree_keys_to_its_main_checkout() {
         &[
             "create",
             "handoff",
-            "--title",
-            "Keyed from a worktree",
+            "--name",
+            "KEYED_FROM_WORKTREE",
             "--tagline",
             "Which docket does this land on?",
             "--body",

@@ -50,7 +50,7 @@ pub fn item_json(item: &Item) -> Value {
             Rung::Spec { stage, .. } => Some(stage.to_string()),
             _ => None,
         },
-        "title": item.title,
+        "name": item.name,
         "tagline": item.tagline,
         "project": item.project,
         "created": item.created.to_string(),

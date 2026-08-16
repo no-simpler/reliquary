@@ -102,7 +102,7 @@ impl Rung {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
     pub id: Id,
-    pub title: String,
+    pub name: String,
     pub tagline: String,
     pub project: PathBuf,
     pub created: Timestamp,
@@ -198,7 +198,7 @@ impl Item {
 
     /// The successor a consumed relay owes: same chain, next hop, superseding
     /// the item it was minted from.
-    pub fn successor(&self, id: Id, title: String, tagline: String) -> Result<Item> {
+    pub fn successor(&self, id: Id, name: String, tagline: String) -> Result<Item> {
         let Rung::Relay(chain) = &self.rung else {
             bail!(
                 "{} is a {}; only a relay owes a successor. Promote it first: docket promote {}",
@@ -210,7 +210,7 @@ impl Item {
         let now = now();
         Ok(Item {
             id,
-            title,
+            name,
             tagline,
             project: self.project.clone(),
             created: now,
@@ -255,9 +255,10 @@ impl fmt::Display for Step {
 pub struct Wire {
     pub id: Id,
     pub kind: Kind,
-    pub title: String,
-    /// The alias is what lets every item written before the field was renamed
+    /// Each alias is what lets every item written before that field was renamed
     /// load unchanged; the next write puts it under the current key.
+    #[serde(alias = "title")]
+    pub name: String,
     #[serde(alias = "description")]
     pub tagline: String,
     pub project: PathBuf,
@@ -323,7 +324,7 @@ impl TryFrom<Wire> for Item {
 
         Ok(Item {
             id: w.id,
-            title: w.title,
+            name: w.name,
             tagline: w.tagline,
             project: w.project,
             created: w.created,
@@ -343,7 +344,7 @@ impl From<&Item> for Wire {
         Wire {
             id: item.id,
             kind: item.kind(),
-            title: item.title.clone(),
+            name: item.name.clone(),
             tagline: item.tagline.clone(),
             project: item.project.clone(),
             created: item.created,

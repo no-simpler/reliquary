@@ -6,9 +6,12 @@
 
 use anyhow::{Result, bail};
 
-/// A name, not a sentence. Git's hard subject bound, and where a listing stops
-/// being scannable.
-pub const TITLE_MAX: usize = 72;
+/// A symbol, not a sentence: what a session says out loud, and what a listing
+/// shows in a column narrow enough to scan. The sentence is the tagline's job.
+pub const NAME_MAX: usize = 20;
+
+/// Three is where a name stops being one and starts being a description.
+pub const NAME_WORDS_MAX: usize = 3;
 
 /// One terminal row — the same bound Debian puts on a package synopsis and
 /// Homebrew on a formula description. Anything longer is body material.
@@ -48,6 +51,70 @@ pub fn one_line(label: &str, raw: &str, max: usize) -> Result<String> {
         );
     }
     Ok(value)
+}
+
+/// The canonical name, or the reason it will not do. Case and separator style
+/// are normalised rather than refused — hyphen, space and underscore all mean
+/// the same word break, which is how a corpus that drifted between them arrives
+/// at one spelling. Everything else is a refusal naming the rule it broke.
+pub fn name(label: &str, raw: &str) -> Result<String> {
+    let trimmed = raw.trim();
+    if trimmed.to_ascii_lowercase().ends_with(".md") {
+        bail!("{label} is a name, not a filename — drop the .md");
+    }
+
+    let mut value = String::new();
+    let mut pending = false;
+    for ch in trimmed.chars() {
+        if ch == '_' || ch == '-' || ch.is_whitespace() {
+            pending = !value.is_empty();
+            continue;
+        }
+        if pending {
+            value.push('_');
+            pending = false;
+        }
+        value.push(ch.to_ascii_uppercase());
+    }
+
+    if value.is_empty() {
+        bail!("{label} is required");
+    }
+    if let Some(stray) = value
+        .chars()
+        .find(|c| !(c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_'))
+    {
+        bail!("{label} holds {stray:?}; a name is A-Z, 0-9 and underscore, like DREAM_RESIDUE");
+    }
+    if !value.chars().any(|c| c.is_ascii_uppercase()) {
+        bail!("{label} is all digits; a name carries at least one letter");
+    }
+    let words = value.split('_').count();
+    if words > NAME_WORDS_MAX {
+        bail!("{label} is {words} words; a name is at most {NAME_WORDS_MAX}");
+    }
+    let length = width(&value);
+    if length > NAME_MAX {
+        bail!(
+            "{label} is {length} characters; the limit is {NAME_MAX}. \
+             It is the handle a session says out loud — what it means belongs \
+             in the tagline"
+        );
+    }
+    Ok(value)
+}
+
+/// The name if it still is one, else one minted from the id, which is always
+/// well formed. For the repair path, where refusing is not an option.
+pub fn recovered_name(raw: Option<&str>, id: &str) -> String {
+    raw.and_then(|value| name("--name", value).ok())
+        .unwrap_or_else(|| format!("RECOVERED_{}", id.to_ascii_uppercase()))
+}
+
+/// Whether a value already on disk is the canonical shape a name would be
+/// accepted in now.
+pub fn is_name(value: &str) -> bool {
+    name("--name", value).is_ok_and(|canonical| canonical == value)
 }
 
 /// Normalised and cut to fit, for the repair path: `set` rebuilds an item whose
@@ -107,8 +174,71 @@ mod tests {
     }
 
     #[test]
+    fn a_name_normalises_case_and_either_separator() {
+        for raw in [
+            "  Rosetta migration ",
+            "rosetta-migration",
+            "ROSETTA_MIGRATION",
+            "--rosetta -- migration--",
+        ] {
+            assert_eq!(name("--name", raw).unwrap(), "ROSETTA_MIGRATION", "{raw:?}");
+        }
+        assert_eq!(name("--name", "refs").unwrap(), "REFS");
+        assert_eq!(name("--name", "phase2 rollout").unwrap(), "PHASE2_ROLLOUT");
+    }
+
+    #[test]
+    fn a_name_refuses_every_shape_that_is_not_one() {
+        for bad in [
+            "",
+            "   ",
+            "ROSETTA.md",
+            "rosetta.MD",
+            "one two three four",
+            "SOMETHING_RATHER_LONGER",
+            "point.break",
+            "quoted'name",
+            "RÉSUMÉ",
+            "2026",
+        ] {
+            assert!(name("--name", bad).is_err(), "{bad:?} should not pass");
+        }
+        assert!(
+            name("--name", "ROSETTA.md")
+                .unwrap_err()
+                .to_string()
+                .contains(".md")
+        );
+        assert_eq!(width(&"X".repeat(NAME_MAX)), NAME_MAX);
+        assert!(name("--name", &"X".repeat(NAME_MAX)).is_ok());
+        assert!(name("--name", &"X".repeat(NAME_MAX + 1)).is_err());
+    }
+
+    #[test]
+    fn a_name_is_recovered_from_the_id_when_it_cannot_be_salvaged() {
+        assert_eq!(
+            recovered_name(Some("dream residue"), "nh7d"),
+            "DREAM_RESIDUE"
+        );
+        assert_eq!(
+            recovered_name(Some("a sentence that was once a title"), "nh7d"),
+            "RECOVERED_NH7D"
+        );
+        assert_eq!(recovered_name(None, "4mve"), "RECOVERED_4MVE");
+        assert!(is_name(&recovered_name(None, "4mve")));
+    }
+
+    #[test]
+    fn only_the_canonical_spelling_counts_as_a_name() {
+        assert!(is_name("DREAM_RESIDUE"));
+        assert!(!is_name("dream_residue"));
+        assert!(!is_name("DREAM-RESIDUE"));
+        assert!(!is_name("Migrate the four legacy conventions"));
+    }
+
+    #[test]
     fn emptiness_and_overlength_are_both_refused() {
-        assert!(one_line("--title", " \n ", TITLE_MAX).is_err());
+        assert!(one_line("--tagline", " \n ", TAGLINE_MAX).is_err());
         let long = "x".repeat(TAGLINE_MAX + 1);
         let error = one_line("--tagline", &long, TAGLINE_MAX)
             .unwrap_err()

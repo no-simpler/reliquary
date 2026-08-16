@@ -74,7 +74,7 @@ Examples:
     #[command(after_long_help = "\
 Example:
 
-  docket path b71c            /Users/you/.claude/docket/<project>/handoffs/b71c-....md")]
+  docket path b71c            /Users/you/.claude/docket/<project>/handoffs/b71c-ROSETTA.md")]
     Path(IdArgs),
 
     /// Edit docket item metadata.
@@ -143,11 +143,13 @@ pub struct CreateArgs {
     #[arg(value_enum)]
     pub kind: Kind,
 
-    /// The item's name, at most 72 characters. Use - for standard input.
+    /// Up to three words of A-Z, 0-9 and underscore, at most 20 characters.
+    /// Case and separators are normalised, so rosetta-messenger stores as
+    /// ROSETTA_MESSENGER.
     #[arg(long)]
-    pub title: String,
+    pub name: String,
 
-    /// One line under the title, at most 80 characters. Use - for standard
+    /// One line under the name, at most 80 characters. Use - for standard
     /// input.
     #[arg(long)]
     pub tagline: String,
@@ -168,18 +170,20 @@ pub struct CreateArgs {
 
 #[derive(Args)]
 pub struct IdArgs {
-    /// Four-character item id, as printed by any listing.
+    /// Item id or name, as printed by any listing.
+    #[arg(value_name = "ITEM")]
     pub id: String,
 }
 
 #[derive(Args)]
 pub struct SetArgs {
-    /// Four-character item id, as printed by any listing.
+    /// Item id or name, as printed by any listing.
+    #[arg(value_name = "ITEM")]
     pub id: String,
 
-    /// Replace the title. Use - for standard input.
+    /// Replace the name.
     #[arg(long)]
-    pub title: Option<String>,
+    pub name: Option<String>,
 
     /// Replace the tagline. Use - for standard input.
     #[arg(long)]
@@ -201,8 +205,8 @@ pub struct SetArgs {
 
 #[derive(Args)]
 pub struct ReorderArgs {
-    /// Four-character item id. Omit only with --sequence.
-    #[arg(required_unless_present = "sequence")]
+    /// Item id or name. Omit only with --sequence.
+    #[arg(required_unless_present = "sequence", value_name = "ITEM")]
     pub id: Option<String>,
 
     /// Move it to the front.
@@ -218,11 +222,11 @@ pub struct ReorderArgs {
     pub position: Option<usize>,
 
     /// Move it directly ahead of this item.
-    #[arg(long, group = "placement", value_name = "ID")]
+    #[arg(long, group = "placement", value_name = "ITEM")]
     pub before: Option<String>,
 
     /// Move it directly behind this item.
-    #[arg(long, group = "placement", value_name = "ID")]
+    #[arg(long, group = "placement", value_name = "ITEM")]
     pub after: Option<String>,
 
     /// Reorder in bulk. Listed items move to the front in this order.
@@ -232,7 +236,8 @@ pub struct ReorderArgs {
 
 #[derive(Args)]
 pub struct PromoteArgs {
-    /// Four-character item id, as printed by any listing.
+    /// Item id or name, as printed by any listing.
+    #[arg(value_name = "ITEM")]
     pub id: String,
 
     /// Jump to a kind instead of advancing one step.
@@ -242,12 +247,13 @@ pub struct PromoteArgs {
 
 #[derive(Args)]
 pub struct RelayArgs {
-    /// The relay being consumed.
+    /// The relay being consumed, by id or name.
+    #[arg(value_name = "ITEM")]
     pub id: String,
 
-    /// Title of the successor. Use - for standard input.
+    /// Name of the successor, under the same rules as create.
     #[arg(long)]
-    pub title: String,
+    pub name: String,
 
     /// Tagline of the successor. Use - for standard input.
     #[arg(long)]

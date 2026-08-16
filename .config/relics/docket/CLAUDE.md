@@ -29,7 +29,9 @@ These bind help text, guide text, notes and error messages alike.
   backtick in a terminal is a stray character.
 - **Canonical vocabulary.** *metadata*, never frontmatter. *kind*, never rung
   or type. It is the metadata key, the `--kind` flag and the `create` argument,
-  so one word covers all three.
+  so one word covers all three. *name*, never title — it is the metadata key,
+  the `--name` flag, half of every filename, and a handle that resolves an item
+  wherever an id does.
 - **Full stops** end sentences and sentence fragments. Bare listings — command
   lines, values, key tables — take none.
 - **Refer to command help as `docket help <command>`**, never

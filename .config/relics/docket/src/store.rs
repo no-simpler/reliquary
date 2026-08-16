@@ -5,7 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 
 use crate::git;
-use crate::id::{Id, slugify};
+use crate::id::Id;
 use crate::item::{Item, Kind, Wire};
 
 const SENTINEL: &str = ".project";
@@ -289,6 +289,9 @@ impl Depot {
         }
     }
 
+    /// The readable half of a filename is the item's name, taken verbatim: the
+    /// grammar admits nothing a filesystem minds. It is fixed at creation, so a
+    /// rename never moves a file out from under an open session.
     fn item_path(&self, item: &Item, slug: &str) -> PathBuf {
         let dir = self.project_dir(&item.project).join(item.kind().dir());
         match item.kind() {
@@ -300,7 +303,7 @@ impl Depot {
     /// Writes a brand new item and returns where its body should be authored.
     pub fn create(&self, item: &Item, body: &str) -> Result<PathBuf> {
         let _guard = self.lock(&item.project)?;
-        let path = self.item_path(item, &slugify(&item.title));
+        let path = self.item_path(item, &item.name);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }

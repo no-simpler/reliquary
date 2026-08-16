@@ -75,32 +75,6 @@ impl fmt::Debug for Id {
     }
 }
 
-/// Kebab-cased, ascii-folded, and capped — the readable half of a filename,
-/// fixed at creation so a retitle never moves a file out from under an open
-/// session.
-pub fn slugify(title: &str) -> String {
-    let mut out = String::new();
-    let mut pending_dash = false;
-    for ch in title.chars() {
-        if ch.is_ascii_alphanumeric() {
-            if pending_dash && !out.is_empty() {
-                out.push('-');
-            }
-            pending_dash = false;
-            out.push(ch.to_ascii_lowercase());
-        } else {
-            pending_dash = true;
-        }
-        if out.len() >= 48 {
-            break;
-        }
-    }
-    if out.is_empty() {
-        out.push_str("item");
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,16 +109,5 @@ mod tests {
         for bad in ["", "b71", "b71cd", "b7!c", "b7ic", "b7lc", "b7oc", "b7uc"] {
             assert!(bad.parse::<Id>().is_err(), "{bad:?} should not parse");
         }
-    }
-
-    #[test]
-    fn slugs_are_kebab_and_bounded() {
-        assert_eq!(
-            slugify("Settle the Postgres intent"),
-            "settle-the-postgres-intent"
-        );
-        assert_eq!(slugify("PCOV -> Xdebug!"), "pcov-xdebug");
-        assert_eq!(slugify("   "), "item");
-        assert!(slugify(&"word ".repeat(40)).len() <= 52);
     }
 }

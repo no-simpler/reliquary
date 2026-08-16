@@ -23,12 +23,11 @@ pub fn list(view: &View<'_>, format: Format) -> Result<()> {
     }
 }
 
-/// One item as the fixed cells that precede its title. Columns run in order of
-/// increasing variability so the title, the only unbounded cell, comes last and
-/// is never padded — alignment then costs nothing at the end of a line.
+/// One item as the fixed cells that precede its tagline. Columns run in order of
+/// increasing variability so the tagline, the widest cell, comes last and is
+/// never padded — alignment then costs nothing at the end of a line.
 pub struct Row {
     pub cells: Vec<String>,
-    pub title: String,
     pub tagline: String,
     pub notes: Vec<String>,
 }
@@ -51,8 +50,10 @@ pub fn row(position: usize, record: &Record) -> Row {
                     record.id.to_string(),
                     kind_badge(item),
                     crate::ui::age(item.created),
+                    // Clamped, not trusted: an item written before the name was
+                    // bounded would otherwise widen the column for every row.
+                    crate::field::clamp(&item.name, crate::field::NAME_MAX),
                 ],
-                title: item.title.clone(),
                 tagline: item.tagline.trim().to_owned(),
                 notes,
             }
@@ -63,16 +64,16 @@ pub fn row(position: usize, record: &Record) -> Row {
                 record.id.to_string(),
                 "INVALID".to_owned(),
                 String::new(),
+                String::new(),
             ],
-            title: error.to_string(),
-            tagline: String::new(),
+            tagline: error.to_string(),
             notes: vec![record.path.display().to_string()],
         },
     }
 }
 
 /// Renders rows with every fixed column padded to its widest value, and returns
-/// the column at which titles start, so a caller can indent continuation lines
+/// the column at which taglines start, so a caller can indent continuation lines
 /// under them.
 pub fn aligned(rows: &[Row], indent: &str) -> (Vec<String>, usize) {
     let mut widths = vec![0usize; rows.iter().map(|r| r.cells.len()).max().unwrap_or(0)];
@@ -90,7 +91,8 @@ pub fn aligned(rows: &[Row], indent: &str) -> (Vec<String>, usize) {
             for (index, cell) in row.cells.iter().enumerate() {
                 line.push_str(&format!("{cell:<width$}  ", width = widths[index]));
             }
-            line.push_str(&row.title);
+            line.push_str(&row.tagline);
+            line.truncate(line.trim_end().len());
             line
         })
         .collect();

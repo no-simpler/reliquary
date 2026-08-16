@@ -4,7 +4,7 @@ use super::{View, aligned, row};
 
 /// Aligned and uncoloured. Padding is worth its bytes here because it is what
 /// lets a reader — model or person — scan one column instead of parsing every
-/// line, and the unbounded title column is never padded.
+/// line, and the trailing tagline column is never padded.
 pub fn list(view: &View<'_>) -> Result<()> {
     println!("docket {}", view.project.display());
     if view.records.is_empty() {
@@ -23,10 +23,8 @@ pub fn list(view: &View<'_>) -> Result<()> {
 
     for (line, row) in lines.iter().zip(&rows) {
         println!("{line}");
-        for note in std::iter::once(&row.tagline).chain(&row.notes) {
-            if !note.is_empty() {
-                println!("{pad}{note}");
-            }
+        for note in &row.notes {
+            println!("{pad}{note}");
         }
     }
     Ok(())

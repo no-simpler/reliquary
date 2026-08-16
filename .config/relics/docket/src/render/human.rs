@@ -35,12 +35,12 @@ pub fn list(view: &View<'_>) -> Result<()> {
     table
         .load_style(UTF8_HORIZONTAL_ONLY)
         .set_content_arrangement(ContentArrangement::Dynamic)
-        .set_header(vec!["#", "ID", "KIND", "AGE", "TITLE", "TAGLINE"]);
+        .set_header(vec!["#", "ID", "KIND", "AGE", "NAME", "TAGLINE"]);
 
-    // The display bound is the stored bound: a title and a tagline that pass
+    // The display bound is the stored bound: a name and a tagline that pass
     // validation each occupy one row, and only a narrow terminal wraps them.
     for (column, cap) in [
-        (4usize, crate::field::TITLE_MAX as u16),
+        (4usize, crate::field::NAME_MAX as u16),
         (5, crate::field::TAGLINE_MAX as u16),
     ] {
         if let Some(column) = table.column_mut(column) {
@@ -78,7 +78,7 @@ pub fn list(view: &View<'_>) -> Result<()> {
                         view.color,
                         age_color(age_days(item.created)),
                     ),
-                    Cell::new(&item.title),
+                    Cell::new(&item.name),
                     detail_cell,
                 ]);
             }
@@ -88,8 +88,12 @@ pub fn list(view: &View<'_>) -> Result<()> {
                     id_cell(record.id, view.color, Color::Red),
                     paint(Cell::new("INVALID"), view.color, Color::Red),
                     Cell::new(""),
-                    Cell::new(record.path.display().to_string()),
-                    paint(Cell::new(error), view.color, Color::Red),
+                    Cell::new(""),
+                    paint(
+                        Cell::new(format!("{error}\n{}", record.path.display())),
+                        view.color,
+                        Color::Red,
+                    ),
                 ]);
             }
         }

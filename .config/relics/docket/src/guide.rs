@@ -19,12 +19,12 @@ All item kinds closed on completion; the depot's history keeps what closed.";
 // Deliberately not opened with a `\` continuation: that would swallow this
 // block's leading indentation along with the newline.
 pub const USAGE: &str =
-    "  docket create <kind> --title '...' --tagline '...'   opens one, prints path
-  docket show 4mve                                     reads one
-  docket close 4mve                                    completes one
+    "  docket create <kind> --name ROSETTA --tagline '...'   opens one, prints path
+  docket show ROSETTA                                   reads one
+  docket close 4mve                                     completes one
 
-  docket guide handoff|relay|spec                      per-kind guidance
-  docket help                                          CLI usage";
+  docket guide handoff|relay|spec                       per-kind guidance
+  docket help                                           CLI usage";
 
 pub const HANDOFF: &str = "\
 HANDOFF

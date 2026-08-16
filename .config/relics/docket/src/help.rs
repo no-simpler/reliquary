@@ -19,7 +19,8 @@ every item:
 
   id            four characters, unique across every project on this machine
   kind          handoff, relay or spec
-  title         one line, at most 72 characters
+  name          up to three words of A-Z, 0-9 and underscore, at most 20
+                characters; resolves an item wherever an id does
   tagline       one line, at most 80 characters
   project       absolute path this item belongs to
   created       RFC 3339, UTC

@@ -120,8 +120,42 @@ fn text(value: &str) -> Result<String> {
     Ok(buffer.trim_end().to_owned())
 }
 
-fn parse_id(raw: &str) -> Result<Id> {
-    raw.parse()
+/// An id, or a name. An id is minted unique and resolves outright; a name is
+/// not, so more than one match is a refusal rather than a guess. Resolving by
+/// name reads every open item, which an id never has to.
+fn resolve(ctx: &Ctx, raw: &str) -> Result<Record> {
+    if let Ok(id) = raw.parse::<Id>() {
+        return ctx.depot.find(id);
+    }
+    let wanted = field::name("name", raw)
+        .map_err(|error| anyhow!("{raw:?} is neither an id nor a name: {error}"))?;
+
+    let mut found: Vec<Record> = ctx
+        .depot
+        .projects()
+        .into_iter()
+        .flat_map(|project| ctx.depot.list(&project))
+        .filter(|record| record.item.as_ref().is_ok_and(|item| item.name == wanted))
+        .collect();
+
+    match found.len() {
+        1 => Ok(found.remove(0)),
+        0 => bail!("no open item named {wanted}. Run docket list --all to see every open item"),
+        count => {
+            let candidates: Vec<String> = found
+                .iter()
+                .map(|record| format!("  {} {}", record.id, record.project.display()))
+                .collect();
+            bail!(
+                "{wanted} names {count} open items. Say which by id:\n{}",
+                candidates.join("\n")
+            )
+        }
+    }
+}
+
+fn resolve_id(ctx: &Ctx, raw: &str) -> Result<Id> {
+    resolve(ctx, raw).map(|record| record.id)
 }
 
 pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
@@ -175,7 +209,7 @@ pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
         );
     }
 
-    let title = field::one_line("--title", &text(&args.title)?, field::TITLE_MAX)?;
+    let name = field::name("--name", &args.name)?;
     let tagline = field::one_line("--tagline", &text(&args.tagline)?, field::TAGLINE_MAX)?;
     let body = match &args.body {
         Some(raw) => text(raw)?,
@@ -186,7 +220,7 @@ pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
     let now = now();
     let item = Item {
         id,
-        title,
+        name,
         tagline,
         project: target.clone(),
         created: now,
@@ -210,7 +244,7 @@ pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
     };
 
     let path = ctx.depot.create(&item, &body)?;
-    mutation.record(&format!("create {}: {}", item.id, item.title));
+    mutation.record(&format!("create {}: {}", item.id, item.name));
     report_created(ctx, &item, &path, body.is_empty());
     Ok(())
 }
@@ -232,7 +266,7 @@ fn report_created(ctx: &Ctx, item: &Item, path: &Path, empty: bool) {
 }
 
 pub fn show(ctx: &Ctx, args: &IdArgs) -> Result<()> {
-    let record = ctx.depot.find(parse_id(&args.id)?)?;
+    let record = resolve(ctx, &args.id)?;
     let text = std::fs::read_to_string(&record.path)?;
     let (_, body) = crate::store::split(&text)?;
     if body.trim().is_empty() {
@@ -248,14 +282,14 @@ pub fn show(ctx: &Ctx, args: &IdArgs) -> Result<()> {
 }
 
 pub fn path(ctx: &Ctx, args: &IdArgs) -> Result<()> {
-    let record = ctx.depot.find(parse_id(&args.id)?)?;
+    let record = resolve(ctx, &args.id)?;
     println!("{}", record.path.display());
     Ok(())
 }
 
 pub fn set(ctx: &Ctx, args: &SetArgs) -> Result<()> {
     let mutation = Mutation::open(ctx)?;
-    let record = ctx.depot.find(parse_id(&args.id)?)?;
+    let record = resolve(ctx, &args.id)?;
     let mut item = match &record.item {
         Ok(item) => item.clone(),
         Err(error) => {
@@ -267,8 +301,8 @@ pub fn set(ctx: &Ctx, args: &SetArgs) -> Result<()> {
         }
     };
 
-    if let Some(value) = &args.title {
-        item.title = field::one_line("--title", &text(value)?, field::TITLE_MAX)?;
+    if let Some(value) = &args.name {
+        item.name = field::name("--name", value)?;
     }
     if let Some(value) = &args.tagline {
         item.tagline = field::one_line("--tagline", &text(value)?, field::TAGLINE_MAX)?;
@@ -344,9 +378,10 @@ fn recover(record: &Record) -> Result<Item> {
 
     Ok(Item {
         id: record.id,
-        title: get("title")
-            .map(|t| field::clamp(&t, field::TITLE_MAX))
-            .unwrap_or_else(|| format!("recovered {}", record.id)),
+        name: field::recovered_name(
+            get("name").or_else(|| get("title")).as_deref(),
+            record.id.as_str(),
+        ),
         tagline: get("tagline")
             .or_else(|| get("description"))
             .map(|t| field::clamp(&t, field::TAGLINE_MAX))
@@ -390,7 +425,7 @@ pub fn reorder(ctx: &Ctx, args: &ReorderArgs) -> Result<()> {
     if let Some(sequence) = &args.sequence {
         let wanted: Vec<Id> = sequence
             .iter()
-            .map(|s| parse_id(s))
+            .map(|s| resolve_id(ctx, s))
             .collect::<Result<_>>()?;
         for id in &wanted {
             if !ids.contains(id) {
@@ -408,7 +443,7 @@ pub fn reorder(ctx: &Ctx, args: &ReorderArgs) -> Result<()> {
         return Ok(());
     }
 
-    let id = parse_id(args.id.as_deref().unwrap_or_default())?;
+    let id = resolve_id(ctx, args.id.as_deref().unwrap_or_default())?;
     let from = ids
         .iter()
         .position(|candidate| *candidate == id)
@@ -421,9 +456,9 @@ pub fn reorder(ctx: &Ctx, args: &ReorderArgs) -> Result<()> {
     } else if let Some(position) = args.position {
         position.saturating_sub(1).min(ids.len() - 1)
     } else if let Some(anchor) = &args.before {
-        anchor_index(&ids, parse_id(anchor)?)?
+        anchor_index(&ids, resolve_id(ctx, anchor)?)?
     } else if let Some(anchor) = &args.after {
-        anchor_index(&ids, parse_id(anchor)?)? + 1
+        anchor_index(&ids, resolve_id(ctx, anchor)?)? + 1
     } else {
         bail!("say where it goes: --top, --bottom, --position N, --before ID or --after ID");
     };
@@ -450,7 +485,7 @@ fn anchor_index(ids: &[Id], anchor: Id) -> Result<usize> {
 
 pub fn promote(ctx: &Ctx, args: &PromoteArgs) -> Result<()> {
     let mutation = Mutation::open(ctx)?;
-    let record = ctx.depot.find(parse_id(&args.id)?)?;
+    let record = resolve(ctx, &args.id)?;
     let mut item = record
         .item
         .as_ref()
@@ -480,7 +515,7 @@ pub fn promote(ctx: &Ctx, args: &PromoteArgs) -> Result<()> {
 
 pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
     let mutation = Mutation::open(ctx)?;
-    let record = ctx.depot.find(parse_id(&args.id)?)?;
+    let record = resolve(ctx, &args.id)?;
     let item = record.item.as_ref().map_err(|error| {
         anyhow!(
             "{} will not parse ({error}), so it cannot be relayed. Repair it first: docket set {}",
@@ -489,7 +524,7 @@ pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
         )
     })?;
 
-    let title = field::one_line("--title", &text(&args.title)?, field::TITLE_MAX)?;
+    let name = field::name("--name", &args.name)?;
     let tagline = field::one_line("--tagline", &text(&args.tagline)?, field::TAGLINE_MAX)?;
     let body = match &args.body {
         Some(raw) => text(raw)?,
@@ -499,7 +534,7 @@ pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
     // The predecessor is closed after the successor exists, and both land in
     // one commit: a chain that lost a hop to a half-finished relay would be
     // unrecoverable.
-    let successor = item.successor(ctx.depot.mint_id(), title, tagline)?;
+    let successor = item.successor(ctx.depot.mint_id(), name, tagline)?;
     let path = ctx.depot.create(&successor, &body)?;
     let footprint = ctx.depot.footprint(&record)?;
     let commit = mutation.close(
@@ -522,14 +557,14 @@ pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
 
 pub fn close(ctx: &Ctx, args: &IdArgs) -> Result<()> {
     let mutation = Mutation::open(ctx)?;
-    let record = ctx.depot.find(parse_id(&args.id)?)?;
-    let title = record
+    let record = resolve(ctx, &args.id)?;
+    let name = record
         .item
         .as_ref()
-        .map(|item| item.title.clone())
+        .map(|item| item.name.clone())
         .unwrap_or_else(|_| "invalid metadata".to_owned());
     let footprint = ctx.depot.footprint(&record)?;
-    let commit = mutation.close(&footprint, &format!("close {}: {title}", record.id))?;
+    let commit = mutation.close(&footprint, &format!("close {}: {name}", record.id))?;
 
     ctx.note(&format!("{} closed at {commit}", record.id));
     if ctx.format == Format::Json {
@@ -581,8 +616,19 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
                             record.path.display()
                         ));
                     }
+                    if !field::is_name(&item.name) {
+                        report(format!(
+                            "malformed {} has a name that is not one: {:?}\n         \
+                             a name is up to three words of A-Z, 0-9 and underscore, \
+                             at most {} characters\n         \
+                             repair: docket set {} --name '...'",
+                            record.id,
+                            item.name,
+                            field::NAME_MAX,
+                            record.id
+                        ));
+                    }
                     for (label, value, max) in [
-                        ("title", Some(item.title.as_str()), field::TITLE_MAX),
                         ("tagline", Some(item.tagline.as_str()), field::TAGLINE_MAX),
                         ("blocked", item.blocked.as_deref(), field::BLOCKED_MAX),
                     ] {
@@ -603,11 +649,14 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
                             "stale    {} has been open {} — {}",
                             record.id,
                             ui::age(item.created),
-                            item.title
+                            item.name
                         ));
                     }
                 }
             }
+        }
+        for line in duplicate_names(ctx, &project) {
+            report(line);
         }
     }
 
@@ -630,6 +679,31 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
         );
     }
     Ok(problems == 0)
+}
+
+/// Names are not unique, and nothing enforces that they should be — one is
+/// expected to be consumed before it recurs. Two open at once is still worth
+/// saying, because it is what makes a name stop resolving.
+fn duplicate_names(ctx: &Ctx, project: &Path) -> Vec<String> {
+    let mut seen: Vec<(String, Vec<Id>)> = Vec::new();
+    for record in ctx.depot.list(project) {
+        let Ok(item) = &record.item else { continue };
+        match seen.iter_mut().find(|(name, _)| *name == item.name) {
+            Some((_, ids)) => ids.push(record.id),
+            None => seen.push((item.name.clone(), vec![record.id])),
+        }
+    }
+    seen.into_iter()
+        .filter(|(_, ids)| ids.len() > 1)
+        .map(|(name, ids)| {
+            let listed: Vec<String> = ids.iter().map(Id::to_string).collect();
+            format!(
+                "repeated {name} is open on {} items, so only an id resolves them\n         {}",
+                ids.len(),
+                listed.join(", ")
+            )
+        })
+        .collect()
 }
 
 /// What stands between the depot and a history it can be closed against.

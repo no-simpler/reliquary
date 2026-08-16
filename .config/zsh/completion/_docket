@@ -68,8 +68,8 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (create)
 _arguments "${_arguments_options[@]}" : \
-'--title=[The item'\''s name, at most 72 characters. Use - for standard input]:TITLE:_default' \
-'--tagline=[One line under the title, at most 80 characters. Use - for standard input]:TAGLINE:_default' \
+'--name=[Up to three words of A-Z, 0-9 and underscore, at most 20 characters. Case and separators are normalised, so rosetta-messenger stores as ROSETTA_MESSENGER]:NAME:_default' \
+'--tagline=[One line under the name, at most 80 characters. Use - for standard input]:TAGLINE:_default' \
 '--to=[Open it for another project. Defaults to this one]:PATH:_files' \
 '--body=[Body to write, instead of leaving the file for you to fill in. Use - for standard input]:BODY:_default' \
 '--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
@@ -94,7 +94,7 @@ _arguments "${_arguments_options[@]}" : \
 '--quiet[Print only what was asked for]' \
 '-h[Print help]' \
 '--help[Print help]' \
-':id -- Four-character item id, as printed by any listing:_default' \
+':id -- Item id or name, as printed by any listing:_default' \
 && ret=0
 ;;
 (path)
@@ -107,12 +107,12 @@ _arguments "${_arguments_options[@]}" : \
 '--quiet[Print only what was asked for]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
-':id -- Four-character item id, as printed by any listing:_default' \
+':id -- Item id or name, as printed by any listing:_default' \
 && ret=0
 ;;
 (set)
 _arguments "${_arguments_options[@]}" : \
-'--title=[Replace the title. Use - for standard input]:TITLE:_default' \
+'--name=[Replace the name]:NAME:_default' \
 '--tagline=[Replace the tagline. Use - for standard input]:TAGLINE:_default' \
 '(--clear-blocked)--blocked=[Record what must clear before this item can move, in one line. Use - for standard input]:BLOCKED:_default' \
 '*--tags=[Replace the tags wholesale]:TAGS:_default' \
@@ -125,14 +125,14 @@ _arguments "${_arguments_options[@]}" : \
 '--quiet[Print only what was asked for]' \
 '-h[Print help]' \
 '--help[Print help]' \
-':id -- Four-character item id, as printed by any listing:_default' \
+':id -- Item id or name, as printed by any listing:_default' \
 && ret=0
 ;;
 (reorder)
 _arguments "${_arguments_options[@]}" : \
 '--position=[Move it to this position, counting from one]:N:_default' \
-'--before=[Move it directly ahead of this item]:ID:_default' \
-'--after=[Move it directly behind this item]:ID:_default' \
+'--before=[Move it directly ahead of this item]:ITEM:_default' \
+'--after=[Move it directly behind this item]:ITEM:_default' \
 '(--top --bottom --position --before --after)*--sequence=[Reorder in bulk. Listed items move to the front in this order]:SEQUENCE:_default' \
 '--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
 '--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
@@ -144,7 +144,7 @@ _arguments "${_arguments_options[@]}" : \
 '--quiet[Print only what was asked for]' \
 '-h[Print help]' \
 '--help[Print help]' \
-'::id -- Four-character item id. Omit only with --sequence:_default' \
+'::id -- Item id or name. Omit only with --sequence:_default' \
 && ret=0
 ;;
 (promote)
@@ -158,12 +158,12 @@ _arguments "${_arguments_options[@]}" : \
 '--quiet[Print only what was asked for]' \
 '-h[Print help]' \
 '--help[Print help]' \
-':id -- Four-character item id, as printed by any listing:_default' \
+':id -- Item id or name, as printed by any listing:_default' \
 && ret=0
 ;;
 (relay)
 _arguments "${_arguments_options[@]}" : \
-'--title=[Title of the successor. Use - for standard input]:TITLE:_default' \
+'--name=[Name of the successor, under the same rules as create]:NAME:_default' \
 '--tagline=[Tagline of the successor. Use - for standard input]:TAGLINE:_default' \
 '--body=[Body of the successor. Use - for standard input]:BODY:_default' \
 '--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
@@ -174,7 +174,7 @@ _arguments "${_arguments_options[@]}" : \
 '--quiet[Print only what was asked for]' \
 '-h[Print help]' \
 '--help[Print help]' \
-':id -- The relay being consumed:_default' \
+':id -- The relay being consumed, by id or name:_default' \
 && ret=0
 ;;
 (close)
@@ -187,7 +187,7 @@ _arguments "${_arguments_options[@]}" : \
 '--quiet[Print only what was asked for]' \
 '-h[Print help (see more with '\''--help'\'')]' \
 '--help[Print help (see more with '\''--help'\'')]' \
-':id -- Four-character item id, as printed by any listing:_default' \
+':id -- Item id or name, as printed by any listing:_default' \
 && ret=0
 ;;
 (doctor)
