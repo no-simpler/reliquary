@@ -163,6 +163,30 @@ The four older conventions it supersedes are still in place and unmigrated: Pill
 `~/.claude/commands/modes/{afk,tree}.md`, and `~/.config/reliquary/design/`. Migration is
 deliberate and one at a time.
 
+### Friction corpus (`midden`)
+
+Machine-wide record of what the harness cost an agent — a directive that was missing, contradicted,
+stale, or a fact that had to be hunted for. Public relic (`~/.config/relics/midden/`, Rust).
+
+Sibling to docket, and deliberately its inverse: docket carries transient work **forward**, midden
+accumulates durable evidence **about the second brain itself**. Notes live in a flat, machine-local,
+untracked corpus at `~/.claude/midden/`. Flat because cross-project pattern detection is the point —
+`project` is a field, not a directory, and one ambiguous directive met from three repositories folds
+into one note rather than three.
+
+Nothing announces it. There is **no hook and no skill**: `SessionEnd` is observe-only and cannot
+inject context, `Stop` fires every turn, and a corpus filled reflexively is one nobody reads. The
+sole surface is `~/.claude/commands/modes/midden.md` — `+midden` as a standing directive, or
+`/modes:midden` invoked once at session end.
+
+Size is policed at write time, not only by `gc`: field caps, plus a fingerprint over kind, target and
+claim so a recurrence bumps a counter instead of writing a second file. `midden gc` runs from the
+relic's `scripts/update.sh`, which `up` already invokes.
+
+**The binary is the single source of truth for its own surface** — reference in `midden --help` and
+`midden help`, doctrine in `midden guide`. Do not restate either here or anywhere else; the relic's
+`CLAUDE.md` records why.
+
 ### Touch ID window (`ske`)
 
 `ske` ("skeleton key") opens a **time-boxed window** in which 1Password Touch ID prompts are

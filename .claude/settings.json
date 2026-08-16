@@ -8,6 +8,7 @@
       "Bash(grep:*)",
       "Bash(git mv:*)",
       "Bash(docket:*)",
+      "Bash(midden:*)",
       "Edit(~/.claude/docket/**)"
     ],
     "deny": [
