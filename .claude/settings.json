@@ -8,8 +8,7 @@
       "Bash(grep:*)",
       "Bash(git mv:*)",
       "Bash(docket:*)",
-      "Edit(~/.claude/docket/**)",
-      "Write(~/.claude/docket/**)"
+      "Edit(~/.claude/docket/**)"
     ],
     "deny": [
       "Bash(php:*)",
