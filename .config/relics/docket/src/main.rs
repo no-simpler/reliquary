@@ -1,5 +1,6 @@
 mod cli;
 mod cmd;
+mod field;
 mod help;
 mod id;
 mod item;

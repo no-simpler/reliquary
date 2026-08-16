@@ -25,13 +25,14 @@ pub fn list(view: &View<'_>) -> Result<()> {
                     blocked,
                     item.title
                 );
-                for line in item.description.lines().filter(|l| !l.trim().is_empty()) {
-                    println!("    {}", line.trim_end());
-                }
-                if let Some(reason) = item.blocked.as_deref() {
-                    for line in reason.lines().filter(|l| !l.trim().is_empty()) {
-                        println!("    blocked: {}", line.trim_end());
-                    }
+                println!("    {}", item.tagline.trim());
+                if let Some(reason) = item
+                    .blocked
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|r| !r.is_empty())
+                {
+                    println!("    blocked: {reason}");
                 }
             }
             Err(error) => {

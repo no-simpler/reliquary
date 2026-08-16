@@ -536,21 +536,8 @@ fn read_body(path: &Path) -> Result<String> {
     Ok(body.to_owned())
 }
 
-/// A trailing newline is what makes a multi-line value serialise as a readable
-/// block scalar rather than one escaped line.
-fn as_block(value: &str) -> String {
-    if value.contains('\n') && !value.ends_with('\n') {
-        format!("{value}\n")
-    } else {
-        value.to_owned()
-    }
-}
-
 pub fn render(item: &Item, body: &str) -> Result<String> {
-    let mut wire = Wire::from(item);
-    wire.description = as_block(&wire.description);
-    wire.blocked = wire.blocked.as_deref().map(as_block);
-    let front = serde_yaml_ng::to_string(&wire)?;
+    let front = serde_yaml_ng::to_string(&Wire::from(item))?;
     Ok(format!("---\n{front}---\n{body}"))
 }
 

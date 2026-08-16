@@ -76,8 +76,8 @@ json\:"Machine-readable, for scripting"))' \
 ;;
 (create)
 _arguments "${_arguments_options[@]}" : \
-'--title=[One line, shown in every listing. \`-\` reads standard input]:TITLE:_default' \
-'--description=[The abstract a future session reads first. \`-\` reads standard input]:DESCRIPTION:_default' \
+'--title=[The item'\''s name, at most 72 characters. \`-\` reads standard input]:TITLE:_default' \
+'--tagline=[One line under the title, at most 80 characters. \`-\` reads standard input]:TAGLINE:_default' \
 '--to=[Open it for another project. Defaults to this one]:PATH:_files' \
 '--body=[Body to write, instead of leaving the file for you to fill in. \`-\` reads standard input]:BODY:_default' \
 '--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
@@ -127,8 +127,8 @@ json\:"Machine-readable, for scripting"))' \
 (set)
 _arguments "${_arguments_options[@]}" : \
 '--title=[Replace the title. \`-\` reads standard input]:TITLE:_default' \
-'--description=[Replace the description. \`-\` reads standard input]:DESCRIPTION:_default' \
-'(--clear-blocked)--blocked=[Record what must clear before this item can move. \`-\` reads standard input]:BLOCKED:_default' \
+'--tagline=[Replace the tagline. \`-\` reads standard input]:TAGLINE:_default' \
+'(--clear-blocked)--blocked=[Record what must clear before this item can move, in one line. \`-\` reads standard input]:BLOCKED:_default' \
 '*--tags=[Replace the tags wholesale]:TAGS:_default' \
 '--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
 agent\:"Unaligned, uncoloured lines with a stable field order"
@@ -184,7 +184,7 @@ json\:"Machine-readable, for scripting"))' \
 (relay)
 _arguments "${_arguments_options[@]}" : \
 '--title=[Title of the successor. \`-\` reads standard input]:TITLE:_default' \
-'--description=[Description of the successor. \`-\` reads standard input]:DESCRIPTION:_default' \
+'--tagline=[Tagline of the successor. \`-\` reads standard input]:TAGLINE:_default' \
 '--body=[Body of the successor. \`-\` reads standard input]:BODY:_default' \
 '--format=[Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code]:FORMAT:((human\:"Aligned, coloured table. The default when a person is watching"
 agent\:"Unaligned, uncoloured lines with a stable field order"

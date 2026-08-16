@@ -44,15 +44,15 @@ Every item:
 
   id            four characters, unique across every project on this machine
   kind          handoff, relay or spec
-  title         the line every listing shows
-  description   the abstract a future session reads first
+  title         the item's name, one line, at most 72 characters
+  tagline       one line under the title, at most 80 characters
   project       absolute path this item belongs to
   created       RFC 3339, UTC
   updated       RFC 3339, UTC
   order         sparse; `docket reorder` owns it
-  blocked       optional, free text: present means blocked, and says why
+  blocked       optional, one line at most 80: present means blocked, and why
   origin        optional: the project this was written from, when they differ
-  tags          optional
+  tags          optional, single tokens of at most 32 characters
 
 relay adds:
 
@@ -63,6 +63,11 @@ relay adds:
 spec adds:
 
   stage         design or implementation
+
+Every one-line field is normalised on the way in: trimmed, and any run of
+whitespace collapsed to a single space. The limits bind what is written, never
+what is read — an item already on disk with an over-long field still lists and
+still opens, and `docket doctor` reports it with the command that fixes it.
 
 An item whose frontmatter stops parsing is never hidden. It stays in every
 listing marked INVALID with the line and column at fault, `docket doctor`
@@ -85,7 +90,7 @@ far as it can and keeps the rest, so an item written for a project you are about
 to create keys to the same docket once it exists:
 
   docket create handoff --to ~/Developer/new-thing --allow-missing \\
-      --title '...' --description '...'
+      --title '...' --tagline '...'
 
 Items live under ~/.claude/docket, one directory per project, beside the
 transcript directory Claude Code keeps for the same path. Set DOCKET_ROOT to
@@ -100,7 +105,7 @@ FOR AGENTS
 
 Writing an item:
 
-  1. `docket create <kind> --title '...' --description '...'` prints an id and a
+  1. `docket create <kind> --title '...' --tagline '...'` prints an id and a
      path.
   2. Write the body at that path with ordinary file tools. It is Markdown, and
      the frontmatter above it belongs to the CLI — leave it alone.
@@ -121,7 +126,12 @@ at a terminal gets an aligned, coloured table instead. Force either with
 
 A good body says what a session arriving cold needs: what the work is, what was
 already settled and must not be re-derived, what to do first, and how to know it
-worked. What is obvious now is gone in a week.";
+worked. What is obvious now is gone in a week.
+
+The title and the tagline are not a summary of that body. They are the two lines
+a reader skims to decide whether to open it at all — 72 and 80 characters, hard
+limits — so write them as a name and a single claim, and put everything else
+below the frontmatter.";
 
 pub fn topic(name: &str) -> Option<&'static str> {
     TOPICS

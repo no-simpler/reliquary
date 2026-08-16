@@ -84,8 +84,8 @@ complete -c docket -n "__fish_docket_using_subcommand ls" -l archived -d 'What h
 complete -c docket -n "__fish_docket_using_subcommand ls" -l json -d 'Shorthand for --format json'
 complete -c docket -n "__fish_docket_using_subcommand ls" -s q -l quiet -d 'Print only what was asked for, with no confirmations'
 complete -c docket -n "__fish_docket_using_subcommand ls" -s h -l help -d 'Print help (see more with \'--help\')'
-complete -c docket -n "__fish_docket_using_subcommand create" -l title -d 'One line, shown in every listing. `-` reads standard input' -r
-complete -c docket -n "__fish_docket_using_subcommand create" -l description -d 'The abstract a future session reads first. `-` reads standard input' -r
+complete -c docket -n "__fish_docket_using_subcommand create" -l title -d 'The item\'s name, at most 72 characters. `-` reads standard input' -r
+complete -c docket -n "__fish_docket_using_subcommand create" -l tagline -d 'One line under the title, at most 80 characters. `-` reads standard input' -r
 complete -c docket -n "__fish_docket_using_subcommand create" -l to -d 'Open it for another project. Defaults to this one' -r -F
 complete -c docket -n "__fish_docket_using_subcommand create" -l body -d 'Body to write, instead of leaving the file for you to fill in. `-` reads standard input' -r
 complete -c docket -n "__fish_docket_using_subcommand create" -l format -d 'Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code' -r -f -a "human\t'Aligned, coloured table. The default when a person is watching'
@@ -120,8 +120,8 @@ complete -c docket -n "__fish_docket_using_subcommand path" -l json -d 'Shorthan
 complete -c docket -n "__fish_docket_using_subcommand path" -s q -l quiet -d 'Print only what was asked for, with no confirmations'
 complete -c docket -n "__fish_docket_using_subcommand path" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c docket -n "__fish_docket_using_subcommand set" -l title -d 'Replace the title. `-` reads standard input' -r
-complete -c docket -n "__fish_docket_using_subcommand set" -l description -d 'Replace the description. `-` reads standard input' -r
-complete -c docket -n "__fish_docket_using_subcommand set" -l blocked -d 'Record what must clear before this item can move. `-` reads standard input' -r
+complete -c docket -n "__fish_docket_using_subcommand set" -l tagline -d 'Replace the tagline. `-` reads standard input' -r
+complete -c docket -n "__fish_docket_using_subcommand set" -l blocked -d 'Record what must clear before this item can move, in one line. `-` reads standard input' -r
 complete -c docket -n "__fish_docket_using_subcommand set" -l tags -d 'Replace the tags wholesale' -r
 complete -c docket -n "__fish_docket_using_subcommand set" -l format -d 'Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code' -r -f -a "human\t'Aligned, coloured table. The default when a person is watching'
 agent\t'Unaligned, uncoloured lines with a stable field order'
@@ -164,7 +164,7 @@ complete -c docket -n "__fish_docket_using_subcommand promote" -l json -d 'Short
 complete -c docket -n "__fish_docket_using_subcommand promote" -s q -l quiet -d 'Print only what was asked for, with no confirmations'
 complete -c docket -n "__fish_docket_using_subcommand promote" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c docket -n "__fish_docket_using_subcommand relay" -l title -d 'Title of the successor. `-` reads standard input' -r
-complete -c docket -n "__fish_docket_using_subcommand relay" -l description -d 'Description of the successor. `-` reads standard input' -r
+complete -c docket -n "__fish_docket_using_subcommand relay" -l tagline -d 'Tagline of the successor. `-` reads standard input' -r
 complete -c docket -n "__fish_docket_using_subcommand relay" -l body -d 'Body of the successor. `-` reads standard input' -r
 complete -c docket -n "__fish_docket_using_subcommand relay" -l format -d 'Output shape. Defaults to human at a terminal and agent everywhere else, including under Claude Code' -r -f -a "human\t'Aligned, coloured table. The default when a person is watching'
 agent\t'Unaligned, uncoloured lines with a stable field order'

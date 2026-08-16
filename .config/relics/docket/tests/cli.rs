@@ -63,7 +63,7 @@ impl Docket {
             kind,
             "--title",
             title,
-            "--description",
+            "--tagline",
             "What a future session reads first.",
             "--body",
             &body,
@@ -148,7 +148,7 @@ fn front(path: &Path) -> String {
 }
 
 /// Ids in listing order, taken from the numbered lines of an agent-shaped
-/// listing so a description can never be mistaken for a row.
+/// listing so a tagline can never be mistaken for a row.
 fn listed_ids(stdout: &str) -> Vec<String> {
     stdout
         .lines()
@@ -224,7 +224,7 @@ fn creating_for_a_missing_target_demands_allow_missing() {
         "handoff",
         "--title",
         "Settle the intent",
-        "--description",
+        "--tagline",
         "Two candidates, neither committed to.",
         "--to",
         &missing,
@@ -240,40 +240,156 @@ fn creating_for_a_missing_target_demands_allow_missing() {
     );
 }
 
+/// Longer than any limit, so one value serves every over-length assertion.
+const TOO_LONG: &str = "\
+Far past every limit this tool enforces, and written as prose because prose is \
+exactly what does not belong in a field that has to be skimmed in one glance.";
+
 #[test]
-fn creating_rejects_an_empty_title_or_description() {
+fn creating_rejects_an_empty_or_overlong_title_or_tagline() {
     let docket = Docket::new();
     let project = docket.project("proj");
+    let create = |title: &str, tagline: &str| {
+        docket.run(&[
+            "create",
+            "handoff",
+            "--title",
+            title,
+            "--tagline",
+            tagline,
+            "--project",
+            &project,
+            "--allow-missing",
+            "-q",
+        ])
+    };
 
-    let untitled = docket.run(&[
-        "create",
-        "handoff",
+    for (title, tagline, expected) in [
+        ("   ", "A tagline.", "--title is required"),
+        ("A title", "", "--tagline is required"),
+        (TOO_LONG, "A tagline.", "--title is 156 characters"),
+        ("A title", TOO_LONG, "--tagline is 156 characters"),
+    ] {
+        let run = create(title, tagline);
+        assert!(!run.ok(), "expected a refusal: {}", run.stdout());
+        assert!(run.stderr().contains(expected), "{}", run.stderr());
+    }
+    assert!(create("A title", "A tagline.").ok());
+}
+
+#[test]
+fn set_and_relay_hold_the_same_limits_as_create() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (handoff, _) = docket.create(&project, "handoff", "A handoff");
+    let (relay, _) = docket.create(&project, "relay", "A relay");
+
+    for (flag, value, expected) in [
+        ("--title", TOO_LONG, "--title is 156 characters"),
+        ("--tagline", TOO_LONG, "--tagline is 156 characters"),
+        ("--title", "  ", "--title is required"),
+        ("--blocked", "  ", "--clear-blocked"),
+        ("--blocked", TOO_LONG, "--blocked is 156 characters"),
+    ] {
+        let run = docket.run(&["set", &handoff, flag, value, "-q"]);
+        assert!(!run.ok(), "expected `set {flag}` to refuse {value:?}");
+        assert!(run.stderr().contains(expected), "{}", run.stderr());
+    }
+
+    let run = docket.run(&[
+        "relay",
+        &relay,
         "--title",
-        "   ",
-        "--description",
-        "An abstract.",
-        "--project",
-        &project,
-        "--allow-missing",
+        "A successor",
+        "--tagline",
+        TOO_LONG,
         "-q",
     ]);
-    assert!(!untitled.ok());
-    assert!(untitled.stderr().contains("a title is required"));
+    assert!(!run.ok(), "expected `relay` to refuse an overlong tagline");
+    assert!(
+        run.stderr().contains("--tagline is 156 characters"),
+        "{}",
+        run.stderr()
+    );
+    // The refusal happened before anything was written: the relay is intact.
+    let listed = docket.run(&["list", "--project", &project, "-q"]);
+    assert_eq!(listed_ids(&listed.stdout()), vec![handoff, relay]);
+}
 
-    let undescribed = docket.run(&[
+#[test]
+fn a_wrapped_tagline_is_stored_as_one_line() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let run = docket.run(&[
         "create",
         "handoff",
         "--title",
         "A title",
-        "--description",
-        "",
+        "--tagline",
+        "Two   lines\nof it.",
         "--project",
         &project,
         "--allow-missing",
         "-q",
     ]);
-    assert!(!undescribed.ok());
-    assert!(undescribed.stderr().contains("a description is required"));
+    assert!(run.ok(), "create failed: {}", run.stderr());
+    let (_, path) = id_and_path(&run.stdout());
+    assert!(
+        front(&path).contains("tagline: Two lines of it.\n"),
+        "{}",
+        front(&path)
+    );
+}
+
+#[test]
+fn a_legacy_description_key_loads_and_is_rewritten_as_a_tagline() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (id, path) = docket.create(&project, "handoff", "A handoff");
+
+    let text = fs::read_to_string(&path).expect("reading the item");
+    let overlong = format!("description: {}\n", TOO_LONG);
+    fs::write(
+        &path,
+        text.lines()
+            .map(|line| {
+                if line.starts_with("tagline:") {
+                    overlong.clone()
+                } else {
+                    format!("{line}\n")
+                }
+            })
+            .collect::<String>(),
+    )
+    .expect("rewriting the item");
+
+    // Lenient on the way in: the item still parses and still lists.
+    let listed = docket.run(&["list", "--project", &project, "-q"]);
+    assert!(listed.ok());
+    assert!(listed.stdout().contains(TOO_LONG), "{}", listed.stdout());
+
+    // Reported on the way past, with the command that fixes it.
+    let doctor = docket.run(&["doctor"]);
+    assert!(!doctor.ok(), "doctor should fail: {}", doctor.stdout());
+    assert!(
+        doctor.stdout().contains("overlong") && doctor.stdout().contains("--tagline"),
+        "{}",
+        doctor.stdout()
+    );
+
+    let set = docket.run(&["set", &id, "--tagline", "Short enough now.", "-q"]);
+    assert!(set.ok(), "set failed: {}", set.stderr());
+    let front = front(&path);
+    assert!(front.contains("tagline: Short enough now.\n"), "{front}");
+    assert!(!front.contains("description:"), "{front}");
+}
+
+#[test]
+fn help_states_the_limits_it_enforces() {
+    let docket = Docket::new();
+    let metadata = docket.run(&["help", "metadata"]).stdout();
+    assert!(metadata.contains("72"), "{metadata}");
+    assert!(metadata.contains("80"), "{metadata}");
 }
 
 #[test]
@@ -402,7 +518,7 @@ fn relaying_mints_a_successor_and_archives_the_predecessor() {
         &first,
         "--title",
         "Wave two",
-        "--description",
+        "--tagline",
         "Wave one landed green.",
         "-q",
     ]);
@@ -420,7 +536,7 @@ fn relaying_mints_a_successor_and_archives_the_predecessor() {
         &second,
         "--title",
         "Wave three",
-        "--description",
+        "--tagline",
         "Wave two landed green.",
         "-q",
     ]);
@@ -448,7 +564,7 @@ fn relaying_a_handoff_points_at_promote() {
         &id,
         "--title",
         "Successor",
-        "--description",
+        "--tagline",
         "Owed by nothing.",
         "-q",
     ]);
@@ -472,7 +588,7 @@ fn body_bytes_survive_a_metadata_rewrite() {
         "handoff",
         "--title",
         "Body fidelity",
-        "--description",
+        "--tagline",
         "The body is not the CLI's to touch.",
         "--body",
         body,

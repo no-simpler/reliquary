@@ -41,7 +41,7 @@ Topics:
 Getting started:
 
   docket                                     what is outstanding here
-  docket create handoff --title '...' --description '...'
+  docket create handoff --title '...' --tagline '...'
   docket show b71c                           read one
   docket close b71c                          done with it";
 
@@ -111,18 +111,19 @@ Opens an item and prints its id and the file to write the body into. The CLI
 owns placement and metadata; the body is ordinary Markdown you write with your
 editor or your file tools.
 
-Title and description are both required. The title is the line a listing shows;
-the description is the abstract that tells a future session whether this is the
-thing it came for. Either may be `-` to read from standard input.",
+Title and tagline are both required, and both are one line: the title names the
+item in at most 72 characters, and the tagline says in at most 80 whether this
+is the thing a session came for. Neither is the place for detail — that is what
+the body is for. Either may be `-` to read from standard input.",
         after_long_help = "\
 Examples:
 
   docket create handoff --title 'Settle the Postgres intent' \\
-      --description 'Two candidate intents, neither committed to.'
+      --tagline 'Two candidate intents, neither committed to.'
 
-  docket create spec --title 'Rosetta messenger integration' --description -
+  docket create spec --title 'Rosetta messenger integration' --tagline -
 
-  docket create handoff --title '...' --description '...' \\
+  docket create handoff --title '...' --tagline '...' \\
       --to ~/Developer/new-thing --allow-missing"
     )]
     Create(CreateArgs),
@@ -141,7 +142,9 @@ Example:
     #[command(
         long_about = "\
 Rewrites frontmatter in canonical order, which also repairs an item whose
-frontmatter was hand-edited into something that no longer parses.
+frontmatter was hand-edited into something that no longer parses. A value too
+long to accept is cut to fit rather than refused, so a damaged item is always
+recoverable.
 
 Use `promote` to change kind or spec stage; this command never moves an item
 along the ladder.",
@@ -149,6 +152,7 @@ along the ladder.",
 Examples:
 
   docket set b71c --title 'Settle what the connection is for'
+  docket set b71c --tagline 'Two candidate intents, neither committed to.'
   docket set b71c --blocked 'Awaiting the upstream fix in rvben/rumdl#812.'
   docket set b71c --clear-blocked
   docket set b71c --tags ci,postgres"
@@ -208,7 +212,7 @@ Only a relay can be relayed. Promote a handoff first.",
 Example:
 
   docket relay a3f9 --title 'Wave 2: migrate the remaining suites' \\
-      --description 'Wave 1 landed green. Xdebug is wired; the fixtures are not.'"
+      --tagline 'Wave 1 landed green. Xdebug is wired; the fixtures are not.'"
     )]
     Relay(RelayArgs),
 
@@ -277,13 +281,14 @@ pub struct CreateArgs {
     #[arg(value_enum)]
     pub kind: Kind,
 
-    /// One line, shown in every listing. `-` reads standard input.
+    /// The item's name, at most 72 characters. `-` reads standard input.
     #[arg(long)]
     pub title: String,
 
-    /// The abstract a future session reads first. `-` reads standard input.
+    /// One line under the title, at most 80 characters. `-` reads standard
+    /// input.
     #[arg(long)]
-    pub description: String,
+    pub tagline: String,
 
     /// Open it for another project. Defaults to this one.
     #[arg(long, value_name = "PATH")]
@@ -324,12 +329,12 @@ pub struct SetArgs {
     #[arg(long)]
     pub title: Option<String>,
 
-    /// Replace the description. `-` reads standard input.
+    /// Replace the tagline. `-` reads standard input.
     #[arg(long)]
-    pub description: Option<String>,
+    pub tagline: Option<String>,
 
-    /// Record what must clear before this item can move. `-` reads standard
-    /// input.
+    /// Record what must clear before this item can move, in one line. `-` reads
+    /// standard input.
     #[arg(long, conflicts_with = "clear_blocked")]
     pub blocked: Option<String>,
 
@@ -392,9 +397,9 @@ pub struct RelayArgs {
     #[arg(long)]
     pub title: String,
 
-    /// Description of the successor. `-` reads standard input.
+    /// Tagline of the successor. `-` reads standard input.
     #[arg(long)]
-    pub description: String,
+    pub tagline: String,
 
     /// Body of the successor. `-` reads standard input.
     #[arg(long)]

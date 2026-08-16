@@ -51,7 +51,7 @@ pub fn item_json(item: &Item) -> Value {
             _ => None,
         },
         "title": item.title,
-        "description": item.description,
+        "tagline": item.tagline,
         "project": item.project,
         "created": item.created.to_string(),
         "updated": item.updated.to_string(),

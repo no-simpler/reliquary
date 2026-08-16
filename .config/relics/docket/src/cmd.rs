@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 
 use crate::cli::*;
+use crate::field;
 use crate::help;
 use crate::id::Id;
 use jiff::Timestamp;
@@ -104,16 +105,8 @@ pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
         );
     }
 
-    let title = text(&args.title)?;
-    let description = text(&args.description)?;
-    if title.trim().is_empty() {
-        bail!("a title is required — it is the only line most listings show");
-    }
-    if description.trim().is_empty() {
-        bail!(
-            "a description is required — it is what tells a future session whether this is the item it came for"
-        );
-    }
+    let title = field::one_line("--title", &text(&args.title)?, field::TITLE_MAX)?;
+    let tagline = field::one_line("--tagline", &text(&args.tagline)?, field::TAGLINE_MAX)?;
     let body = match &args.body {
         Some(raw) => text(raw)?,
         None => String::new(),
@@ -124,7 +117,7 @@ pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
     let item = Item {
         id,
         title,
-        description,
+        tagline,
         project: target.clone(),
         created: now,
         updated: now,
@@ -203,13 +196,20 @@ pub fn set(ctx: &Ctx, args: &SetArgs) -> Result<()> {
     };
 
     if let Some(value) = &args.title {
-        item.title = text(value)?;
+        item.title = field::one_line("--title", &text(value)?, field::TITLE_MAX)?;
     }
-    if let Some(value) = &args.description {
-        item.description = text(value)?;
+    if let Some(value) = &args.tagline {
+        item.tagline = field::one_line("--tagline", &text(value)?, field::TAGLINE_MAX)?;
     }
     if let Some(value) = &args.blocked {
-        item.blocked = Some(text(value)?);
+        let value = text(value)?;
+        if value.trim().is_empty() {
+            bail!(
+                "--blocked says what must clear. To drop the block: `docket set {id} --clear-blocked`",
+                id = record.id
+            );
+        }
+        item.blocked = Some(field::one_line("--blocked", &value, field::BLOCKED_MAX)?);
     }
     if args.clear_blocked {
         item.blocked = None;
@@ -217,9 +217,8 @@ pub fn set(ctx: &Ctx, args: &SetArgs) -> Result<()> {
     if let Some(tags) = &args.tags {
         item.tags = tags
             .iter()
-            .map(|t| t.trim().to_owned())
-            .filter(|t| !t.is_empty())
-            .collect();
+            .filter_map(|t| field::tag(t).transpose())
+            .collect::<Result<_>>()?;
     }
     item.updated = now();
 
@@ -272,8 +271,12 @@ fn recover(record: &Record) -> Result<Item> {
 
     Ok(Item {
         id: record.id,
-        title: get("title").unwrap_or_else(|| format!("recovered {}", record.id)),
-        description: get("description")
+        title: get("title")
+            .map(|t| field::clamp(&t, field::TITLE_MAX))
+            .unwrap_or_else(|| format!("recovered {}", record.id)),
+        tagline: get("tagline")
+            .or_else(|| get("description"))
+            .map(|t| field::clamp(&t, field::TAGLINE_MAX))
             .unwrap_or_else(|| "Recovered from damaged frontmatter.".to_owned()),
         project: record.project.clone(),
         created: stamp("created"),
@@ -296,7 +299,7 @@ fn recover(record: &Record) -> Result<Item> {
                 chain: None,
             },
         },
-        blocked: get("blocked"),
+        blocked: get("blocked").map(|b| field::clamp(&b, field::BLOCKED_MAX)),
         origin: None,
         tags: Vec::new(),
     })
@@ -403,14 +406,14 @@ pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
             )
         })?;
 
-    let title = text(&args.title)?;
-    let description = text(&args.description)?;
+    let title = field::one_line("--title", &text(&args.title)?, field::TITLE_MAX)?;
+    let tagline = field::one_line("--tagline", &text(&args.tagline)?, field::TAGLINE_MAX)?;
     let body = match &args.body {
         Some(raw) => text(raw)?,
         None => String::new(),
     };
 
-    let successor = item.successor(ctx.depot.mint_id(), title, description)?;
+    let successor = item.successor(ctx.depot.mint_id(), title, tagline)?;
     let path = ctx.depot.create(&successor, &body)?;
     ctx.depot.archive(&record)?;
 
@@ -496,6 +499,23 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
                             record.id,
                             record.path.display()
                         ));
+                    }
+                    for (label, value, max) in [
+                        ("title", Some(item.title.as_str()), field::TITLE_MAX),
+                        ("tagline", Some(item.tagline.as_str()), field::TAGLINE_MAX),
+                        ("blocked", item.blocked.as_deref(), field::BLOCKED_MAX),
+                    ] {
+                        let Some(value) = value else { continue };
+                        if field::is_overlong(value, max) {
+                            report(format!(
+                                "overlong {} has a {} of {} characters, over the limit of {max}\n         \
+                                 repair: `docket set {} --{label} '...'`",
+                                record.id,
+                                label,
+                                value.chars().count(),
+                                record.id
+                            ));
+                        }
                     }
                     if ui::age_days(item.created) > 60 {
                         report(format!(

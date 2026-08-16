@@ -103,7 +103,7 @@ impl Rung {
 pub struct Item {
     pub id: Id,
     pub title: String,
-    pub description: String,
+    pub tagline: String,
     pub project: PathBuf,
     pub created: Timestamp,
     pub updated: Timestamp,
@@ -198,7 +198,7 @@ impl Item {
 
     /// The successor a consumed relay owes: same chain, next hop, superseding
     /// the item it was minted from.
-    pub fn successor(&self, id: Id, title: String, description: String) -> Result<Item> {
+    pub fn successor(&self, id: Id, title: String, tagline: String) -> Result<Item> {
         let Rung::Relay(chain) = &self.rung else {
             bail!(
                 "{} is a {}; only a relay owes a successor. Promote it first: `docket promote {}`",
@@ -211,7 +211,7 @@ impl Item {
         Ok(Item {
             id,
             title,
-            description,
+            tagline,
             project: self.project.clone(),
             created: now,
             updated: now,
@@ -256,7 +256,10 @@ pub struct Wire {
     pub id: Id,
     pub kind: Kind,
     pub title: String,
-    pub description: String,
+    /// The alias is what lets every item written before the field was renamed
+    /// load unchanged; the next write puts it under the current key.
+    #[serde(alias = "description")]
+    pub tagline: String,
     pub project: PathBuf,
     pub created: Timestamp,
     pub updated: Timestamp,
@@ -321,7 +324,7 @@ impl TryFrom<Wire> for Item {
         Ok(Item {
             id: w.id,
             title: w.title,
-            description: w.description,
+            tagline: w.tagline,
             project: w.project,
             created: w.created,
             updated: w.updated,
@@ -341,7 +344,7 @@ impl From<&Item> for Wire {
             id: item.id,
             kind: item.kind(),
             title: item.title.clone(),
-            description: item.description.clone(),
+            tagline: item.tagline.clone(),
             project: item.project.clone(),
             created: item.created,
             updated: item.updated,

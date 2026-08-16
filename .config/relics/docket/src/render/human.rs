@@ -1,6 +1,7 @@
 use anyhow::Result;
-// Horizontal rules only: description cells wrap to several lines, and without a
-// rule between rows one item's detail reads as the next item's.
+// Horizontal rules only: a narrow terminal wraps the detail cell over several
+// lines, and without a rule between rows one item's detail reads as the next
+// item's.
 use comfy_table::presets::UTF8_HORIZONTAL_ONLY;
 use comfy_table::{Attribute, Cell, Color, ColumnConstraint, ContentArrangement, Table, Width};
 
@@ -36,9 +37,12 @@ pub fn list(view: &View<'_>) -> Result<()> {
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(vec!["#", "ID", "KIND", "AGE", "TITLE", "DETAIL"]);
 
-    // Without an upper bound the prose columns take the whole terminal, and a
-    // description reads worse as one long line than as a wrapped cell.
-    for (column, cap) in [(4usize, 44u16), (5, 64)] {
+    // The display bound is the stored bound: a title and a tagline that pass
+    // validation each occupy one row, and only a narrow terminal wraps them.
+    for (column, cap) in [
+        (4usize, crate::field::TITLE_MAX as u16),
+        (5, crate::field::TAGLINE_MAX as u16),
+    ] {
         if let Some(column) = table.column_mut(column) {
             column.set_constraint(ColumnConstraint::UpperBoundary(Width::Fixed(cap)));
         }
@@ -47,7 +51,7 @@ pub fn list(view: &View<'_>) -> Result<()> {
     for (index, record) in view.records.iter().enumerate() {
         match &record.item {
             Ok(item) => {
-                let mut detail = item.description.trim_end().to_owned();
+                let mut detail = item.tagline.trim_end().to_owned();
                 if let Some(reason) = item.blocked.as_deref().filter(|r| !r.trim().is_empty()) {
                     detail = format!("BLOCKED: {}\n{detail}", reason.trim());
                 }

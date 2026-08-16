@@ -40,7 +40,7 @@ archives the predecessor. Never open the successor by hand and close the
 predecessor separately — that is how a chain silently forks or loses its
 provenance.
 
-The successor is a fresh item and needs its own title and description. Do not
+The successor is a fresh item and needs its own title and tagline. Do not
 title it "continued" or "part 2": name what it now asks for. Its body is written
 from what this session learned, not copied forward. Carry forward only what is
 still live; the predecessor is archived, and nothing reads it again.
