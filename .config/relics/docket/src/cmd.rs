@@ -378,12 +378,8 @@ fn recover(record: &Record) -> Result<Item> {
 
     Ok(Item {
         id: record.id,
-        name: field::recovered_name(
-            get("name").or_else(|| get("title")).as_deref(),
-            record.id.as_str(),
-        ),
+        name: field::recovered_name(get("name").as_deref(), record.id.as_str()),
         tagline: get("tagline")
-            .or_else(|| get("description"))
             .map(|t| field::clamp(&t, field::TAGLINE_MAX))
             .unwrap_or_else(|| "Recovered from damaged metadata.".to_owned()),
         project: record.project.clone(),

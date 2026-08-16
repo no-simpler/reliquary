@@ -250,16 +250,17 @@ impl fmt::Display for Step {
 /// The on-disk projection. Field order here is the canonical frontmatter key
 /// order, and every rung's fields are a superset of the rung below it, so a
 /// promotion only ever adds keys.
+///
+/// Unknown keys are denied and superseded ones carry no alias: a key that was
+/// renamed is gone, and an item still holding it fails to parse, lists as
+/// invalid, and is rebuilt by `set`. A reader that quietly accepts both
+/// spellings is a schema with two spellings.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Wire {
     pub id: Id,
     pub kind: Kind,
-    /// Each alias is what lets every item written before that field was renamed
-    /// load unchanged; the next write puts it under the current key.
-    #[serde(alias = "title")]
     pub name: String,
-    #[serde(alias = "description")]
     pub tagline: String,
     pub project: PathBuf,
     pub created: Timestamp,

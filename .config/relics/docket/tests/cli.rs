@@ -257,6 +257,27 @@ fn footprint_gone(path: &Path) -> bool {
     !path.exists()
 }
 
+/// Replaces the line carrying one metadata key, which is how an item written by
+/// an older version of the tool differs from one written now.
+fn swap_key(path: &Path, key: &str, line: &str) {
+    let text = fs::read_to_string(path).expect("reading the item");
+    let prefix = format!("{key}:");
+    let mut found = false;
+    let swapped: String = text
+        .lines()
+        .map(|existing| {
+            if existing.starts_with(&prefix) {
+                found = true;
+                format!("{line}\n")
+            } else {
+                format!("{existing}\n")
+            }
+        })
+        .collect();
+    assert!(found, "{key} is not in {}", path.display());
+    fs::write(path, swapped).expect("rewriting the item");
+}
+
 /// Deletes one metadata key, which is how an item falls out of schema in the
 /// wild.
 fn drop_key(path: &Path, key: &str) {
@@ -464,28 +485,13 @@ fn a_wrapped_tagline_is_stored_as_one_line() {
 }
 
 #[test]
-fn a_legacy_description_key_loads_and_is_rewritten_as_a_tagline() {
+fn an_overlong_value_on_disk_loads_and_is_reported() {
     let docket = Docket::new();
     let project = docket.project("proj");
     let (id, path) = docket.create(&project, "handoff", "A_HANDOFF");
+    swap_key(&path, "tagline", &format!("tagline: {TOO_LONG}"));
 
-    let text = fs::read_to_string(&path).expect("reading the item");
-    let overlong = format!("description: {}\n", TOO_LONG);
-    fs::write(
-        &path,
-        text.lines()
-            .map(|line| {
-                if line.starts_with("tagline:") {
-                    overlong.clone()
-                } else {
-                    format!("{line}\n")
-                }
-            })
-            .collect::<String>(),
-    )
-    .expect("rewriting the item");
-
-    // Lenient on the way in: the item still parses and still lists.
+    // Lenient on the way in: length never keeps an item off a listing.
     let listed = docket.run(&["list", "--project", &project, "-q"]);
     assert!(listed.ok());
     assert!(listed.stdout().contains(TOO_LONG), "{}", listed.stdout());
@@ -501,48 +507,69 @@ fn a_legacy_description_key_loads_and_is_rewritten_as_a_tagline() {
 
     let set = docket.run(&["set", &id, "--tagline", "Short enough now.", "-q"]);
     assert!(set.ok(), "set failed: {}", set.stderr());
-    let front = front(&path);
-    assert!(front.contains("tagline: Short enough now.\n"), "{front}");
-    assert!(!front.contains("description:"), "{front}");
+    assert!(
+        front(&path).contains("tagline: Short enough now.\n"),
+        "{}",
+        front(&path)
+    );
 }
 
+/// Leniency covers values, never keys. A renamed key carries no alias, so an
+/// item still holding the old one does not quietly load under two spellings —
+/// it fails to parse, says which key it does not know, and is rebuilt by `set`.
 #[test]
-fn a_legacy_title_key_loads_and_is_rewritten_as_a_name() {
+fn a_superseded_key_is_not_read() {
     let docket = Docket::new();
     let project = docket.project("proj");
-    let (id, path) = docket.create(&project, "handoff", "A_HANDOFF");
 
-    let text = fs::read_to_string(&path).expect("reading the item");
-    fs::write(
-        &path,
-        text.lines()
-            .map(|line| match line.strip_prefix("name: ") {
-                Some(_) => "title: Migrate the four legacy conventions\n".to_owned(),
-                None => format!("{line}\n"),
-            })
-            .collect::<String>(),
-    )
-    .expect("rewriting the item");
+    for (superseded, current, line) in [
+        (
+            "title",
+            "name",
+            "title: Migrate the four legacy conventions",
+        ),
+        (
+            "description",
+            "tagline",
+            "description: What it used to say.",
+        ),
+    ] {
+        let (id, path) = docket.create(&project, "handoff", "A_HANDOFF");
+        swap_key(&path, current, line);
 
-    // Lenient on the way in: the item still parses and still lists.
-    let listed = docket.run(&["list", "--project", &project, "-q"]);
-    assert!(listed.ok(), "list failed: {}", listed.stderr());
-    assert!(listed.stdout().contains(&id), "{}", listed.stdout());
+        // Still listed — parsing is total — but as invalid, naming the key.
+        let listed = docket.run(&["list", "--project", &project, "-q"]);
+        assert!(listed.ok(), "list failed: {}", listed.stderr());
+        let stdout = listed.stdout();
+        assert!(stdout.contains("INVALID"), "{stdout}");
+        assert!(
+            stdout.contains(superseded),
+            "the error names the key: {stdout}"
+        );
 
-    // Reported on the way past, with the command that fixes it.
-    let doctor = docket.run(&["doctor"]);
-    assert!(!doctor.ok(), "doctor should fail: {}", doctor.stdout());
-    assert!(
-        doctor.stdout().contains("malformed") && doctor.stdout().contains("--name"),
-        "{}",
-        doctor.stdout()
-    );
+        let doctor = docket.run(&["doctor"]);
+        assert!(!doctor.ok(), "doctor should fail: {}", doctor.stdout());
+        assert!(doctor.stdout().contains("invalid"), "{}", doctor.stdout());
 
-    let set = docket.run(&["set", &id, "--name", "LEGACY_MIGRATION", "-q"]);
-    assert!(set.ok(), "set failed: {}", set.stderr());
-    let front = front(&path);
-    assert!(front.contains("name: LEGACY_MIGRATION\n"), "{front}");
-    assert!(!front.contains("title:"), "{front}");
+        let set = docket.run(&[
+            "set",
+            &id,
+            "--name",
+            "REBUILT",
+            "--tagline",
+            "Rebuilt under the current keys.",
+            "-q",
+        ]);
+        assert!(set.ok(), "set failed: {}", set.stderr());
+        let front = front(&path);
+        assert!(front.contains("name: REBUILT\n"), "{front}");
+        assert!(
+            !front.contains(&format!("{superseded}:")),
+            "the old key survived: {front}"
+        );
+
+        docket.run(&["close", &id, "-q"]);
+    }
 }
 
 #[test]

@@ -81,6 +81,13 @@ terminal.
 
 ## Constraints
 
+**A rename is a rename.** No serde alias, no fallback read, no dual spelling.
+`Wire` denies unknown keys, so an item written under a superseded key fails to
+parse, lists as invalid naming the key, and is rebuilt by `set`. Compatibility
+shims read as kindness and age into a schema nobody can state in one sentence.
+Leniency belongs to values — length on the way in, case and separators on a
+name — never to keys.
+
 `install_on_path` copies the built binary, so nothing may be read from beside
 the executable at runtime.
 
