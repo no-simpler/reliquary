@@ -479,6 +479,62 @@ fn anchor_index(ids: &[Id], anchor: Id) -> Result<usize> {
         .ok_or_else(|| anyhow!("{anchor} is not on this project's docket"))
 }
 
+pub fn r#move(ctx: &Ctx, args: &MoveArgs) -> Result<()> {
+    let mutation = Mutation::open(ctx)?;
+    let record = resolve(ctx, &args.id)?;
+    let mut item = record
+        .item
+        .as_ref()
+        .map_err(|error| {
+            anyhow!(
+                "{} will not parse ({error}), so it cannot be moved. Repair it first: docket set {}",
+                record.id,
+                record.id
+            )
+        })?
+        .clone();
+
+    let from = record.project.clone();
+    let target = crate::store::project_key(&args.to);
+    if target == from {
+        bail!(
+            "{} is already on the docket of {}",
+            record.id,
+            from.display()
+        );
+    }
+    if !target.exists() && !args.allow_missing {
+        bail!(
+            "{} does not exist. If you are about to create it, say so: \
+             docket move {} --to {} --allow-missing",
+            target.display(),
+            record.id,
+            target.display()
+        );
+    }
+
+    // Origin records where an item was written, when that is not where it
+    // sits. A move changes the second and never the first, so the project it
+    // leaves becomes its origin only if it did not already carry one.
+    let authored = item.origin.clone().unwrap_or_else(|| from.clone());
+    item.origin = (authored != target).then_some(authored);
+    item.project = target.clone();
+    // New on that docket, so it lands at the bottom of it.
+    item.order = ctx.depot.next_order(&target);
+    item.updated = now();
+
+    let path = ctx.depot.save(&record, &item)?;
+    mutation.record(&format!(
+        "move {}: {} to {}",
+        item.id,
+        crate::store::slug_for_path(&from),
+        crate::store::slug_for_path(&target)
+    ));
+    println!("{}\t{}", item.id, path.display());
+    ctx.note(&format!("{} moved to {}", item.id, target.display()));
+    Ok(())
+}
+
 pub fn promote(ctx: &Ctx, args: &PromoteArgs) -> Result<()> {
     let mutation = Mutation::open(ctx)?;
     let record = resolve(ctx, &args.id)?;

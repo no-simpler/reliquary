@@ -248,6 +248,17 @@ fn holds(front: &str, key: &str, value: &str) -> bool {
         .any(|found| found.trim_matches(['\'', '"']) == value)
 }
 
+/// One metadata value, for the keys an assertion has to carry across a command
+/// rather than spell out.
+fn value(front: &str, key: &str) -> String {
+    front
+        .lines()
+        .find_map(|line| line.strip_prefix(&format!("{key}: ")))
+        .unwrap_or_else(|| panic!("{key} is written — {front}"))
+        .trim_matches(['\'', '"'])
+        .to_owned()
+}
+
 /// Nothing an item occupied survives closing — the file, and a spec's whole
 /// directory with it.
 fn footprint_gone(path: &Path) -> bool {
@@ -1033,6 +1044,196 @@ fn reorder_places_one_item_top_bottom_or_at_a_position() {
             ids[1].clone(),
             ids[2].clone()
         ]
+    );
+}
+
+#[test]
+fn moving_re_targets_an_item_and_keeps_its_identity() {
+    let docket = Docket::new();
+    let from = docket.project("from");
+    let to = docket.project("to");
+    let (id, path) = docket.create(&from, "handoff", "WRONG_PROJECT");
+    let created = value(&front(&path), "created");
+
+    let run = docket.run(&["move", &id, "--to", &to, "--allow-missing", "-q"]);
+    assert!(run.ok(), "move failed: {}", run.stderr());
+    let (moved_id, moved) = id_and_path(&run.stdout());
+
+    assert_eq!(moved_id, id, "an id survives a move");
+    assert!(!path.exists(), "the item left the docket it was on");
+    assert_eq!(tail(&moved, 2), format!("handoffs/{id}-WRONG_PROJECT.md"));
+    assert_eq!(
+        value(&front(&moved), "created"),
+        created,
+        "a move re-targets an item, it does not mint a new one"
+    );
+    assert_eq!(
+        docket.run(&["show", &id, "-q"]).stdout(),
+        "Body of WRONG_PROJECT.\n",
+        "the body is not the command's to touch"
+    );
+
+    let listed =
+        |project: &str| listed_ids(&docket.run(&["list", "--project", project, "-q"]).stdout());
+    assert_eq!(listed(&to), vec![id.clone()]);
+    assert!(listed(&from).is_empty(), "nothing is left behind");
+
+    let subject = docket.history().first().cloned().unwrap_or_default();
+    assert!(
+        subject.starts_with(&format!("move {id}: ")),
+        "a move is one typed commit — {subject:?}"
+    );
+}
+
+#[test]
+fn moving_a_spec_carries_its_supporting_files() {
+    let docket = Docket::new();
+    let from = docket.project("from");
+    let to = docket.project("to");
+    let (id, path) = docket.create(&from, "spec", "HAS_ATTACHMENTS");
+    let directory = path
+        .parent()
+        .expect("a spec sits in a directory")
+        .to_owned();
+    fs::write(directory.join("schema.md"), "The shape.\n").expect("writing a supporting file");
+
+    let run = docket.run(&["move", &id, "--to", &to, "--allow-missing", "-q"]);
+    assert!(run.ok(), "move failed: {}", run.stderr());
+    let (_, moved) = id_and_path(&run.stdout());
+    let landed = moved.parent().expect("a spec sits in a directory");
+
+    assert_eq!(
+        tail(&moved, 3),
+        format!("specs/{id}-HAS_ATTACHMENTS/spec.md")
+    );
+    assert_eq!(
+        fs::read_to_string(landed.join("schema.md")).ok(),
+        Some("The shape.\n".to_owned()),
+        "a spec moves as the directory it is, not as its entrypoint alone"
+    );
+    assert!(!directory.exists(), "nothing is left on the shelf it left");
+}
+
+#[test]
+fn a_moved_relay_carries_its_chain() {
+    let docket = Docket::new();
+    let from = docket.project("from");
+    let to = docket.project("to");
+    let (first, _) = docket.create(&from, "relay", "CHAIN_HEAD");
+
+    let successor = docket.run(&[
+        "relay",
+        &first,
+        "--name",
+        "CHAIN_NEXT",
+        "--tagline",
+        "Hop one landed green.",
+        "-q",
+    ]);
+    assert!(successor.ok(), "relay failed: {}", successor.stderr());
+    let (second, _) = id_and_path(&successor.stdout());
+
+    let run = docket.run(&["move", &second, "--to", &to, "--allow-missing", "-q"]);
+    assert!(run.ok(), "move failed: {}", run.stderr());
+    let front = front(&id_and_path(&run.stdout()).1);
+
+    assert!(
+        holds(&front, "chain", &first),
+        "a chain crosses projects — {front}"
+    );
+    assert!(front.contains("hop: 2"), "the hop survives — {front}");
+    assert!(
+        holds(&front, "supersedes", &first),
+        "provenance survives — {front}"
+    );
+}
+
+#[test]
+fn a_moved_item_lands_at_the_bottom_of_its_new_docket() {
+    let docket = Docket::new();
+    let from = docket.project("from");
+    let to = docket.project("to");
+    let (resident, _) = docket.create(&to, "handoff", "ALREADY_THERE");
+    let (arriving, _) = docket.create(&from, "handoff", "ARRIVING");
+
+    let run = docket.run(&["move", &arriving, "--to", &to, "--allow-missing", "-q"]);
+    assert!(run.ok(), "move failed: {}", run.stderr());
+    assert_eq!(
+        listed_ids(&docket.run(&["list", "--project", &to, "-q"]).stdout()),
+        vec![resident, arriving],
+        "an arrival is new on that docket, so it lands under what is already on it"
+    );
+}
+
+/// Origin says where an item was written, when that is not where it sits. A
+/// move changes the second, so it is what makes the two differ — or agree.
+#[test]
+fn moving_records_where_an_item_was_written() {
+    let docket = Docket::new();
+    let home = docket.project("home");
+    let away = docket.project("away");
+    let third = docket.project("third");
+    let (id, path) = docket.create(&home, "handoff", "TRAVELS");
+    assert!(
+        !front(&path).contains("origin:"),
+        "written where it sits, so nothing differs"
+    );
+
+    let out = docket.run(&["move", &id, "--to", &away, "--allow-missing", "-q"]);
+    assert!(out.ok(), "move failed: {}", out.stderr());
+    let front_away = front(&id_and_path(&out.stdout()).1);
+    assert!(
+        holds(&front_away, "origin", &home),
+        "the docket it left is where it was written — {front_away}"
+    );
+
+    let on = docket.run(&["move", &id, "--to", &third, "--allow-missing", "-q"]);
+    assert!(on.ok(), "move failed: {}", on.stderr());
+    let front_third = front(&id_and_path(&on.stdout()).1);
+    assert!(
+        holds(&front_third, "origin", &home),
+        "a second move does not rewrite where it was written — {front_third}"
+    );
+
+    let back = docket.run(&["move", &id, "--to", &home, "--allow-missing", "-q"]);
+    assert!(back.ok(), "move failed: {}", back.stderr());
+    let front_home = front(&id_and_path(&back.stdout()).1);
+    assert!(
+        !front_home.contains("origin:"),
+        "home again, so the two agree — {front_home}"
+    );
+}
+
+#[test]
+fn moving_refuses_a_target_it_cannot_stand_behind() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let elsewhere = docket.project("elsewhere");
+    let (id, path) = docket.create(&project, "spec", "STAYS_PUT");
+
+    let same = docket.run(&["move", &id, "--to", &project, "-q"]);
+    assert!(!same.ok(), "a move to where it already sits is a refusal");
+    assert!(
+        same.stderr().contains("already"),
+        "the refusal says so: {}",
+        same.stderr()
+    );
+
+    let missing = docket.run(&["move", &id, "--to", &elsewhere, "-q"]);
+    assert!(!missing.ok(), "an absent target has to be said out loud");
+    assert!(
+        missing.stderr().contains("--allow-missing"),
+        "the refusal names the flag that would have worked: {}",
+        missing.stderr()
+    );
+
+    drop_key(&path, "stage:");
+    let damaged = docket.run(&["move", &id, "--to", &elsewhere, "--allow-missing", "-q"]);
+    assert!(!damaged.ok(), "unparseable metadata cannot be re-targeted");
+    assert!(
+        damaged.stderr().contains(&format!("docket set {id}")),
+        "the refusal names the repair: {}",
+        damaged.stderr()
     );
 }
 

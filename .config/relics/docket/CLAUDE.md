@@ -59,6 +59,14 @@ nothing — with exactly one exception. `close` is refused without a repository,
 because closing removes the item and history is the only thing that keeps it.
 That asymmetry is deliberate; do not smooth it out.
 
+What it buys is the invariant the design rests on: **no docket operation can
+destroy work that history does not already hold.** Every command but `close`
+preserves the body byte for byte, so an edit made outside docket cannot be lost
+by one — and `close` is gated on `is_recorded`. That is a conditional-write
+precondition, not a lock, and it is why nothing needs to observe an outside edit
+as it happens. The drift snapshot serves the log, not safety; do not redesign
+around its latency.
+
 Three properties are load-bearing, and each is one line away from being lost:
 
 - **Every invocation goes through `Git::command`**, which strips the inherited

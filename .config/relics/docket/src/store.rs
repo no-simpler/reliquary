@@ -312,38 +312,57 @@ impl Depot {
     }
 
     /// Rewrites frontmatter in canonical order while preserving the body byte
-    /// for byte, and moves the file when a promotion changed its kind.
+    /// for byte, relocating the item when its kind or its project changed.
+    ///
+    /// The slug is taken from where the file already sits and never from the
+    /// item, so a rename never moves a file out from under an open session —
+    /// which leaves the computed path differing from the current one exactly
+    /// when a relocation is owed.
     pub fn save(&self, record: &Record, item: &Item) -> Result<PathBuf> {
         let _guard = self.lock(&item.project)?;
         let body = read_body(&record.path)?;
-        let target = if record.kind == item.kind() {
-            record.path.clone()
-        } else {
-            self.item_path(item, &existing_slug(&record.path, record.id))
-        };
+        let target = self.item_path(item, &existing_slug(&record.path, record.id));
+        if target == record.path {
+            write_atomic(&target, &render(item, &body)?)?;
+            return Ok(target);
+        }
 
-        if target != record.path {
+        // The whole footprint moves, not the entry point alone: a spec's
+        // directory carries supporting files that a file-by-file write would
+        // orphan. The ladder runs forward, so a spec is a source only when a
+        // move re-targets it, and a directory always lands as a directory.
+        let from = self.footprint_at(record.kind, &record.path)?;
+        if from.is_dir() {
+            let to = self.footprint_at(item.kind(), &target)?;
+            if let Some(parent) = to.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::rename(&from, &to)
+                .with_context(|| format!("moving {} to {}", from.display(), to.display()))?;
+            write_atomic(&target, &render(item, &body)?)?;
+        } else {
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
             write_atomic(&target, &render(item, &body)?)?;
             remove_item(&record.path)?;
-        } else {
-            write_atomic(&target, &render(item, &body)?)?;
         }
         Ok(target)
     }
 
     /// Everything one item occupies: the file, or a spec's whole directory.
-    /// Closing removes this, and history is what keeps it.
+    /// Closing removes this and history is what keeps it; a move relocates it.
     pub fn footprint(&self, record: &Record) -> Result<PathBuf> {
-        match record.kind {
-            Kind::Spec => record
-                .path
+        self.footprint_at(record.kind, &record.path)
+    }
+
+    fn footprint_at(&self, kind: Kind, path: &Path) -> Result<PathBuf> {
+        match kind {
+            Kind::Spec => path
                 .parent()
                 .map(Path::to_owned)
-                .ok_or_else(|| anyhow!("spec has no directory")),
-            _ => Ok(record.path.clone()),
+                .ok_or_else(|| anyhow!("{} has no directory", path.display())),
+            _ => Ok(path.to_owned()),
         }
     }
 

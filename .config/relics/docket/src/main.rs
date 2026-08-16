@@ -51,6 +51,7 @@ fn run(cli: Cli) -> anyhow::Result<bool> {
         Some(Command::Path(args)) => cmd::path(&ctx, args)?,
         Some(Command::Set(args)) => cmd::set(&ctx, args)?,
         Some(Command::Reorder(args)) => cmd::reorder(&ctx, args)?,
+        Some(Command::Move(args)) => cmd::r#move(&ctx, args)?,
         Some(Command::Promote(args)) => cmd::promote(&ctx, args)?,
         Some(Command::Relay(args)) => cmd::relay(&ctx, args)?,
         Some(Command::Close(args)) => cmd::close(&ctx, args)?,

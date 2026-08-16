@@ -83,6 +83,16 @@ Example:
     /// Change order of docket items.
     Reorder(ReorderArgs),
 
+    /// Re-target a docket item to another project.
+    #[command(after_long_help = "\
+The item keeps its id, its body and a relay's chain, and lands at the bottom
+of the target's docket.
+
+Example:
+
+  docket move b71c --to ~/Developer/halo")]
+    Move(MoveArgs),
+
     /// Advance docket item kind.
     Promote(PromoteArgs),
 
@@ -232,6 +242,21 @@ pub struct ReorderArgs {
     /// Reorder in bulk. Listed items move to the front in this order.
     #[arg(long, value_delimiter = ',', conflicts_with_all = ["placement", "id"])]
     pub sequence: Option<Vec<String>>,
+}
+
+#[derive(Args)]
+pub struct MoveArgs {
+    /// Item id or name, as printed by any listing.
+    #[arg(value_name = "ITEM")]
+    pub id: String,
+
+    /// The project to move it to.
+    #[arg(long, value_name = "PATH")]
+    pub to: PathBuf,
+
+    /// Allow a target directory that does not exist yet.
+    #[arg(long)]
+    pub allow_missing: bool,
 }
 
 #[derive(Args)]
