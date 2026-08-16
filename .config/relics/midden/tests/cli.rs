@@ -462,16 +462,13 @@ fn json_is_available_for_every_listing() {
 #[test]
 fn doctrine_lives_only_in_the_guide() {
     let m = Midden::new();
-    let guide = m
-        .run(&["guide", "kinds", "filing", "draining"])
-        .ok()
-        .stdout();
-    assert!(guide.contains("Most sessions produce none"), "{guide}");
-    assert!(guide.contains("Evidence or nothing"), "{guide}");
+    let guide = m.run(&["guide", "file", "drain"]).ok().stdout();
+    assert!(guide.contains("No quote, no note"), "{guide}");
+    assert!(guide.contains("Resolving is not bookkeeping"), "{guide}");
 
     let help = m.run(&["help"]).ok().all();
-    assert!(!help.contains("Most sessions produce none"), "{help}");
-    assert!(!help.contains("Evidence or nothing"), "{help}");
+    assert!(!help.contains("No quote, no note"), "{help}");
+    assert!(!help.contains("Resolving is not bookkeeping"), "{help}");
 }
 
 #[test]

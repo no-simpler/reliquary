@@ -2,33 +2,20 @@ use anyhow::{Result, bail};
 
 /// Canonical order, so a guide reads the same whatever order its topics were
 /// asked for.
-pub const TOPICS: &[(&str, &str)] = &[("kinds", KINDS), ("filing", FILING), ("draining", DRAINING)];
+pub const TOPICS: &[(&str, &str)] = &[("file", FILE), ("drain", DRAIN)];
 
-pub const INTRO: &str = "\
-MIDDEN
-
-Machine-wide corpus of what the harness cost an agent. One note is one cause,
-filed while the evidence is still in front of you.
-
-Most sessions produce none. That is the expected outcome, not a failure to
-notice: a note nobody can act on dilutes the ones that matter, and a heap that
-stops being worth reading stops being read.";
+pub const INTRO: &str = "Agents give feedback to the user via this tool.";
 
 // Deliberately not opened with a `\` continuation: that would swallow this
 // block's leading indentation along with the newline.
-pub const USAGE: &str = "  midden note --kind <kind> --title '...' --target <path>   files one
-  midden                                                    open notes
-  midden digest                                             grouped by fix site
-  midden resolve <id> --actioned|--dismissed                closes one
+pub const USAGE: &str = "  midden help   CLI usage";
 
-  midden guide kinds|filing|draining                        doctrine
-  midden help                                               CLI usage";
+pub const FILE: &str = "\
+FILE
 
-pub const KINDS: &str = "\
-KINDS
+  midden note --kind <kind> --title '...' --target <path> --body -
 
-Chosen before the title is written, because each one names where its fix lives.
-A cause fitting none of them is usually not understood yet.
+kind, chosen before the title, because each one names where its fix lives:
 
   gap        Nothing covered the situation. You guessed.
   conflict   Two directives pulled opposite ways.
@@ -36,38 +23,56 @@ A cause fitting none of them is usually not understood yet.
   hunt       A fact that should have been declared cost repeated searching.
   rebuff     The user corrected or rejected you.
   friction   Harness or tooling: a permission prompt, a missing capability.
-  rework     Work was done, then discarded.";
+  rework     Work was done, then discarded.
 
-pub const FILING: &str = "\
-FILING
-
-File at the moment it happens, not at the end. A long session compacts, and
-what compaction takes is exactly the early friction worth reporting. Anything
-before a compact boundary is not yours to reconstruct — say it was lost.
-
-  Evidence or nothing. The body quotes what happened. No quote, no note.
-  Name the cause, not the feeling. Not confusing: unstated, contradicted, moved.
-  One note per cause. Two causes in one note cannot be resolved separately.
-  Target the fix, not the symptom. The file that should have said it.
+One note, one cause. Two causes in one cannot be resolved separately.
+Evidence in the body: quote what happened. No quote, no note.
+Target the file that should have said it, not the symptom.
+Name the cause, not the feeling: unstated, contradicted, moved.
 
 For a rebuff, the title names the directive that would have prevented it, not
 what you were asked to do differently.
 
-Do not look for an existing note first. Filing the same kind, target and claim
-again folds into the one already there and bumps its count.";
+Do not look for an existing note first. The same cause folds itself and bumps
+its count.
 
-pub const DRAINING: &str = "\
-DRAINING
+Anything before a compact boundary is lost. Say so; do not reconstruct it.";
 
-For the session that acts on the heap, not the one that fills it.
+pub const DRAIN: &str = "\
+DRAIN
 
-  midden digest groups open notes by where their fix would land.
-  Work a group at a time: one section is one file to open.
-  resolve --actioned once the directive actually changed.
-  resolve --dismissed when the friction is simply the cost of doing business.
+Turn the corpus into directive changes, then empty it. No other session will.
 
-An actioned note that recurs reopens itself. That is the corpus's most useful
-signal: the fix did not hold.
+  midden digest                 open notes, grouped by the file their fix lands in
+  midden show <id>              the evidence behind one
+  midden resolve <id> --actioned | --dismissed
+  midden archive <id>           retire without a verdict
+
+Work a group at a time: one section is one file to open. Groups are ordered by
+what the corpus says that file has cost — heaviest first, and notes with no
+target last, because those are not yet a worklist.
+
+Read the evidence before changing anything. A note is one session's account of
+one moment, and occurrences are how much weight that account carries. Seen once
+may still be right; seen five times may still be the cost of doing business.
+
+Every note gets one of three outcomes.
+
+  actioned    a directive actually changed. Name the edit in your report.
+  dismissed   the friction is real and no fix is coming.
+  archive     unusable as filed: no evidence, two causes tangled together, or a
+              claim that no longer applies to how the tree looks now.
+
+Resolving is not bookkeeping. An open note is a claim on the next draining
+session, and a corpus nobody closes is a corpus nobody reads.
+
+An actioned note that recurs reopens itself. That is the most useful signal
+here: the fix did not hold, so the second attempt wants a different shape than
+the first — a stricter rule, a different file, or a check that fails loudly.
+
+Where a fix lands follows co-locality: the most granular file covering every
+affected case. What one project needs does not belong in a root directive, and
+what three projects hit does not belong in one of them.
 
 Retention runs from up. Nothing here needs pruning by hand.";
 

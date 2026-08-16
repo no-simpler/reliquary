@@ -6,8 +6,8 @@ use crate::note::{Kind, Status};
 use crate::ui::{ColorChoice, Format};
 
 pub const ROOT_AFTER_LONG_HELP: &str = "\
-midden guide kinds|filing|draining = doctrine
-midden help metadata|retention = reference topics";
+midden guide file|drain = doctrine
+midden help metadata|dedup|retention = reference topics";
 
 #[derive(Parser)]
 #[command(
@@ -120,7 +120,7 @@ schedule of its own. See midden help retention for the boundaries.")]
     /// Explain a topic, or a command.
     Help(HelpArgs),
 
-    /// Doctrine: what earns a note, and what to do with the heap.
+    /// Doctrine: filing one, and draining the corpus.
     Guide(GuideArgs),
 
     /// Print a shell completion script.
@@ -161,7 +161,7 @@ pub struct ListArgs {
 
 #[derive(Args)]
 pub struct NoteArgs {
-    /// What kind of friction this was. See midden guide kinds.
+    /// What kind of friction this was. See midden guide file.
     #[arg(long, value_enum)]
     pub kind: Kind,
 
@@ -273,7 +273,7 @@ pub struct HelpArgs {
 
 #[derive(Args)]
 pub struct GuideArgs {
-    /// Any of kinds, filing, draining. Omit for orientation alone.
+    /// Either of file, drain. Omit for orientation alone.
     pub topics: Vec<String>,
 }
 
