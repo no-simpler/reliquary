@@ -71,15 +71,15 @@ Examples:
     #[command(after_long_help = "\
 Examples:
 
-  midden note --kind hunt --title 'brewfile scopes are undocumented' \\
+  midden file --kind hunt --title 'brewfile scopes are undocumented' \\
     --target ~/.config/CLAUDE.md --detail 'Four greps to find bbs applies them.'
 
-  midden note --kind rebuff --title 'committed without staging every M line' \\
+  midden file --kind rebuff --title 'committed without staging every M line' \\
     --target ~/.config/CLAUDE.md --body -
 
 Filing the same kind, target and claim twice bumps the count instead of
 writing a second note.")]
-    Note(NoteArgs),
+    File(FileArgs),
 
     /// Print a note's evidence.
     Show(IdArgs),
@@ -160,7 +160,7 @@ pub struct ListArgs {
 }
 
 #[derive(Args)]
-pub struct NoteArgs {
+pub struct FileArgs {
     /// What kind of friction this was. See midden guide file.
     #[arg(long, value_enum)]
     pub kind: Kind,

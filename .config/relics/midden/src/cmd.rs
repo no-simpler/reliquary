@@ -94,7 +94,7 @@ pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
     )
 }
 
-pub fn note(ctx: &Ctx, args: &NoteArgs) -> Result<()> {
+pub fn file(ctx: &Ctx, args: &FileArgs) -> Result<()> {
     let project = match &args.to {
         Some(path) => crate::store::project_key(&crate::store::resolve_lenient(path)),
         None => ctx.project.clone(),

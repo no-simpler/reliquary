@@ -45,7 +45,7 @@ fn run(cli: Cli) -> anyhow::Result<bool> {
     match &cli.command {
         None => cmd::list(&ctx, &ListArgs::default())?,
         Some(Command::List(args)) => cmd::list(&ctx, args)?,
-        Some(Command::Note(args)) => cmd::note(&ctx, args)?,
+        Some(Command::File(args)) => cmd::file(&ctx, args)?,
         Some(Command::Show(args)) => cmd::show(&ctx, args)?,
         Some(Command::Path(args)) => cmd::path(&ctx, args)?,
         Some(Command::Set(args)) => cmd::set(&ctx, args)?,

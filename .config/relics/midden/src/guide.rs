@@ -13,7 +13,7 @@ pub const USAGE: &str = "  midden help   CLI usage";
 pub const FILE: &str = "\
 FILE
 
-  midden note --kind <kind> --title '...' --target <path> --body -
+  midden file --kind <kind> --title '...' --target <path> --body -
 
 kind, chosen before the title, because each one names where its fix lives:
 

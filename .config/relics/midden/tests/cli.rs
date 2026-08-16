@@ -45,7 +45,7 @@ impl Midden {
 
     /// Files a note and returns its id.
     fn file(&self, kind: &str, title: &str, extra: &[&str]) -> String {
-        let mut args = vec!["note", "--kind", kind, "--title", title];
+        let mut args = vec!["file", "--kind", kind, "--title", title];
         args.extend_from_slice(extra);
         self.run(&args).ok().stdout().trim().to_owned()
     }
@@ -183,7 +183,7 @@ fn the_same_cause_folds_instead_of_multiplying() {
     );
     // Different wording, different case, a trailing separator on the target.
     let again = m.run(&[
-        "note",
+        "file",
         "--kind",
         "hunt",
         "--title",
@@ -240,13 +240,13 @@ fn an_archived_cause_that_returns_gets_a_fresh_note() {
 fn field_caps_refuse_with_the_flag_that_needs_retyping() {
     let m = Midden::new();
     let long = "x".repeat(73);
-    let run = m.run(&["note", "--kind", "gap", "--title", &long]).fails();
+    let run = m.run(&["file", "--kind", "gap", "--title", &long]).fails();
     assert!(run.stderr().contains("--title"), "{}", run.stderr());
     assert!(run.stderr().contains("73 characters"), "{}", run.stderr());
 
     let body = "y".repeat(1201);
     let run = m
-        .run(&["note", "--kind", "gap", "--title", "fine", "--body", &body])
+        .run(&["file", "--kind", "gap", "--title", "fine", "--body", &body])
         .fails();
     assert!(run.stderr().contains("1201 bytes"), "{}", run.stderr());
     assert!(m.live().is_empty());
@@ -255,7 +255,7 @@ fn field_caps_refuse_with_the_flag_that_needs_retyping() {
 #[test]
 fn a_kind_outside_the_taxonomy_is_refused() {
     let m = Midden::new();
-    m.run(&["note", "--kind", "annoyance", "--title", "x"])
+    m.run(&["file", "--kind", "annoyance", "--title", "x"])
         .fails();
     assert!(m.live().is_empty());
 }
@@ -486,7 +486,7 @@ fn help_serves_topics_and_commands_from_one_verb() {
             .stdout()
             .contains("30 days")
     );
-    assert!(m.run(&["help", "note"]).ok().stdout().contains("--kind"));
+    assert!(m.run(&["help", "file"]).ok().stdout().contains("--kind"));
     m.run(&["help", "nonsense"]).fails();
 }
 
