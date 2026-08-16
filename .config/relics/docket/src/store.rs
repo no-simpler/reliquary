@@ -1,16 +1,15 @@
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 
+use crate::git;
 use crate::id::{Id, slugify};
 use crate::item::{Item, Kind, Wire};
 
 const SENTINEL: &str = ".project";
 const LOCK: &str = ".lock";
-const ARCHIVE: &str = "archive";
 const SPEC_FILE: &str = "spec.md";
 const ORDER_STEP: i64 = 10;
 
@@ -79,29 +78,16 @@ fn expand_tilde(path: &Path) -> PathBuf {
     PathBuf::from(home).join(rest.trim_start_matches('/'))
 }
 
-/// The main checkout root of the containing repository, or the working
-/// directory when there is none. Linked worktrees fold into their main
-/// checkout, because `git worktree list` reports it first; a submodule reports
-/// its own root, which is what a per-aspect repository layout needs.
-pub fn project_key(cwd: &Path) -> PathBuf {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(["worktree", "list", "--porcelain"])
-        .output();
-
-    if let Ok(output) = output
-        && output.status.success()
-        && let Ok(text) = String::from_utf8(output.stdout)
-        && let Some(main) = text
-            .lines()
-            .next()
-            .and_then(|line| line.strip_prefix("worktree "))
-        && !main.is_empty()
-    {
-        return resolve_lenient(Path::new(main));
+/// The main checkout root of the repository containing `path`, or `path`
+/// itself when there is none and when git is absent. The single keying
+/// entry point: a path names the same project however it arrives, whether from
+/// the working directory, from --project, or from create --to.
+pub fn project_key(path: &Path) -> PathBuf {
+    let resolved = resolve_lenient(path);
+    match git::detect().and_then(|git| git.main_worktree(&resolved)) {
+        Some(main) => resolve_lenient(&main),
+        None => resolved,
     }
-    resolve_lenient(cwd)
 }
 
 /// Claude Code's own project-directory convention, so a docket sits beside the
@@ -183,6 +169,9 @@ impl Depot {
 
     /// Held across every mutation, so two sessions cannot interleave an
     /// ordering rewrite. Dropping the returned handle releases it.
+    ///
+    /// Always nested inside the depot lock, never taken around it — see the
+    /// ordering rule in `git`.
     fn lock(&self, project: &Path) -> Result<File> {
         let dir = self.ensure_project(project)?;
         let file = File::create(dir.join(LOCK))?;
@@ -190,7 +179,25 @@ impl Depot {
         Ok(file)
     }
 
-    /// Every project that has a docket directory, live or archived.
+    /// The coarse lock, held by a whole mutating command, so a snapshot and the
+    /// change it brackets are one unit against a concurrent session.
+    pub fn lock_depot(&self) -> Result<File> {
+        fs::create_dir_all(&self.root)
+            .with_context(|| format!("creating {}", self.root.display()))?;
+        let file = File::create(self.root.join(LOCK))?;
+        file.lock()?;
+        Ok(file)
+    }
+
+    /// The depot lock if it is free this instant, and nothing if it is not.
+    /// What runs at session start takes this one: a hook that waits on another
+    /// session's write would be a hook that hangs a terminal.
+    pub fn try_lock_depot(&self) -> Option<File> {
+        let file = File::create(self.root.join(LOCK)).ok()?;
+        file.try_lock().ok().map(|()| file)
+    }
+
+    /// Every project that has a docket directory.
     pub fn projects(&self) -> Vec<PathBuf> {
         let mut found = Vec::new();
         let Ok(entries) = fs::read_dir(&self.root) else {
@@ -208,30 +215,23 @@ impl Depot {
         found
     }
 
-    pub fn list(&self, project: &Path, archived: bool) -> Vec<Record> {
+    pub fn list(&self, project: &Path) -> Vec<Record> {
         let dir = self.project_dir(project);
-        let base = if archived { dir.join(ARCHIVE) } else { dir };
         let mut records = Vec::new();
         for kind in Kind::ALL {
-            collect(&base.join(kind.dir()), kind, project, &mut records);
+            collect(&dir.join(kind.dir()), kind, project, &mut records);
         }
         records.sort_by(|a, b| a.order().cmp(&b.order()).then_with(|| a.id.cmp(&b.id)));
         records
     }
 
-    /// Every place an item can sit, live and archived, for the scans that only
-    /// need filenames.
+    /// Every place an open item can sit, for the scans that only need
+    /// filenames. A closed item sits nowhere: history holds it.
     fn shelves(&self, project: &Path) -> Vec<(Kind, PathBuf)> {
         let dir = self.project_dir(project);
-        let archive = dir.join(ARCHIVE);
         Kind::ALL
             .into_iter()
-            .flat_map(|kind| {
-                [
-                    (kind, dir.join(kind.dir())),
-                    (kind, archive.join(kind.dir())),
-                ]
-            })
+            .map(|kind| (kind, dir.join(kind.dir())))
             .collect()
     }
 
@@ -255,19 +255,32 @@ impl Depot {
                 }
             }
         }
-        bail!("no item with id {id}. Run docket list --all to see every open item")
+        let mut message =
+            format!("no item with id {id}. Run docket list --all to see every open item");
+        if git::Repo::open(&self.root).is_some() {
+            message.push_str(&format!(
+                ". If it was closed, history holds it: git -C {} log --diff-filter=D --name-only",
+                self.root.display()
+            ));
+        }
+        bail!(message)
     }
 
-    /// Unique across every project and every archive, so an id is never reused
-    /// even after the item that held it is gone.
+    /// Unique across every project, and across everything history ever held, so
+    /// an id is never reused even after the item that held it is closed.
     pub fn mint_id(&self) -> Id {
-        let taken: Vec<Id> = self
+        let mut taken: Vec<Id> = self
             .projects()
             .iter()
             .flat_map(|project| self.shelves(project))
             .flat_map(|(kind, shelf)| filenames(&shelf, kind))
             .map(|(id, _)| id)
             .collect();
+        if let Some(repo) = git::Repo::open(&self.root)
+            && let Ok(recorded) = repo.ids_ever()
+        {
+            taken.extend(recorded);
+        }
         loop {
             let id = Id::mint();
             if !taken.contains(&id) {
@@ -318,45 +331,21 @@ impl Depot {
         Ok(target)
     }
 
-    /// Archive rather than delete: a handoff is the one artefact here that
-    /// nothing else can regenerate.
-    pub fn archive(&self, record: &Record) -> Result<PathBuf> {
-        let _guard = self.lock(&record.project)?;
-        let dir = self
-            .project_dir(&record.project)
-            .join(ARCHIVE)
-            .join(record.kind.dir());
-        fs::create_dir_all(&dir)?;
-
-        let (source, target) = match record.kind {
-            Kind::Spec => {
-                let spec_dir = record
-                    .path
-                    .parent()
-                    .ok_or_else(|| anyhow!("spec has no directory"))?
-                    .to_owned();
-                let name = spec_dir
-                    .file_name()
-                    .ok_or_else(|| anyhow!("spec directory has no name"))?;
-                (spec_dir.clone(), dir.join(name))
-            }
-            _ => {
-                let name = record
-                    .path
-                    .file_name()
-                    .ok_or_else(|| anyhow!("item has no filename"))?;
-                (record.path.clone(), dir.join(name))
-            }
-        };
-        if target.exists() {
-            remove_item(&target)?;
+    /// Everything one item occupies: the file, or a spec's whole directory.
+    /// Closing removes this, and history is what keeps it.
+    pub fn footprint(&self, record: &Record) -> Result<PathBuf> {
+        match record.kind {
+            Kind::Spec => record
+                .path
+                .parent()
+                .map(Path::to_owned)
+                .ok_or_else(|| anyhow!("spec has no directory")),
+            _ => Ok(record.path.clone()),
         }
-        fs::rename(&source, &target).with_context(|| format!("archiving {}", source.display()))?;
-        Ok(target)
     }
 
     pub fn next_order(&self, project: &Path) -> i64 {
-        self.list(project, false)
+        self.list(project)
             .iter()
             .map(Record::order)
             .filter(|o| *o != i64::MAX)
@@ -369,7 +358,7 @@ impl Depot {
     /// touch its neighbours.
     pub fn resequence(&self, project: &Path, ordered: &[Id]) -> Result<usize> {
         let _guard = self.lock(project)?;
-        let records = self.list(project, false);
+        let records = self.list(project);
         let mut touched = 0;
         for (position, id) in ordered.iter().enumerate() {
             let Some(record) = records.iter().find(|r| r.id == *id) else {

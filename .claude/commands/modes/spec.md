@@ -28,5 +28,5 @@ exception: uncertain irreversible ops.
 
 ## Graduation
 
-Spec gets archived when implemented.
-Don’t reference archived spec.
+Spec gets closed when implemented.
+Don’t reference closed spec.

@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -5,6 +6,7 @@ use anyhow::{Context, Result, anyhow, bail};
 
 use crate::cli::*;
 use crate::field;
+use crate::git;
 use crate::guide;
 use crate::help;
 use crate::id::Id;
@@ -31,6 +33,82 @@ impl Ctx {
     }
 }
 
+/// Held for the whole of a mutating command: the depot lock, and the depot's
+/// history when git is present.
+///
+/// Opening one first commits whatever was edited outside docket — bodies are
+/// authored through the path docket prints, so a change must never land on top
+/// of unrecorded work. The command's own change is then a second, typed commit.
+struct Mutation<'a> {
+    ctx: &'a Ctx,
+    repo: Option<git::Repo>,
+    _lock: File,
+}
+
+impl<'a> Mutation<'a> {
+    fn open(ctx: &'a Ctx) -> Result<Mutation<'a>> {
+        let lock = ctx.depot.lock_depot()?;
+        let repo = git::Repo::ensure(&ctx.depot.root).unwrap_or_else(|error| {
+            ctx.note(&format!("history unavailable: {error:#}"));
+            None
+        });
+        let mutation = Mutation {
+            ctx,
+            repo,
+            _lock: lock,
+        };
+        if let Some(repo) = &mutation.repo
+            && let Err(error) = snapshot_drift(repo)
+        {
+            ctx.note(&format!("history not updated: {error:#}"));
+        }
+        Ok(mutation)
+    }
+
+    /// Records the command's own change.
+    fn record(&self, message: &str) {
+        let Some(repo) = &self.repo else { return };
+        if let Err(error) = repo.snapshot(message) {
+            self.ctx.note(&format!("history not updated: {error:#}"));
+        }
+    }
+
+    /// Removes an item and records the removal, refusing unless history already
+    /// holds it. The one place the git layer is load-bearing rather than
+    /// additive: without it, closing would be deletion with nothing behind it.
+    fn close(&self, footprint: &Path, message: &str) -> Result<String> {
+        let Some(repo) = &self.repo else {
+            bail!(
+                "closing needs git, because the depot's history is what keeps a closed item. \
+                 Put git on PATH, or remove {} by hand",
+                footprint.display()
+            );
+        };
+        if !repo.is_recorded(footprint)? {
+            bail!(
+                "history does not hold {} yet, so closing it would lose it. \
+                 Run docket doctor",
+                footprint.display()
+            );
+        }
+        repo.remove(footprint, message)
+    }
+}
+
+/// Commits what was edited outside docket, under its own message, naming the
+/// items it touched. Best-effort at every call site: a depot that cannot be
+/// committed is a matter for docket doctor, never a reason to refuse the work
+/// in hand.
+fn snapshot_drift(repo: &git::Repo) -> Result<()> {
+    let ids = repo.drifted_ids()?;
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let named: Vec<String> = ids.iter().map(Id::to_string).collect();
+    repo.snapshot(&format!("edit: {}", named.join(", ")))?;
+    Ok(())
+}
+
 /// `-` means standard input, the only way to hand a long value to a CLI without
 /// worrying about what a shell will do to it.
 fn text(value: &str) -> Result<String> {
@@ -54,7 +132,7 @@ pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
     };
 
     for (index, project) in projects.iter().enumerate() {
-        let mut records = ctx.depot.list(project, args.archived);
+        let mut records = ctx.depot.list(project);
         records.retain(|record| match &record.item {
             Ok(item) => {
                 !args.invalid
@@ -82,8 +160,9 @@ pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
 }
 
 pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
+    let mutation = Mutation::open(ctx)?;
     let target = match &args.to {
-        Some(path) => crate::store::resolve_lenient(path),
+        Some(path) => crate::store::project_key(path),
         None => ctx.project.clone(),
     };
     if !target.exists() && !args.allow_missing {
@@ -131,6 +210,7 @@ pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
     };
 
     let path = ctx.depot.create(&item, &body)?;
+    mutation.record(&format!("create {}: {}", item.id, item.title));
     report_created(ctx, &item, &path, body.is_empty());
     Ok(())
 }
@@ -174,6 +254,7 @@ pub fn path(ctx: &Ctx, args: &IdArgs) -> Result<()> {
 }
 
 pub fn set(ctx: &Ctx, args: &SetArgs) -> Result<()> {
+    let mutation = Mutation::open(ctx)?;
     let record = ctx.depot.find(parse_id(&args.id)?)?;
     let mut item = match &record.item {
         Ok(item) => item.clone(),
@@ -214,6 +295,7 @@ pub fn set(ctx: &Ctx, args: &SetArgs) -> Result<()> {
     item.updated = now();
 
     let path = ctx.depot.save(&record, &item)?;
+    mutation.record(&format!("set {}", item.id));
     ctx.note(&format!("{} updated", item.id));
     if ctx.format == Format::Json {
         let mut value = render::json::item_json(&item);
@@ -297,9 +379,10 @@ fn recover(record: &Record) -> Result<Item> {
 }
 
 pub fn reorder(ctx: &Ctx, args: &ReorderArgs) -> Result<()> {
+    let mutation = Mutation::open(ctx)?;
     let mut ids: Vec<Id> = ctx
         .depot
-        .list(&ctx.project, false)
+        .list(&ctx.project)
         .iter()
         .map(|record| record.id)
         .collect();
@@ -317,6 +400,10 @@ pub fn reorder(ctx: &Ctx, args: &ReorderArgs) -> Result<()> {
         let mut ordered = wanted.clone();
         ordered.extend(ids.into_iter().filter(|id| !wanted.contains(id)));
         let touched = ctx.depot.resequence(&ctx.project, &ordered)?;
+        mutation.record(&format!(
+            "reorder {}",
+            crate::store::slug_for_path(&ctx.project)
+        ));
         ctx.note(&format!("reordered ({touched} moved)"));
         return Ok(());
     }
@@ -344,6 +431,10 @@ pub fn reorder(ctx: &Ctx, args: &ReorderArgs) -> Result<()> {
     ids.remove(from);
     ids.insert(to.min(ids.len()), id);
     ctx.depot.resequence(&ctx.project, &ids)?;
+    mutation.record(&format!(
+        "reorder {}",
+        crate::store::slug_for_path(&ctx.project)
+    ));
     ctx.note(&format!(
         "{id} is now at position {}",
         ids.iter().position(|c| *c == id).unwrap_or(0) + 1
@@ -358,6 +449,7 @@ fn anchor_index(ids: &[Id], anchor: Id) -> Result<usize> {
 }
 
 pub fn promote(ctx: &Ctx, args: &PromoteArgs) -> Result<()> {
+    let mutation = Mutation::open(ctx)?;
     let record = ctx.depot.find(parse_id(&args.id)?)?;
     let mut item = record
         .item
@@ -371,9 +463,11 @@ pub fn promote(ctx: &Ctx, args: &PromoteArgs) -> Result<()> {
         })?
         .clone();
 
+    let was = record.kind;
     let step = item.promote(args.to)?;
     item.updated = now();
     let path = ctx.depot.save(&record, &item)?;
+    mutation.record(&format!("promote {}: {was} to {}", item.id, item.kind()));
     println!(
         "{}\t{}\t{}",
         item.id,
@@ -385,6 +479,7 @@ pub fn promote(ctx: &Ctx, args: &PromoteArgs) -> Result<()> {
 }
 
 pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
+    let mutation = Mutation::open(ctx)?;
     let record = ctx.depot.find(parse_id(&args.id)?)?;
     let item = record.item.as_ref().map_err(|error| {
         anyhow!(
@@ -401,13 +496,20 @@ pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
         None => String::new(),
     };
 
+    // The predecessor is closed after the successor exists, and both land in
+    // one commit: a chain that lost a hop to a half-finished relay would be
+    // unrecoverable.
     let successor = item.successor(ctx.depot.mint_id(), title, tagline)?;
     let path = ctx.depot.create(&successor, &body)?;
-    ctx.depot.archive(&record)?;
+    let footprint = ctx.depot.footprint(&record)?;
+    let commit = mutation.close(
+        &footprint,
+        &format!("relay {} to {}", record.id, successor.id),
+    )?;
 
     println!("{}\t{}", successor.id, path.display());
     ctx.note(&format!(
-        "{} archived; {} carries the chain on to hop {}",
+        "{} closed at {commit}; {} carries the chain on to hop {}",
         record.id,
         successor.id,
         successor.rung.chain().map(|c| c.hop).unwrap_or_default()
@@ -418,14 +520,26 @@ pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
     Ok(())
 }
 
-pub fn archive(ctx: &Ctx, args: &IdArgs) -> Result<()> {
+pub fn close(ctx: &Ctx, args: &IdArgs) -> Result<()> {
+    let mutation = Mutation::open(ctx)?;
     let record = ctx.depot.find(parse_id(&args.id)?)?;
-    let archived = ctx.depot.archive(&record)?;
-    ctx.note(&format!("{} archived", record.id));
+    let title = record
+        .item
+        .as_ref()
+        .map(|item| item.title.clone())
+        .unwrap_or_else(|_| "invalid metadata".to_owned());
+    let footprint = ctx.depot.footprint(&record)?;
+    let commit = mutation.close(&footprint, &format!("close {}: {title}", record.id))?;
+
+    ctx.note(&format!("{} closed at {commit}", record.id));
     if ctx.format == Format::Json {
         println!(
             "{}",
-            serde_json::json!({ "id": record.id.to_string(), "archived": archived })
+            serde_json::json!({
+                "id": record.id.to_string(),
+                "closed": true,
+                "commit": commit,
+            })
         );
     }
     Ok(())
@@ -439,7 +553,7 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
     };
 
     for project in ctx.depot.projects() {
-        for record in ctx.depot.list(&project, false) {
+        for record in ctx.depot.list(&project) {
             match &record.item {
                 Err(error) => report(format!(
                     "invalid  {} {}\n         {error}\n         repair: docket set {}",
@@ -505,6 +619,10 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
         );
     }
 
+    for line in history_problems(ctx) {
+        report(line);
+    }
+
     if problems == 0 {
         println!(
             "docket: {}, nothing wrong",
@@ -512,6 +630,51 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
         );
     }
     Ok(problems == 0)
+}
+
+/// What stands between the depot and a history it can be closed against.
+fn history_problems(ctx: &Ctx) -> Vec<String> {
+    let mut found = Vec::new();
+
+    let Some(repo) = git::Repo::open(&ctx.depot.root) else {
+        if git::detect().is_none() {
+            found.push(
+                "ungit    git is not on PATH, so the depot has no history\n         \
+                 and no item can be closed"
+                    .to_owned(),
+            );
+        } else if ctx.depot.root.is_dir() {
+            found.push(format!(
+                "unversioned {} has no repository yet\n         \
+                 the next command that writes will create one",
+                ctx.depot.root.display()
+            ));
+        }
+        return found;
+    };
+
+    for nested in repo.nested_repositories() {
+        found.push(format!(
+            "nested   {} is a repository of its own\n         \
+             git records it as a link rather than as content, so nothing under it has history",
+            nested.display()
+        ));
+    }
+
+    // The shelf is retired by the first repository the depot gets. One that
+    // survived was left by a machine that had no git when items were closed.
+    for project in ctx.depot.projects() {
+        let shelf = ctx.depot.project_dir(&project).join("archive");
+        if shelf.is_dir() {
+            found.push(format!(
+                "legacy   {} is a retired archive shelf\n         \
+                 nothing lists it: move what it holds back, or delete it",
+                shelf.display()
+            ));
+        }
+    }
+
+    found
 }
 
 fn hook_is_wired() -> bool {
@@ -532,7 +695,21 @@ fn hook_is_wired() -> bool {
 }
 
 pub fn announce(ctx: &Ctx, args: &AnnounceArgs) -> Result<()> {
-    let records = ctx.depot.list(&ctx.project, false);
+    // The one read that writes. Announcing brackets a session at its opening,
+    // which is the cheapest moment to record what the last one left behind, and
+    // the only moment guaranteed to arrive. Silent throughout, and never the
+    // thing that brings a depot into being: a machine that has never opened an
+    // item gets no repository from a session starting.
+    if ctx.depot.root.is_dir()
+        && let Some(lock) = ctx.depot.try_lock_depot()
+    {
+        if let Ok(Some(repo)) = git::Repo::ensure(&ctx.depot.root) {
+            let _ = snapshot_drift(&repo);
+        }
+        drop(lock);
+    }
+
+    let records = ctx.depot.list(&ctx.project);
     if records.is_empty() {
         return Ok(());
     }
@@ -630,12 +807,10 @@ pub fn open_context(global: &Global) -> Result<Ctx> {
     } else {
         ui::resolve_format(global.format)
     };
-    let project = match &global.project {
-        Some(path) => crate::store::resolve_lenient(path),
-        None => crate::store::project_key(
-            &std::env::current_dir().context("reading the working directory")?,
-        ),
-    };
+    let project = crate::store::project_key(&match &global.project {
+        Some(path) => path.clone(),
+        None => std::env::current_dir().context("reading the working directory")?,
+    });
     Ok(Ctx {
         depot,
         format,

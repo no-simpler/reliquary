@@ -60,8 +60,7 @@ Examples:
   docket list                    this project, open items
   docket list --all              every project on this machine
   docket list --kind spec        specs only
-  docket list --invalid          only items whose metadata will not parse
-  docket list --archived         what has been archived here"
+  docket list --invalid          only items whose metadata will not parse"
     )]
     List(ListArgs),
 
@@ -90,8 +89,13 @@ Example:
     /// Replace relay with successor.
     Relay(RelayArgs),
 
-    /// Archive a docket item whose work is done.
-    Archive(IdArgs),
+    /// Close a docket item whose work is done.
+    #[command(after_long_help = "\
+Closing removes the item. The depot's history is what keeps it, so closing
+needs git:
+
+  git -C ~/.claude/docket log --diff-filter=D --name-only")]
+    Close(IdArgs),
 
     /// Report invalid metadata for fixing.
     Doctor,
@@ -131,10 +135,6 @@ pub struct ListArgs {
     /// Only items whose metadata will not parse.
     #[arg(long)]
     pub invalid: bool,
-
-    /// What has been archived, instead of what is open.
-    #[arg(long)]
-    pub archived: bool,
 }
 
 #[derive(Args)]

@@ -1,6 +1,7 @@
 mod cli;
 mod cmd;
 mod field;
+mod git;
 mod guide;
 mod help;
 mod id;
@@ -52,7 +53,7 @@ fn run(cli: Cli) -> anyhow::Result<bool> {
         Some(Command::Reorder(args)) => cmd::reorder(&ctx, args)?,
         Some(Command::Promote(args)) => cmd::promote(&ctx, args)?,
         Some(Command::Relay(args)) => cmd::relay(&ctx, args)?,
-        Some(Command::Archive(args)) => cmd::archive(&ctx, args)?,
+        Some(Command::Close(args)) => cmd::close(&ctx, args)?,
         Some(Command::Announce(args)) => cmd::announce(&ctx, args)?,
         Some(Command::Doctor) => return cmd::doctor(&ctx),
         Some(Command::Completions(_) | Command::Help(_) | Command::Guide(_)) => {

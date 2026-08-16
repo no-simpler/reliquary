@@ -44,7 +44,7 @@ complete -c docket -n "__fish_docket_needs_command" -f -a "set" -d 'Edit docket 
 complete -c docket -n "__fish_docket_needs_command" -f -a "reorder" -d 'Change order of docket items'
 complete -c docket -n "__fish_docket_needs_command" -f -a "promote" -d 'Advance docket item kind'
 complete -c docket -n "__fish_docket_needs_command" -f -a "relay" -d 'Replace relay with successor'
-complete -c docket -n "__fish_docket_needs_command" -f -a "archive" -d 'Archive a docket item whose work is done'
+complete -c docket -n "__fish_docket_needs_command" -f -a "close" -d 'Close a docket item whose work is done'
 complete -c docket -n "__fish_docket_needs_command" -f -a "doctor" -d 'Report invalid metadata for fixing'
 complete -c docket -n "__fish_docket_needs_command" -f -a "announce" -d 'Emit banner of outstanding work, if any'
 complete -c docket -n "__fish_docket_needs_command" -f -a "help" -d 'Explain a topic, or a command'
@@ -63,7 +63,6 @@ complete -c docket -n "__fish_docket_using_subcommand list" -l project -d 'Act o
 complete -c docket -n "__fish_docket_using_subcommand list" -l all -d 'Every project on this machine, not just this one'
 complete -c docket -n "__fish_docket_using_subcommand list" -l blocked -d 'Only items carrying a block'
 complete -c docket -n "__fish_docket_using_subcommand list" -l invalid -d 'Only items whose metadata will not parse'
-complete -c docket -n "__fish_docket_using_subcommand list" -l archived -d 'What has been archived, instead of what is open'
 complete -c docket -n "__fish_docket_using_subcommand list" -l json -d 'Shorthand for --format json'
 complete -c docket -n "__fish_docket_using_subcommand list" -s q -l quiet -d 'Print only what was asked for'
 complete -c docket -n "__fish_docket_using_subcommand list" -s h -l help -d 'Print help (see more with \'--help\')'
@@ -80,7 +79,6 @@ complete -c docket -n "__fish_docket_using_subcommand ls" -l project -d 'Act on 
 complete -c docket -n "__fish_docket_using_subcommand ls" -l all -d 'Every project on this machine, not just this one'
 complete -c docket -n "__fish_docket_using_subcommand ls" -l blocked -d 'Only items carrying a block'
 complete -c docket -n "__fish_docket_using_subcommand ls" -l invalid -d 'Only items whose metadata will not parse'
-complete -c docket -n "__fish_docket_using_subcommand ls" -l archived -d 'What has been archived, instead of what is open'
 complete -c docket -n "__fish_docket_using_subcommand ls" -l json -d 'Shorthand for --format json'
 complete -c docket -n "__fish_docket_using_subcommand ls" -s q -l quiet -d 'Print only what was asked for'
 complete -c docket -n "__fish_docket_using_subcommand ls" -s h -l help -d 'Print help (see more with \'--help\')'
@@ -176,16 +174,16 @@ complete -c docket -n "__fish_docket_using_subcommand relay" -l project -d 'Act 
 complete -c docket -n "__fish_docket_using_subcommand relay" -l json -d 'Shorthand for --format json'
 complete -c docket -n "__fish_docket_using_subcommand relay" -s q -l quiet -d 'Print only what was asked for'
 complete -c docket -n "__fish_docket_using_subcommand relay" -s h -l help -d 'Print help'
-complete -c docket -n "__fish_docket_using_subcommand archive" -l format -d 'Defaults to agent under Claude Code or off a terminal, human otherwise' -r -f -a "human\t''
+complete -c docket -n "__fish_docket_using_subcommand close" -l format -d 'Defaults to agent under Claude Code or off a terminal, human otherwise' -r -f -a "human\t''
 agent\t''
 json\t''"
-complete -c docket -n "__fish_docket_using_subcommand archive" -l color -d 'Honours NO_COLOR and CLICOLOR_FORCE' -r -f -a "auto\t''
+complete -c docket -n "__fish_docket_using_subcommand close" -l color -d 'Honours NO_COLOR and CLICOLOR_FORCE' -r -f -a "auto\t''
 always\t''
 never\t''"
-complete -c docket -n "__fish_docket_using_subcommand archive" -l project -d 'Act on another project\'s docket' -r -F
-complete -c docket -n "__fish_docket_using_subcommand archive" -l json -d 'Shorthand for --format json'
-complete -c docket -n "__fish_docket_using_subcommand archive" -s q -l quiet -d 'Print only what was asked for'
-complete -c docket -n "__fish_docket_using_subcommand archive" -s h -l help -d 'Print help'
+complete -c docket -n "__fish_docket_using_subcommand close" -l project -d 'Act on another project\'s docket' -r -F
+complete -c docket -n "__fish_docket_using_subcommand close" -l json -d 'Shorthand for --format json'
+complete -c docket -n "__fish_docket_using_subcommand close" -s q -l quiet -d 'Print only what was asked for'
+complete -c docket -n "__fish_docket_using_subcommand close" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c docket -n "__fish_docket_using_subcommand doctor" -l format -d 'Defaults to agent under Claude Code or off a terminal, human otherwise' -r -f -a "human\t''
 agent\t''
 json\t''"

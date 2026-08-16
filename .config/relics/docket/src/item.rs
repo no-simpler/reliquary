@@ -147,7 +147,7 @@ impl Item {
                 Some(step) => step,
                 None => bail!(
                     "{} is already a spec in implementation, the top of the ladder. \
-                     Archive it when its work lands: docket archive {}",
+                     Close it when its work lands: docket close {}",
                     self.id,
                     self.id
                 ),

@@ -14,14 +14,14 @@ handoff = one-off prompt.
 relay = transitive prompt; a relay goes in, another comes out.
 spec = multi-session plan, evolved across design and implementation stages.
 
-All item kinds archived on completion.";
+All item kinds closed on completion; the depot's history keeps what closed.";
 
 // Deliberately not opened with a `\` continuation: that would swallow this
 // block's leading indentation along with the newline.
 pub const USAGE: &str =
     "  docket create <kind> --title '...' --tagline '...'   opens one, prints path
   docket show 4mve                                     reads one
-  docket archive 4mve                                  completes one
+  docket close 4mve                                    completes one
 
   docket guide handoff|relay|spec                      per-kind guidance
   docket help                                          CLI usage";
@@ -37,7 +37,7 @@ pub const RELAY: &str = "\
 RELAY
 
 Singleton: deferred work for multiple sessions.
-Each session discovers scope of next, replaces relay or archives.
+Each session discovers scope of next, replaces relay or closes.
 For design knowable in advance, consider spec.";
 
 pub const SPEC: &str = "\

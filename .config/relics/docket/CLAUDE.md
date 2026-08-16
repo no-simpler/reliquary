@@ -43,9 +43,39 @@ These bind help text, guide text, notes and error messages alike.
 `src/cli.rs` argument surface and help. `src/item.rs` the typed ladder — a kind
 is only constructible in a valid shape, so `stage` cannot exist on a handoff and
 a relay cannot lack its chain. `src/store.rs` the depot: project keys, metadata,
-atomic writes, locking. `src/render/` one module per output shape, over the
-shared row model. `src/cmd.rs` the commands. `src/help.rs` reference topics;
-`src/guide.rs` doctrine.
+atomic writes, locking. `src/git.rs` the git layer. `src/render/` one module per
+output shape, over the shared row model. `src/cmd.rs` the commands.
+`src/help.rs` reference topics; `src/guide.rs` doctrine.
+
+## The git layer
+
+`src/git.rs` is the only module that names git, and nothing else may shell out
+to it. Two consumers: project keys, and the depot's history.
+
+It is **additive** — ask `git::detect` and take the ungit path when it answers
+nothing — with exactly one exception. `close` is refused without a repository,
+because closing removes the item and history is the only thing that keeps it.
+That asymmetry is deliberate; do not smooth it out.
+
+Three properties are load-bearing, and each is one line away from being lost:
+
+- **Every invocation goes through `Git::command`**, which strips the inherited
+  `GIT_*` environment. docket run from inside a git hook would otherwise answer
+  for that hook's repository rather than the one under its own feet.
+- **The depot's identity and `commit.gpgsign=false` live in its own config**,
+  written once at init. This machine signs through a 1Password-backed program,
+  so a signed depot commit means a Touch ID prompt on every mutation. Precedent:
+  `~/Developer/clc/clc.sh`, `store_init`.
+- **The depot lock is taken before the per-project lock**, never the other way
+  round. `cmd::Mutation` holds it for a whole command; `git::Repo` takes no lock
+  of its own.
+
+A mutating command commits twice: what was edited outside docket, then its own
+change. Bodies are authored through the path docket prints, so the first commit
+is what keeps that work from riding along under someone else's message.
+`announce` does the first alone, and takes the lock only if it is free — a
+session-start hook that waits on another session is a hook that hangs a
+terminal.
 
 ## Constraints
 
@@ -59,4 +89,11 @@ until `cargo build --release` has run — see the note in the script.
 `scripts/test.sh`: format, then clippy at `-D warnings`, then the suite.
 
 Every test must set `DOCKET_ROOT` to a scratch directory. A test that forgets it
-writes into the live depot.
+writes into the live depot. `HOME` points at the same scratch tree, which is
+also what keeps git from reading the machine's global config.
+
+`DOCKET_GIT` is the seam: a path overrides the binary, and an empty value takes
+the ungit path. It is how the refusal to close is tested at all.
+
+`scripts/update.sh` overrides the default, so it calls `scripts/publish.sh`
+itself — see the note in the script.

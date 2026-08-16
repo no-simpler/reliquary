@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -40,18 +41,90 @@ impl Docket {
     }
 
     fn run(&self, args: &[&str]) -> Run {
-        let output = Command::new(env!("CARGO_BIN_EXE_docket"))
+        self.invoke(&self.base, args, &[])
+    }
+
+    /// The same invocation with extra environment, for the seams: `DOCKET_GIT`
+    /// set to nothing takes the ungit path.
+    fn run_with(&self, args: &[&str], env: &[(&str, &str)]) -> Run {
+        self.invoke(&self.base, args, env)
+    }
+
+    /// From a working directory of its own, which is what exercises keying:
+    /// every other invocation passes --project and never asks git anything.
+    fn run_in(&self, cwd: &Path, args: &[&str]) -> Run {
+        self.invoke(cwd, args, &[])
+    }
+
+    /// Drives git against a tree the test built, never against the depot.
+    fn git(&self, cwd: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(cwd)
             .args(args)
-            .current_dir(&self.base)
+            .env("HOME", &self.base)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "docket tests")
+            .env("GIT_AUTHOR_EMAIL", "tests@localhost")
+            .env("GIT_COMMITTER_NAME", "docket tests")
+            .env("GIT_COMMITTER_EMAIL", "tests@localhost")
+            .output()
+            .expect("running git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn invoke(&self, cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_docket"));
+        command
+            .args(args)
+            .current_dir(cwd)
             .env("DOCKET_ROOT", &self.root)
             .env("CLAUDECODE", "1")
-            // HOME is where `doctor` looks for the session-start hook, so it
-            // points at the temporary tree as well.
+            // HOME is where `doctor` looks for the session-start hook, and
+            // where git would look for a global config, so it points at the
+            // temporary tree as well.
             .env("HOME", &self.base)
             .env_remove("DOCKET_UI")
-            .output()
-            .expect("running the docket binary");
+            .env_remove("DOCKET_GIT");
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let output = command.output().expect("running the docket binary");
         Run { output }
+    }
+
+    /// The depot's commit subjects, newest first.
+    fn history(&self) -> Vec<String> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&self.root)
+            .args(["log", "--pretty=format:%s"])
+            .env("HOME", &self.base)
+            .output()
+            .expect("reading the depot history");
+        if !output.status.success() {
+            return Vec::new();
+        }
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// Every path any commit ever removed.
+    fn removed_paths(&self) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&self.root)
+            .args(["log", "--diff-filter=D", "--name-only", "--pretty=format:"])
+            .env("HOME", &self.base)
+            .output()
+            .expect("reading the depot history");
+        String::from_utf8_lossy(&output.stdout).into_owned()
     }
 
     /// Opens an item with a body, and returns its id and the path `create`
@@ -164,16 +237,24 @@ fn listed_ids(stdout: &str) -> Vec<String> {
         .collect()
 }
 
-/// Where archiving an item puts it: same filename, one level down under
-/// `archive/`.
-fn archived_beside(path: &Path) -> PathBuf {
-    let kind_dir = path.parent().expect("an item sits in a kind directory");
-    kind_dir
-        .parent()
-        .expect("a kind directory sits in a project directory")
-        .join("archive")
-        .join(kind_dir.file_name().expect("the kind directory is named"))
-        .join(path.file_name().expect("the item has a filename"))
+/// Whether metadata carries one key at one value. An id of nothing but digits
+/// is emitted quoted, because YAML would otherwise read it back as a number —
+/// so an assertion that spells the pair out by hand fails on roughly one id in
+/// a hundred.
+fn holds(front: &str, key: &str, value: &str) -> bool {
+    front
+        .lines()
+        .filter_map(|line| line.strip_prefix(&format!("{key}: ")))
+        .any(|found| found.trim_matches(['\'', '"']) == value)
+}
+
+/// Nothing an item occupied survives closing — the file, and a spec's whole
+/// directory with it.
+fn footprint_gone(path: &Path) -> bool {
+    if path.file_name() == Some(OsStr::new("spec.md")) {
+        return path.parent().map(|dir| !dir.exists()).unwrap_or(true);
+    }
+    !path.exists()
 }
 
 /// Deletes one metadata key, which is how an item falls out of schema in the
@@ -519,7 +600,7 @@ fn promotion_climbs_the_ladder_and_stops_at_the_top() {
     let past_the_top = docket.run(&["promote", &id, "-q"]);
     assert!(!past_the_top.ok());
     assert!(
-        past_the_top.stderr().contains("docket archive"),
+        past_the_top.stderr().contains("docket close"),
         "stderr should point at close: {}",
         past_the_top.stderr()
     );
@@ -565,14 +646,14 @@ fn promotion_is_additive() {
     assert!(front.contains("kind: spec"));
     assert!(front.contains("stage: design"));
     assert!(
-        front.contains(&format!("chain: {id}")),
+        holds(&front, "chain", &id),
         "the chain minted at the relay rung survives — {front}"
     );
     assert!(front.contains("hop: 1"), "the hop survives — {front}");
 }
 
 #[test]
-fn relaying_mints_a_successor_and_archives_the_predecessor() {
+fn relaying_mints_a_successor_and_closes_the_predecessor() {
     let docket = Docket::new();
     let project = docket.project("proj");
     let (first, first_path) = docket.create(&project, "relay", "Wave one");
@@ -589,11 +670,10 @@ fn relaying_mints_a_successor_and_archives_the_predecessor() {
     assert!(second_run.ok(), "relay failed: {}", second_run.stderr());
     let (second, second_path) = id_and_path(&second_run.stdout());
     let second_front = front(&second_path);
-    assert!(second_front.contains(&format!("chain: {first}")));
+    assert!(holds(&second_front, "chain", &first));
     assert!(second_front.contains("hop: 2"));
-    assert!(second_front.contains(&format!("supersedes: {first}")));
-    assert!(!first_path.exists());
-    assert!(archived_beside(&first_path).is_file());
+    assert!(holds(&second_front, "supersedes", &first));
+    assert!(footprint_gone(&first_path));
 
     let third_run = docket.run(&[
         "relay",
@@ -605,16 +685,24 @@ fn relaying_mints_a_successor_and_archives_the_predecessor() {
         "-q",
     ]);
     assert!(third_run.ok(), "relay failed: {}", third_run.stderr());
-    let (_, third_path) = id_and_path(&third_run.stdout());
+    let (third, third_path) = id_and_path(&third_run.stdout());
     let third_front = front(&third_path);
     assert!(
-        third_front.contains(&format!("chain: {first}")),
+        holds(&third_front, "chain", &first),
         "the chain is stable across hops — {third_front}"
     );
     assert!(third_front.contains("hop: 3"));
-    assert!(third_front.contains(&format!("supersedes: {second}")));
-    assert!(!second_path.exists());
-    assert!(archived_beside(&second_path).is_file());
+    assert!(holds(&third_front, "supersedes", &second));
+    assert!(footprint_gone(&second_path));
+
+    // A relay is one exchange: the successor and the predecessor's removal
+    // belong to the same commit, or a chain could lose a hop.
+    let subjects = docket.history();
+    assert_eq!(
+        subjects.first().map(String::as_str),
+        Some(format!("relay {second} to {third}").as_str()),
+        "the successor and the removal share a commit — {subjects:?}"
+    );
 }
 
 #[test]
@@ -797,24 +885,125 @@ fn reorder_places_one_item_top_bottom_or_at_a_position() {
 }
 
 #[test]
-fn archive_files_an_item_away() {
+fn closing_removes_an_item_and_history_keeps_it() {
     let docket = Docket::new();
     let project = docket.project("proj");
     let (id, path) = docket.create(&project, "handoff", "Finished work");
 
-    let archived_run = docket.run(&["archive", &id, "-q"]);
-    assert!(
-        archived_run.ok(),
-        "archive failed: {}",
-        archived_run.stderr()
-    );
-    assert!(!path.exists());
-    assert!(archived_beside(&path).is_file());
+    let closed = docket.run(&["close", &id, "-q"]);
+    assert!(closed.ok(), "close failed: {}", closed.stderr());
+    assert!(footprint_gone(&path));
 
     let open = docket.run(&["list", "--project", &project]);
     assert!(!listed_ids(&open.stdout()).contains(&id));
-    let archived = docket.run(&["list", "--archived", "--project", &project]);
-    assert_eq!(listed_ids(&archived.stdout()), vec![id]);
+
+    let subjects = docket.history();
+    assert_eq!(
+        subjects.first().map(String::as_str),
+        Some(format!("close {id}: Finished work").as_str()),
+        "the close is the top commit — {subjects:?}"
+    );
+    assert!(
+        docket.removed_paths().contains(&id),
+        "history should name what it removed"
+    );
+}
+
+/// Closing is the one irreversible act, so it is gated on history holding the
+/// item — and refused outright when there is no history to hold it.
+#[test]
+fn closing_is_refused_without_git() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (id, path) = docket.create(&project, "handoff", "Unrecorded work");
+
+    let run = docket.run_with(&["close", &id, "-q"], &[("DOCKET_GIT", "")]);
+    assert!(!run.ok(), "close should refuse without git");
+    assert!(
+        run.stderr().contains("git"),
+        "the refusal names what is missing: {}",
+        run.stderr()
+    );
+    assert!(path.is_file(), "the item survives a refused close");
+}
+
+/// An id is minted against history, not against the disk, so nothing a closed
+/// item was addressed by ever comes back.
+#[test]
+fn a_closed_id_is_never_minted_again() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let mut seen = Vec::new();
+    for round in 0..8 {
+        let (id, _) = docket.create(&project, "handoff", &format!("Round {round}"));
+        assert!(!seen.contains(&id), "{id} was minted twice");
+        seen.push(id.clone());
+        let closed = docket.run(&["close", &id, "-q"]);
+        assert!(closed.ok(), "close failed: {}", closed.stderr());
+    }
+}
+
+/// Bodies are authored outside docket, through the path it prints. The next
+/// command that writes records that work before adding its own.
+#[test]
+fn outside_edits_are_recorded_before_the_next_change() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (first, path) = docket.create(&project, "handoff", "Has a body");
+    let (second, _) = docket.create(&project, "handoff", "Written later");
+
+    let text = fs::read_to_string(&path).expect("reading the item");
+    fs::write(&path, format!("{text}\nAn agent wrote this.\n")).expect("editing the body");
+
+    let run = docket.run(&["set", &second, "--tagline", "Retagged.", "-q"]);
+    assert!(run.ok(), "set failed: {}", run.stderr());
+
+    let subjects = docket.history();
+    assert_eq!(
+        subjects.first().map(String::as_str),
+        Some(format!("set {second}").as_str()),
+        "the command's own change is the top commit — {subjects:?}"
+    );
+    assert_eq!(
+        subjects.get(1).map(String::as_str),
+        Some(format!("edit: {first}").as_str()),
+        "the outside edit is recorded under it — {subjects:?}"
+    );
+}
+
+/// The session-start hook is the only bracket guaranteed to arrive, so it
+/// records drift too — without saying anything about it.
+#[test]
+fn announce_records_drift_and_stays_quiet_about_it() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (id, path) = docket.create(&project, "handoff", "Drifts");
+
+    let text = fs::read_to_string(&path).expect("reading the item");
+    fs::write(&path, format!("{text}\nEdited between sessions.\n")).expect("editing the body");
+
+    let run = docket.run(&["announce", "--project", &project]);
+    assert!(run.ok(), "announce failed: {}", run.stderr());
+    assert!(
+        !run.stdout().contains("edit:") && !run.stderr().contains("edit:"),
+        "announce says nothing about history"
+    );
+    assert_eq!(
+        docket.history().first().map(String::as_str),
+        Some(format!("edit: {id}").as_str())
+    );
+}
+
+/// A depot that has never been opened gets no repository from a session merely
+/// starting.
+#[test]
+fn announce_does_not_create_a_depot() {
+    let docket = Docket::new();
+    fs::remove_dir_all(&docket.root).expect("clearing the depot");
+
+    let run = docket.run(&["announce"]);
+    assert!(run.ok(), "announce failed: {}", run.stderr());
+    assert!(!docket.root.exists(), "announce created {:?}", docket.root);
 }
 
 #[test]
@@ -912,54 +1101,109 @@ fn help_serves_topics_and_commands_and_rejects_neither() {
 }
 
 /// Kind is taken from the directory an item sits in, not from metadata that may
-/// no longer parse. Otherwise archiving a damaged spec files it as a handoff,
-/// which loses the id from the filename and makes the item unreachable.
+/// no longer parse. Otherwise closing a damaged spec treats it as a handoff and
+/// removes the wrong footprint, leaving its directory behind.
 #[test]
-fn archiving_an_invalid_spec_keeps_it_reachable() {
+fn closing_an_invalid_spec_removes_its_directory() {
     let docket = Docket::new();
     let project = docket.project("damaged-spec");
     let (id, path) = docket.create(&project, "spec", "A spec that will be damaged");
-    drop_key(&path, "stage");
-
-    let run = docket.run(&["archive", &id, "--project", &project, "-q"]);
-    assert!(run.ok(), "archive failed: {}", run.stderr());
-
-    let located = docket.run(&["path", &id]);
-    assert!(
-        located.ok(),
-        "the item became unreachable: {}",
-        located.stderr()
-    );
-    assert_eq!(
-        tail(&PathBuf::from(located.stdout().trim()), 4),
-        format!("archive/specs/{id}-a-spec-that-will-be-damaged/spec.md")
-    );
-
-    let archived = docket.run(&["list", "--archived", "--project", &project]);
-    assert!(
-        archived.stdout().contains(&id),
-        "vanished from the archive listing"
-    );
-    assert!(
-        archived.stdout().contains("INVALID"),
-        "should still read as invalid"
-    );
-}
-
-/// Archiving a damaged spec moves its whole directory, not just the file inside
-/// it, for the same reason.
-#[test]
-fn archiving_an_invalid_spec_moves_its_directory() {
-    let docket = Docket::new();
-    let project = docket.project("damaged-spec-archive");
-    let (id, path) = docket.create(&project, "spec", "Another damaged spec");
     drop_key(&path, "stage");
     let spec_dir = path
         .parent()
         .expect("a spec lives in its own directory")
         .to_owned();
 
-    let run = docket.run(&["archive", &id, "--project", &project, "-q"]);
-    assert!(run.ok(), "archive failed: {}", run.stderr());
+    let run = docket.run(&["close", &id, "--project", &project, "-q"]);
+    assert!(run.ok(), "close failed: {}", run.stderr());
     assert!(!spec_dir.exists(), "the spec directory was left behind");
+
+    let removed = docket.removed_paths();
+    assert!(
+        removed.contains(&format!("specs/{id}-a-spec-that-will-be-damaged/spec.md")),
+        "history should hold the whole spec — {removed}"
+    );
+}
+
+/// A closed item is no longer addressable, and the error says where it went.
+#[test]
+fn a_closed_id_points_at_history() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (id, _) = docket.create(&project, "handoff", "Done and gone");
+    assert!(docket.run(&["close", &id, "-q"]).ok());
+
+    let located = docket.run(&["path", &id]);
+    assert!(!located.ok(), "a closed item should not resolve");
+    assert!(
+        located.stderr().contains("diff-filter=D"),
+        "the error points at history: {}",
+        located.stderr()
+    );
+}
+
+/// Every keying entry point answers the same: a linked worktree folds into the
+/// main checkout whether the path arrives as the working directory, as
+/// --project, or as create --to. Without that, one session's items key to the
+/// worktree and the next session's to the checkout.
+#[test]
+fn a_linked_worktree_keys_to_its_main_checkout() {
+    let docket = Docket::new();
+    let main = docket.base.join("repo");
+    fs::create_dir_all(&main).expect("creating the repository");
+    docket.git(
+        &main,
+        &["-c", "init.defaultBranch=main", "init", "--quiet", "."],
+    );
+    fs::write(main.join("README.md"), "seed\n").expect("seeding the repository");
+    docket.git(&main, &["add", "-A"]);
+    docket.git(&main, &["commit", "--quiet", "-m", "seed"]);
+
+    let linked = docket.base.join("linked");
+    docket.git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "side",
+            linked.to_str().expect("utf-8 path"),
+        ],
+    );
+
+    // From inside the worktree, with no --project at all.
+    let created = docket.run_in(
+        &linked,
+        &[
+            "create",
+            "handoff",
+            "--title",
+            "Keyed from a worktree",
+            "--tagline",
+            "Which docket does this land on?",
+            "--body",
+            "Body.\n",
+            "-q",
+        ],
+    );
+    assert!(created.ok(), "create failed: {}", created.stderr());
+    let (id, path) = id_and_path(&created.stdout());
+    assert!(
+        path.starts_with(&docket.root),
+        "the item should sit in the depot: {path:?}"
+    );
+    assert!(
+        holds(&front(&path), "project", &main.display().to_string()),
+        "the worktree should key to its main checkout — {}",
+        front(&path)
+    );
+
+    // And --project pointed at the worktree agrees with it.
+    let listed = docket.run(&["list", "--project", linked.to_str().expect("utf-8 path")]);
+    assert!(
+        listed_ids(&listed.stdout()).contains(&id),
+        "--project on the worktree should reach the same docket: {}",
+        listed.stdout()
+    );
 }

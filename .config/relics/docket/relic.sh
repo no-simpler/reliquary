@@ -7,5 +7,5 @@ DESCRIPTION="Outstanding agentic work, per project: handoffs, relays and specs b
 RUNTIME="rust"                       # required — python | bash | fish | rust | docker
 MIN_RUNTIME_VERSION="1.89"           # floor, never a pin — edition 2024 plus std file locking
 BREW_DEPS=( )                        # rustup owns the toolchain
-EXTERNAL_DEPS=( "git (project key resolution; absent git degrades to the working directory)" )
+EXTERNAL_DEPS=( "git (project keys, and the depot's version control; absent git degrades to the working directory as the key, and no item can be closed)" )
 DOCKER=0                             # optional — 1 if entrypoints are docker-run shims

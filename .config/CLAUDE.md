@@ -144,10 +144,20 @@ Machine-wide handoffs, relays and specs — the transient items that bridge agen
 Public relic (`~/.config/relics/docket/`, Rust).
 
 Items live in a per-machine depot at `~/.claude/docket/`, grouped by project and deliberately
-untracked; the system around them (relic, hook, skill) is tracked and travels between machines.
-A project keys to the **main checkout root** of its git repository, so worktrees share one docket,
-and to the resolved working directory outside a repository. Ids are four characters and unique
-across the machine, so one resolves from any directory.
+untracked **by yadm** — the system around them (relic, hook, skill) is tracked and travels between
+machines, the items themselves do not. A project keys to the **main checkout root** of its git
+repository, so worktrees share one docket, and to the resolved working directory outside a
+repository. Ids are four characters and unique across the machine, so one resolves from any
+directory.
+
+The depot is **its own git repository**, created on first use and never given a remote — history
+is machine-local, like the items. docket commits every change it makes, and commits whatever was
+edited through the path it prints before adding its own. Closing an item therefore *removes* it:
+`git -C ~/.claude/docket log --diff-filter=D --name-only` is where a closed item lives, and docket
+grows no command that restates that. The repository carries its own identity and
+`commit.gpgsign=false`, so no depot commit ever reaches for Touch ID. Everything git-dependent
+lives behind one module (`src/git.rs`), switched on by git's presence — without git, items can
+still be opened and read, but none can be closed.
 
 A `SessionStart` hook in `~/.claude/settings.json` runs `docket announce --hook`, which is silent
 when nothing is outstanding. The skill at `~/.claude/skills/docket/` is a trigger stub, and its
