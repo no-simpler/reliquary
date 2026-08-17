@@ -37,10 +37,12 @@ _docket() {
             (list)
 _arguments "${_arguments_options[@]}" : \
 '--kind=[Only this kind]:KIND:(handoff relay spec)' \
+'*--tag=[Only items carrying this tag. Repeat it to demand every one named]:TAG:_default' \
+'--search=[Only items whose name, tagline or body holds this text. Case is ignored, and the text is plain rather than a pattern]:TEXT:_default' \
 '--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
 '--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
 '--project=[Act on another project'\''s docket]:PATH:_files' \
-'--all[Every project on this machine, not just this one]' \
+'--all[Every project on this machine, as one listing]' \
 '--blocked[Only items carrying a block]' \
 '--invalid[Only items whose metadata will not parse]' \
 '(--format)--json[Shorthand for --format json]' \
@@ -53,10 +55,12 @@ _arguments "${_arguments_options[@]}" : \
 (ls)
 _arguments "${_arguments_options[@]}" : \
 '--kind=[Only this kind]:KIND:(handoff relay spec)' \
+'*--tag=[Only items carrying this tag. Repeat it to demand every one named]:TAG:_default' \
+'--search=[Only items whose name, tagline or body holds this text. Case is ignored, and the text is plain rather than a pattern]:TEXT:_default' \
 '--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
 '--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
 '--project=[Act on another project'\''s docket]:PATH:_files' \
-'--all[Every project on this machine, not just this one]' \
+'--all[Every project on this machine, as one listing]' \
 '--blocked[Only items carrying a block]' \
 '--invalid[Only items whose metadata will not parse]' \
 '(--format)--json[Shorthand for --format json]' \
@@ -145,6 +149,21 @@ _arguments "${_arguments_options[@]}" : \
 '-h[Print help]' \
 '--help[Print help]' \
 '::id -- Item id or name. Omit only with --sequence:_default' \
+&& ret=0
+;;
+(move)
+_arguments "${_arguments_options[@]}" : \
+'--to=[The project to move it to]:PATH:_files' \
+'--format=[Defaults to agent under Claude Code or off a terminal, human otherwise]:FORMAT:(human agent json)' \
+'--color=[Honours NO_COLOR and CLICOLOR_FORCE]:COLOR:(auto always never)' \
+'--project=[Act on another project'\''s docket]:PATH:_files' \
+'--allow-missing[Allow a target directory that does not exist yet]' \
+'(--format)--json[Shorthand for --format json]' \
+'-q[Print only what was asked for]' \
+'--quiet[Print only what was asked for]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':id -- Item id or name, as printed by any listing:_default' \
 && ret=0
 ;;
 (promote)
@@ -269,6 +288,7 @@ _docket_commands() {
 'path:Print an item'\''s file path, for writing or editing its body' \
 'set:Edit docket item metadata' \
 'reorder:Change order of docket items' \
+'move:Re-target a docket item to another project' \
 'promote:Advance docket item kind' \
 'relay:Replace relay with successor' \
 'close:Close a docket item whose work is done' \
@@ -319,6 +339,11 @@ _docket__subcmd__help_commands() {
 _docket__subcmd__list_commands() {
     local commands; commands=()
     _describe -t commands 'docket list commands' commands "$@"
+}
+(( $+functions[_docket__subcmd__move_commands] )) ||
+_docket__subcmd__move_commands() {
+    local commands; commands=()
+    _describe -t commands 'docket move commands' commands "$@"
 }
 (( $+functions[_docket__subcmd__path_commands] )) ||
 _docket__subcmd__path_commands() {

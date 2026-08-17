@@ -55,12 +55,21 @@ pub enum Command {
     #[command(
         visible_alias = "ls",
         after_long_help = "\
+--kind, --tag, --search and --blocked narrow: an item that cannot answer one of
+them drops out, so they compose in any combination. --invalid is the one
+selector — it narrows to the items that answer nothing at all.
+
+A listing across every project keeps each project's own order, and puts the
+project whose first item has waited longest at the top.
+
 Examples:
 
-  docket list                    this project, open items
-  docket list --all              every project on this machine
-  docket list --kind spec        specs only
-  docket list --invalid          only items whose metadata will not parse"
+  docket list                          this project, open items
+  docket list --all                    every project on this machine
+  docket list --kind spec              specs only
+  docket list --tag ci --tag release   items carrying both tags
+  docket list --search rosetta         name, tagline or body holds it
+  docket list --invalid                only items whose metadata will not parse"
     )]
     List(ListArgs),
 
@@ -130,13 +139,24 @@ Examples:
 
 #[derive(Args, Default)]
 pub struct ListArgs {
-    /// Every project on this machine, not just this one.
+    /// Every project on this machine, as one listing.
     #[arg(long)]
     pub all: bool,
 
     /// Only this kind.
     #[arg(long, value_enum)]
     pub kind: Option<Kind>,
+
+    /// Only items carrying this tag. Repeat it to demand every one named.
+    // No value delimiter: set --tags takes a comma for the whole set it
+    // writes, and one separator may not carry two quantifiers.
+    #[arg(long, value_name = "TAG")]
+    pub tag: Vec<String>,
+
+    /// Only items whose name, tagline or body holds this text. Case is
+    /// ignored, and the text is plain rather than a pattern.
+    #[arg(long, value_name = "TEXT")]
+    pub search: Option<String>,
 
     /// Only items carrying a block.
     #[arg(long)]

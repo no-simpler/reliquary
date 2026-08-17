@@ -45,9 +45,10 @@ These bind help text, guide text, notes and error messages alike.
 `src/cli.rs` argument surface and help. `src/item.rs` the typed ladder — a kind
 is only constructible in a valid shape, so `stage` cannot exist on a handoff and
 a relay cannot lack its chain. `src/store.rs` the depot: project keys, metadata,
-atomic writes, locking. `src/git.rs` the git layer. `src/render/` one module per
-output shape, over the shared row model. `src/cmd.rs` the commands.
-`src/help.rs` reference topics; `src/guide.rs` doctrine.
+atomic writes, locking. `src/git.rs` the git layer. `src/query.rs` what a
+listing asks the depot for. `src/render/` one module per output shape, over the
+shared row model. `src/cmd.rs` the commands. `src/help.rs` reference topics;
+`src/guide.rs` doctrine.
 
 ## The git layer
 

@@ -400,7 +400,10 @@ impl Depot {
     }
 }
 
-fn existing_slug(path: &Path, id: Id) -> String {
+/// The readable half of a filename: an item's name as it was written there.
+/// The one place that knows how a filename is built, so it also answers for an
+/// item whose metadata will not parse.
+pub fn existing_slug(path: &Path, id: Id) -> String {
     let stem = if path.file_name().and_then(|n| n.to_str()) == Some(SPEC_FILE) {
         path.parent().and_then(|p| p.file_name())
     } else {

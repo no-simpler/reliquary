@@ -6,13 +6,38 @@ use std::path::Path;
 
 use anyhow::Result;
 
+use crate::item::Item;
+use crate::query::Hit;
 use crate::store::Record;
 use crate::ui::Format;
 
+/// How wide the project column may get. A path is unbounded and the unbounded
+/// column is the tagline, so this one is cut to fit the way a name is.
+const PROJECT_MAX: usize = 40;
+
 pub struct View<'a> {
-    pub project: &'a Path,
-    pub records: &'a [Record],
+    /// The project every item sits on, or nothing when the listing spans the
+    /// machine and each row names its own.
+    pub project: Option<&'a Path>,
+    pub hits: &'a [Hit],
     pub color: bool,
+    /// Whether a filter was in play, so an empty result can say whether there
+    /// is nothing here or nothing that answered.
+    pub narrowed: bool,
+}
+
+impl View<'_> {
+    /// How many projects the listing covers, for the line that heads one
+    /// spanning the machine.
+    pub fn projects(&self) -> usize {
+        let mut seen: Vec<&Path> = Vec::new();
+        for hit in self.hits {
+            if !seen.contains(&hit.record.project.as_path()) {
+                seen.push(&hit.record.project);
+            }
+        }
+        seen.len()
+    }
 }
 
 pub fn list(view: &View<'_>, format: Format) -> Result<()> {
@@ -101,11 +126,99 @@ pub fn aligned(rows: &[Row], indent: &str) -> (Vec<String>, usize) {
 
 /// The badge every renderer shows for an item's rung: kind, plus the one
 /// qualifier that rung carries.
-pub fn kind_badge(item: &crate::item::Item) -> String {
+pub fn kind_badge(item: &Item) -> String {
     use crate::item::Rung;
     match &item.rung {
         Rung::Handoff => "handoff".to_owned(),
         Rung::Relay(chain) => format!("relay hop={}", chain.hop),
         Rung::Spec { stage, .. } => format!("spec/{stage}"),
+    }
+}
+
+/// The row a listing shows for one hit: the cells `row` gives, the project
+/// ahead of them when the listing spans the machine, and the notes a query
+/// earned under them. `announce` takes `row` directly, so a banner stays the
+/// blocked line alone.
+pub fn hit_row(hit: &Hit, name_project: bool) -> Row {
+    let mut row = row(hit.position, &hit.record);
+    if name_project {
+        row.cells.insert(0, project_cell(&hit.record.project));
+    }
+    if let Ok(item) = &hit.record.item
+        && let Some(tags) = tag_line(item)
+    {
+        row.notes.push(format!("tags: {tags}"));
+    }
+    if let Some(excerpt) = &hit.excerpt {
+        row.notes.push(format!("match: {excerpt}"));
+    }
+    row
+}
+
+/// The project a roster row sits on, cut to fit a column.
+pub fn project_cell(project: &Path) -> String {
+    let home = std::env::var_os("HOME");
+    shorten(project, home.as_deref().map(Path::new))
+}
+
+/// Home becomes a tilde, and a path still too long loses its head rather than
+/// its tail: the leading directories are what every project on a machine has in
+/// common, and the trailing ones are what say which project this is.
+fn shorten(project: &Path, home: Option<&Path>) -> String {
+    let text = match home.and_then(|home| project.strip_prefix(home).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => project.display().to_string(),
+    };
+    let width = text.chars().count();
+    if width <= PROJECT_MAX {
+        return text;
+    }
+
+    // One character of the budget goes to the elision, and the cut falls on a
+    // separator when one is in reach, so the head that is dropped is whole
+    // directories rather than half of one.
+    let keep = PROJECT_MAX - 1;
+    let from = width - keep;
+    let tail: String = text.chars().skip(from).collect();
+    let cut = match tail.find('/') {
+        Some(at) if tail[..at].chars().count() * 2 <= keep => at,
+        _ => 0,
+    };
+    format!("…{}", &tail[cut..])
+}
+
+/// The tags an item carries as one line, separated by the space a tag may not
+/// contain. Each renderer labels it in its own case.
+pub fn tag_line(item: &Item) -> Option<String> {
+    if item.tags.is_empty() {
+        return None;
+    }
+    Some(item.tags.join(" "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_project_cell_shortens_home() {
+        let home = Path::new("/Users/example");
+        assert_eq!(
+            shorten(Path::new("/Users/example/Developer/halo"), Some(home)),
+            "~/Developer/halo"
+        );
+        assert_eq!(shorten(Path::new("/Users/example"), Some(home)), "~");
+        assert_eq!(shorten(Path::new("/opt/tools"), Some(home)), "/opt/tools");
+        assert_eq!(shorten(Path::new("/opt/tools"), None), "/opt/tools");
+    }
+
+    #[test]
+    fn a_project_cell_loses_its_head_when_it_must() {
+        let deep = Path::new("/Users/example/Developer/benefactor/services/offer/pillar/api");
+        let cell = shorten(deep, Some(Path::new("/Users/example")));
+        assert!(cell.starts_with('…'), "{cell}");
+        assert!(cell.ends_with("pillar/api"), "{cell}");
+        assert!(cell.chars().count() <= PROJECT_MAX, "{cell}");
     }
 }

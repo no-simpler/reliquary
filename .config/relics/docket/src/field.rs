@@ -22,6 +22,10 @@ pub const BLOCKED_MAX: usize = 80;
 
 pub const TAG_MAX: usize = 32;
 
+/// A quoted body line shares the tagline's column, so it wraps the same way a
+/// block reason does.
+pub const EXCERPT_MAX: usize = 80;
+
 /// Trimmed, with every internal run of whitespace collapsed to one space, so a
 /// value pasted out of a wrapped paragraph stores as the single line it is.
 fn normalise(raw: &str) -> String {
@@ -137,6 +141,47 @@ pub fn clamp(raw: &str, max: usize) -> String {
         _ => end,
     };
     format!("{}…", head[..cut].trim_end())
+}
+
+/// The stretch of a line around a match, for quoting what a search found. The
+/// window is placed rather than taken from the head, because a line long enough
+/// to need cutting is one whose match is usually not at its front, and an
+/// elision stands for either end that was dropped.
+///
+/// `needle` is already lowered, as the caller matched with it.
+pub fn excerpt(raw: &str, needle: &str, max: usize) -> String {
+    let line = normalise(raw);
+    let total = width(&line);
+    if total <= max {
+        return line;
+    }
+    let lowered = line.to_lowercase();
+    // Case folding can change a character count, so a needle found in the
+    // lowered line places the window approximately. The excerpt is a pointer at
+    // the match, not a substitute for reading the item.
+    let Some(byte) = lowered.find(needle) else {
+        return clamp(&line, max);
+    };
+    let at = lowered[..byte].chars().count().min(total);
+
+    // A quarter of the room goes to what led up to the match, so the match sits
+    // where the eye lands rather than against the left edge.
+    let start = at.saturating_sub(max / 4);
+    let mut room = max.saturating_sub(usize::from(start > 0));
+    if total - start > room {
+        room = room.saturating_sub(1);
+    }
+    let end = (start + room).min(total);
+
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.extend(line.chars().skip(start).take(end - start));
+    if end < total {
+        out.push('…');
+    }
+    out
 }
 
 /// One tag, or nothing when the entry was blank. Whitespace is rejected rather
@@ -266,6 +311,39 @@ mod tests {
         let clamped = clamp("a supercalifragilistic word", 12);
         assert_eq!(clamped, "a supercali…");
         assert!(width(&clamped) <= 12);
+    }
+
+    #[test]
+    fn an_excerpt_is_placed_around_its_match() {
+        let line = format!("{} needle {}", "a".repeat(60), "b".repeat(60));
+        let quoted = excerpt(&line, "needle", EXCERPT_MAX);
+        assert!(quoted.contains("needle"), "{quoted}");
+        assert!(quoted.starts_with('…') && quoted.ends_with('…'), "{quoted}");
+        assert!(width(&quoted) <= EXCERPT_MAX, "{quoted}");
+    }
+
+    #[test]
+    fn a_line_that_fits_is_quoted_whole() {
+        assert_eq!(
+            excerpt("  short   line ", "line", EXCERPT_MAX),
+            "short line"
+        );
+    }
+
+    #[test]
+    fn an_excerpt_keeps_the_head_when_the_match_is_there() {
+        let line = format!("needle {}", "b".repeat(200));
+        let quoted = excerpt(&line, "needle", EXCERPT_MAX);
+        assert!(quoted.starts_with("needle"), "{quoted}");
+        assert!(quoted.ends_with('…'), "{quoted}");
+        assert!(width(&quoted) <= EXCERPT_MAX, "{quoted}");
+    }
+
+    #[test]
+    fn an_excerpt_falls_back_to_clamping_when_the_needle_is_absent() {
+        let line = "c".repeat(200);
+        let quoted = excerpt(&line, "needle", EXCERPT_MAX);
+        assert_eq!(quoted, clamp(&line, EXCERPT_MAX));
     }
 
     #[test]

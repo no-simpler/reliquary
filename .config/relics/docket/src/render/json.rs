@@ -3,42 +3,44 @@ use serde_json::{Value, json};
 
 use super::View;
 use crate::item::{Item, Rung};
-use crate::store::Record;
+use crate::query::Hit;
 
+/// One shape, whichever scope produced it: every item carries its own project,
+/// so a top-level one would be a second copy of the same fact — and across
+/// projects it would be a copy that is wrong for all but one row.
 pub fn list(view: &View<'_>) -> Result<()> {
-    let items: Vec<Value> = view
-        .records
-        .iter()
-        .enumerate()
-        .map(|(index, record)| record_json(index + 1, record))
-        .collect();
+    let items: Vec<Value> = view.hits.iter().map(hit_json).collect();
     println!(
         "{}",
-        serde_json::to_string_pretty(&json!({
-            "project": view.project,
-            "items": items,
-        }))?
+        serde_json::to_string_pretty(&json!({ "items": items }))?
     );
     Ok(())
 }
 
-pub fn record_json(position: usize, record: &Record) -> Value {
-    match &record.item {
+fn hit_json(hit: &Hit) -> Value {
+    let record = &hit.record;
+    let mut value = match &record.item {
         Ok(item) => {
             let mut value = item_json(item);
-            value["position"] = json!(position);
-            value["path"] = json!(record.path);
             value["valid"] = json!(true);
             value
         }
+        // The keys the shelf can answer for are still answered, so the shape
+        // does not change with whether an item parsed.
         Err(error) => json!({
-            "position": position,
             "id": record.id.to_string(),
-            "path": record.path,
+            "kind": record.kind.to_string(),
+            "project": record.project,
             "valid": false,
             "error": error,
         }),
+    };
+    value["position"] = json!(hit.position);
+    value["path"] = json!(record.path);
+    if let Some(excerpt) = &hit.excerpt {
+        value["excerpt"] = json!(excerpt);
     }
+    value
 }
 
 pub fn item_json(item: &Item) -> Value {

@@ -5,8 +5,8 @@ use anyhow::Result;
 use comfy_table::presets::UTF8_HORIZONTAL_ONLY;
 use comfy_table::{Attribute, Cell, Color, ColumnConstraint, ContentArrangement, Table, Width};
 
-use super::{View, kind_badge};
-use crate::ui::{age, age_days};
+use super::{View, kind_badge, project_cell, tag_line};
+use crate::ui::{age, age_days, plural};
 
 /// Warm while an item is fresh, hot once it has been sitting long enough to be
 /// worth a second look.
@@ -19,10 +19,29 @@ fn age_color(days: i64) -> Color {
 }
 
 pub fn list(view: &View<'_>) -> Result<()> {
-    println!("{}", view.project.display());
-    if view.records.is_empty() {
-        println!("nothing on the docket");
+    match view.project {
+        Some(project) => println!("{}", project.display()),
+        None => println!("{}", plural(view.projects(), "project", "projects")),
+    }
+    if view.hits.is_empty() {
+        println!(
+            "{}",
+            if view.narrowed {
+                "nothing matches"
+            } else {
+                "nothing on the docket"
+            }
+        );
         return Ok(());
+    }
+
+    // A listing across the machine names each row's project ahead of the cells
+    // every listing shows, which shifts every column after it by one.
+    let named = view.project.is_none();
+    let offset = usize::from(named);
+    let mut header = vec!["#", "ID", "KIND", "AGE", "NAME", "TAGLINE"];
+    if named {
+        header.insert(0, "PROJECT");
     }
 
     let mut table = Table::new();
@@ -35,25 +54,37 @@ pub fn list(view: &View<'_>) -> Result<()> {
     table
         .load_style(UTF8_HORIZONTAL_ONLY)
         .set_content_arrangement(ContentArrangement::Dynamic)
-        .set_header(vec!["#", "ID", "KIND", "AGE", "NAME", "TAGLINE"]);
+        .set_header(header);
 
     // The display bound is the stored bound: a name and a tagline that pass
     // validation each occupy one row, and only a narrow terminal wraps them.
     for (column, cap) in [
-        (4usize, crate::field::NAME_MAX as u16),
-        (5, crate::field::TAGLINE_MAX as u16),
+        (offset + 4, crate::field::NAME_MAX as u16),
+        (offset + 5, crate::field::TAGLINE_MAX as u16),
     ] {
         if let Some(column) = table.column_mut(column) {
             column.set_constraint(ColumnConstraint::UpperBoundary(Width::Fixed(cap)));
         }
     }
 
-    for (index, record) in view.records.iter().enumerate() {
+    for hit in view.hits {
+        let record = &hit.record;
+        let mut cells = Vec::new();
+        if named {
+            // An anchor rather than a signal, so it takes no colour.
+            cells.push(Cell::new(project_cell(&record.project)));
+        }
         match &record.item {
             Ok(item) => {
                 let mut detail = item.tagline.trim_end().to_owned();
                 if let Some(reason) = item.blocked.as_deref().filter(|r| !r.trim().is_empty()) {
                     detail = format!("BLOCKED: {}\n{detail}", reason.trim());
+                }
+                if let Some(tags) = tag_line(item) {
+                    detail.push_str(&format!("\nTAGS: {tags}"));
+                }
+                if let Some(excerpt) = &hit.excerpt {
+                    detail.push_str(&format!("\nMATCH: {excerpt}"));
                 }
                 let kind = paint(
                     Cell::new(kind_badge(item)),
@@ -69,8 +100,8 @@ pub fn list(view: &View<'_>) -> Result<()> {
                 } else {
                     Cell::new(detail)
                 };
-                table.add_row(vec![
-                    Cell::new(index + 1),
+                cells.extend([
+                    Cell::new(hit.position),
                     id_cell(record.id, view.color, Color::White),
                     kind,
                     paint(
@@ -83,8 +114,8 @@ pub fn list(view: &View<'_>) -> Result<()> {
                 ]);
             }
             Err(error) => {
-                table.add_row(vec![
-                    Cell::new(index + 1),
+                cells.extend([
+                    Cell::new(hit.position),
                     id_cell(record.id, view.color, Color::Red),
                     paint(Cell::new("INVALID"), view.color, Color::Red),
                     Cell::new(""),
@@ -97,6 +128,7 @@ pub fn list(view: &View<'_>) -> Result<()> {
                 ]);
             }
         }
+        table.add_row(cells);
     }
 
     println!("{table}");

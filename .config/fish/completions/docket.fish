@@ -42,6 +42,7 @@ complete -c docket -n "__fish_docket_needs_command" -f -a "show" -d 'Print an it
 complete -c docket -n "__fish_docket_needs_command" -f -a "path" -d 'Print an item\'s file path, for writing or editing its body'
 complete -c docket -n "__fish_docket_needs_command" -f -a "set" -d 'Edit docket item metadata'
 complete -c docket -n "__fish_docket_needs_command" -f -a "reorder" -d 'Change order of docket items'
+complete -c docket -n "__fish_docket_needs_command" -f -a "move" -d 'Re-target a docket item to another project'
 complete -c docket -n "__fish_docket_needs_command" -f -a "promote" -d 'Advance docket item kind'
 complete -c docket -n "__fish_docket_needs_command" -f -a "relay" -d 'Replace relay with successor'
 complete -c docket -n "__fish_docket_needs_command" -f -a "close" -d 'Close a docket item whose work is done'
@@ -53,6 +54,8 @@ complete -c docket -n "__fish_docket_needs_command" -f -a "completions" -d 'Prin
 complete -c docket -n "__fish_docket_using_subcommand list" -l kind -d 'Only this kind' -r -f -a "handoff\t''
 relay\t''
 spec\t''"
+complete -c docket -n "__fish_docket_using_subcommand list" -l tag -d 'Only items carrying this tag. Repeat it to demand every one named' -r
+complete -c docket -n "__fish_docket_using_subcommand list" -l search -d 'Only items whose name, tagline or body holds this text. Case is ignored, and the text is plain rather than a pattern' -r
 complete -c docket -n "__fish_docket_using_subcommand list" -l format -d 'Defaults to agent under Claude Code or off a terminal, human otherwise' -r -f -a "human\t''
 agent\t''
 json\t''"
@@ -60,7 +63,7 @@ complete -c docket -n "__fish_docket_using_subcommand list" -l color -d 'Honours
 always\t''
 never\t''"
 complete -c docket -n "__fish_docket_using_subcommand list" -l project -d 'Act on another project\'s docket' -r -F
-complete -c docket -n "__fish_docket_using_subcommand list" -l all -d 'Every project on this machine, not just this one'
+complete -c docket -n "__fish_docket_using_subcommand list" -l all -d 'Every project on this machine, as one listing'
 complete -c docket -n "__fish_docket_using_subcommand list" -l blocked -d 'Only items carrying a block'
 complete -c docket -n "__fish_docket_using_subcommand list" -l invalid -d 'Only items whose metadata will not parse'
 complete -c docket -n "__fish_docket_using_subcommand list" -l json -d 'Shorthand for --format json'
@@ -69,6 +72,8 @@ complete -c docket -n "__fish_docket_using_subcommand list" -s h -l help -d 'Pri
 complete -c docket -n "__fish_docket_using_subcommand ls" -l kind -d 'Only this kind' -r -f -a "handoff\t''
 relay\t''
 spec\t''"
+complete -c docket -n "__fish_docket_using_subcommand ls" -l tag -d 'Only items carrying this tag. Repeat it to demand every one named' -r
+complete -c docket -n "__fish_docket_using_subcommand ls" -l search -d 'Only items whose name, tagline or body holds this text. Case is ignored, and the text is plain rather than a pattern' -r
 complete -c docket -n "__fish_docket_using_subcommand ls" -l format -d 'Defaults to agent under Claude Code or off a terminal, human otherwise' -r -f -a "human\t''
 agent\t''
 json\t''"
@@ -76,7 +81,7 @@ complete -c docket -n "__fish_docket_using_subcommand ls" -l color -d 'Honours N
 always\t''
 never\t''"
 complete -c docket -n "__fish_docket_using_subcommand ls" -l project -d 'Act on another project\'s docket' -r -F
-complete -c docket -n "__fish_docket_using_subcommand ls" -l all -d 'Every project on this machine, not just this one'
+complete -c docket -n "__fish_docket_using_subcommand ls" -l all -d 'Every project on this machine, as one listing'
 complete -c docket -n "__fish_docket_using_subcommand ls" -l blocked -d 'Only items carrying a block'
 complete -c docket -n "__fish_docket_using_subcommand ls" -l invalid -d 'Only items whose metadata will not parse'
 complete -c docket -n "__fish_docket_using_subcommand ls" -l json -d 'Shorthand for --format json'
@@ -148,6 +153,18 @@ complete -c docket -n "__fish_docket_using_subcommand reorder" -l bottom -d 'Mov
 complete -c docket -n "__fish_docket_using_subcommand reorder" -l json -d 'Shorthand for --format json'
 complete -c docket -n "__fish_docket_using_subcommand reorder" -s q -l quiet -d 'Print only what was asked for'
 complete -c docket -n "__fish_docket_using_subcommand reorder" -s h -l help -d 'Print help'
+complete -c docket -n "__fish_docket_using_subcommand move" -l to -d 'The project to move it to' -r -F
+complete -c docket -n "__fish_docket_using_subcommand move" -l format -d 'Defaults to agent under Claude Code or off a terminal, human otherwise' -r -f -a "human\t''
+agent\t''
+json\t''"
+complete -c docket -n "__fish_docket_using_subcommand move" -l color -d 'Honours NO_COLOR and CLICOLOR_FORCE' -r -f -a "auto\t''
+always\t''
+never\t''"
+complete -c docket -n "__fish_docket_using_subcommand move" -l project -d 'Act on another project\'s docket' -r -F
+complete -c docket -n "__fish_docket_using_subcommand move" -l allow-missing -d 'Allow a target directory that does not exist yet'
+complete -c docket -n "__fish_docket_using_subcommand move" -l json -d 'Shorthand for --format json'
+complete -c docket -n "__fish_docket_using_subcommand move" -s q -l quiet -d 'Print only what was asked for'
+complete -c docket -n "__fish_docket_using_subcommand move" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c docket -n "__fish_docket_using_subcommand promote" -l to -d 'Jump to a kind instead of advancing one step' -r -f -a "handoff\t''
 relay\t''
 spec\t''"

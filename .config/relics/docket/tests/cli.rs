@@ -148,6 +148,39 @@ impl Docket {
         assert!(run.ok(), "create failed: {}", run.stderr());
         id_and_path(&run.stdout())
     }
+
+    /// The same, with a tagline and a body of the test's own, for the searches
+    /// that have to tell one field from another.
+    fn write(
+        &self,
+        project: &str,
+        kind: &str,
+        name: &str,
+        tagline: &str,
+        body: &str,
+    ) -> (String, PathBuf) {
+        let run = self.run(&[
+            "create",
+            kind,
+            "--name",
+            name,
+            "--tagline",
+            tagline,
+            "--body",
+            body,
+            "--project",
+            project,
+            "--allow-missing",
+            "-q",
+        ]);
+        assert!(run.ok(), "create failed: {}", run.stderr());
+        id_and_path(&run.stdout())
+    }
+
+    fn tag(&self, id: &str, tags: &str) {
+        let run = self.run(&["set", id, "--tags", tags, "-q"]);
+        assert!(run.ok(), "set failed: {}", run.stderr());
+    }
 }
 
 impl Drop for Docket {
@@ -225,15 +258,40 @@ fn front(path: &Path) -> String {
 fn listed_ids(stdout: &str) -> Vec<String> {
     stdout
         .lines()
-        .filter(|line| !line.starts_with(' '))
+        .filter(|line| !line.starts_with(' ') && !line.starts_with("docket "))
         .filter_map(|line| {
-            let mut fields = line.split_whitespace();
-            let position = fields.next()?;
-            if position != "!" && position.parse::<usize>().is_err() {
-                return None;
-            }
-            fields.next().map(str::to_owned)
+            // A listing across projects names each row's project ahead of the
+            // cells every listing shows, so the position is not always first.
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let at = fields
+                .iter()
+                .position(|field| *field == "!" || field.parse::<usize>().is_ok())?;
+            fields.get(at + 1).map(|id| (*id).to_owned())
         })
+        .collect()
+}
+
+/// The positions a listing printed, in the order it printed them.
+fn listed_positions(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter(|line| !line.starts_with(' ') && !line.starts_with("docket "))
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            let at = fields
+                .iter()
+                .position(|field| *field == "!" || field.parse::<usize>().is_ok())?;
+            Some(fields[at].to_owned())
+        })
+        .collect()
+}
+
+/// The indented lines a listing hung under its rows.
+fn notes(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter(|line| line.starts_with(' '))
+        .map(|line| line.trim().to_owned())
         .collect()
 }
 
@@ -1571,4 +1629,457 @@ fn a_linked_worktree_keys_to_its_main_checkout() {
         "--project on the worktree should reach the same docket: {}",
         listed.stdout()
     );
+}
+
+#[test]
+fn search_matches_a_name_a_tagline_and_a_body() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (named, _) = docket.write(
+        &project,
+        "handoff",
+        "ROSETTA_TABLE",
+        "One line about nothing.",
+        "A body about nothing.\n",
+    );
+    let (taglined, _) = docket.write(
+        &project,
+        "handoff",
+        "SECOND_ITEM",
+        "The obelisk is the point.",
+        "A body about nothing.\n",
+    );
+    let (bodied, _) = docket.write(
+        &project,
+        "handoff",
+        "THIRD_ITEM",
+        "One line about nothing.",
+        "The demotic register is the one that mattered.\n",
+    );
+
+    for (needle, wanted) in [
+        ("rosetta", &named),
+        ("obelisk", &taglined),
+        ("demotic", &bodied),
+    ] {
+        let run = docket.run(&["list", "--search", needle, "--project", &project]);
+        assert!(run.ok(), "list failed: {}", run.stderr());
+        assert_eq!(listed_ids(&run.stdout()), vec![wanted.clone()], "{needle}");
+    }
+}
+
+#[test]
+fn search_does_not_reach_metadata() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    docket.write(
+        &project,
+        "handoff",
+        "PLAIN_ITEM",
+        "One line about nothing.",
+        "A body about nothing.\n",
+    );
+
+    // Every item states its kind in its metadata, so a search that read it
+    // would answer with all of them.
+    for needle in ["handoff", "tagline", "created"] {
+        let run = docket.run(&["list", "--search", needle, "--project", &project]);
+        assert!(run.ok(), "list failed: {}", run.stderr());
+        assert!(listed_ids(&run.stdout()).is_empty(), "{needle}");
+    }
+}
+
+#[test]
+fn search_ignores_case() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (id, _) = docket.write(
+        &project,
+        "handoff",
+        "MIXED_CASE",
+        "One line about nothing.",
+        "The Rosetta table moves first.\n",
+    );
+
+    for needle in ["rosetta", "ROSETTA", "RoSeTtA"] {
+        let run = docket.run(&["list", "--search", needle, "--project", &project]);
+        assert_eq!(listed_ids(&run.stdout()), vec![id.clone()], "{needle}");
+    }
+}
+
+#[test]
+fn search_reaches_an_item_whose_metadata_will_not_parse() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (id, path) = docket.write(
+        &project,
+        "spec",
+        "DAMAGED_SPEC",
+        "One line about nothing.",
+        "The demotic register is the one that mattered.\n",
+    );
+    drop_key(&path, "stage");
+
+    // The name comes from the filename and the body from what follows the
+    // metadata, so both still answer.
+    for needle in ["damaged", "demotic"] {
+        let run = docket.run(&["list", "--search", needle, "--project", &project]);
+        assert!(run.ok(), "list failed: {}", run.stderr());
+        assert_eq!(listed_ids(&run.stdout()), vec![id.clone()], "{needle}");
+        assert!(run.stdout().contains("INVALID"), "{}", run.stdout());
+    }
+}
+
+#[test]
+fn search_quotes_the_body_line_it_matched_and_nothing_else() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    docket.write(
+        &project,
+        "handoff",
+        "QUOTED_LINE",
+        "One line about nothing.",
+        "A first line.\nThe demotic register is the one that mattered.\nA third.\n",
+    );
+
+    let hit = docket.run(&["list", "--search", "demotic", "--project", &project]);
+    assert!(hit.ok(), "list failed: {}", hit.stderr());
+    assert_eq!(
+        notes(&hit.stdout()),
+        vec!["match: The demotic register is the one that mattered."]
+    );
+
+    // A name or a tagline is already on the row, so quoting it would say
+    // nothing the reader cannot see.
+    let seen = docket.run(&["list", "--search", "quoted", "--project", &project]);
+    assert!(notes(&seen.stdout()).is_empty(), "{}", seen.stdout());
+}
+
+#[test]
+fn tag_filters_demand_every_tag_named() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (both, _) = docket.create(&project, "handoff", "BOTH_TAGS");
+    let (one, _) = docket.create(&project, "handoff", "ONE_TAG");
+    docket.create(&project, "handoff", "NO_TAGS");
+    docket.tag(&both, "ci,release");
+    docket.tag(&one, "ci");
+
+    let by = |args: &[&str]| {
+        let mut all = vec!["list"];
+        all.extend_from_slice(args);
+        all.extend_from_slice(&["--project", &project]);
+        let run = docket.run(&all);
+        assert!(run.ok(), "list failed: {}", run.stderr());
+        listed_ids(&run.stdout())
+    };
+
+    assert_eq!(by(&["--tag", "ci"]).len(), 2);
+    assert_eq!(by(&["--tag", "ci", "--tag", "release"]), vec![both.clone()]);
+    assert!(by(&["--tag", "absent"]).is_empty());
+    assert!(!by(&["--tag", "ci"]).contains(&"NO_TAGS".to_owned()));
+    assert!(by(&["--tag", "ci"]).contains(&one));
+}
+
+#[test]
+fn tags_are_shown_on_the_row_that_carries_them() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (tagged, _) = docket.create(&project, "handoff", "TAGGED_ITEM");
+    docket.create(&project, "handoff", "BARE_ITEM");
+    docket.tag(&tagged, "ci,release");
+
+    let run = docket.run(&["list", "--project", &project]);
+    assert_eq!(notes(&run.stdout()), vec!["tags: ci release"]);
+}
+
+#[test]
+fn kind_answers_from_the_shelf_when_metadata_will_not_parse() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (spec, path) = docket.create(&project, "spec", "DAMAGED_SPEC");
+    let (handoff, _) = docket.create(&project, "handoff", "SOUND_HANDOFF");
+    drop_key(&path, "stage");
+
+    let specs = docket.run(&["list", "--kind", "spec", "--project", &project]);
+    assert_eq!(listed_ids(&specs.stdout()), vec![spec]);
+    assert!(specs.stdout().contains("INVALID"), "{}", specs.stdout());
+
+    let handoffs = docket.run(&["list", "--kind", "handoff", "--project", &project]);
+    assert_eq!(listed_ids(&handoffs.stdout()), vec![handoff]);
+}
+
+#[test]
+fn invalid_selects_only_what_will_not_parse() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (damaged, path) = docket.create(&project, "spec", "DAMAGED_SPEC");
+    docket.create(&project, "handoff", "SOUND_HANDOFF");
+    drop_key(&path, "stage");
+
+    let only = docket.run(&["list", "--invalid", "--project", &project]);
+    assert_eq!(listed_ids(&only.stdout()), vec![damaged.clone()]);
+
+    let narrowed = docket.run(&["list", "--invalid", "--kind", "spec", "--project", &project]);
+    assert_eq!(listed_ids(&narrowed.stdout()), vec![damaged]);
+
+    // Nothing that will not parse can answer a block, so the two together are
+    // empty rather than a refusal.
+    let none = docket.run(&["list", "--invalid", "--blocked", "--project", &project]);
+    assert!(none.ok(), "list failed: {}", none.stderr());
+    assert!(listed_ids(&none.stdout()).is_empty());
+}
+
+#[test]
+fn every_filter_narrows_the_same_listing() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (wanted, _) = docket.write(
+        &project,
+        "spec",
+        "EVERY_FLAG",
+        "One line about nothing.",
+        "The demotic register is the one that mattered.\n",
+    );
+    docket.tag(&wanted, "ci");
+    let held = docket.run(&["set", &wanted, "--blocked", "the schema review", "-q"]);
+    assert!(held.ok(), "set failed: {}", held.stderr());
+    docket.write(
+        &project,
+        "handoff",
+        "OTHER_ITEM",
+        "One line about nothing.",
+        "The demotic register is the one that mattered.\n",
+    );
+
+    let all = docket.run(&[
+        "list",
+        "--kind",
+        "spec",
+        "--tag",
+        "ci",
+        "--blocked",
+        "--search",
+        "demotic",
+        "--project",
+        &project,
+    ]);
+    assert!(all.ok(), "list failed: {}", all.stderr());
+    assert_eq!(listed_ids(&all.stdout()), vec![wanted.clone()]);
+
+    // Dropping the one flag that only this item answers widens the result.
+    let wider = docket.run(&["list", "--search", "demotic", "--project", &project]);
+    assert_eq!(listed_ids(&wider.stdout()).len(), 2);
+}
+
+#[test]
+fn an_empty_result_says_whether_it_was_narrowed() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+
+    let bare = docket.run(&["list", "--project", &project]);
+    assert!(bare.stdout().contains("(empty)"), "{}", bare.stdout());
+
+    docket.create(&project, "handoff", "SOUND_HANDOFF");
+    let filtered = docket.run(&["list", "--kind", "spec", "--project", &project]);
+    assert!(filtered.ok(), "list failed: {}", filtered.stderr());
+    assert!(
+        filtered.stdout().contains("(no match)"),
+        "{}",
+        filtered.stdout()
+    );
+}
+
+#[test]
+fn a_listing_across_projects_names_each_row_s_project() {
+    let docket = Docket::new();
+    let alpha = docket.project("alpha");
+    let beta = docket.project("beta");
+    let (first, _) = docket.create(&alpha, "handoff", "ALPHA_WORK");
+    let (second, _) = docket.create(&beta, "handoff", "BETA_WORK");
+
+    let run = docket.run(&["list", "--all"]);
+    assert!(run.ok(), "list failed: {}", run.stderr());
+    let ids = listed_ids(&run.stdout());
+    assert!(ids.contains(&first) && ids.contains(&second), "{ids:?}");
+    assert_eq!(run.stdout().matches("~/alpha").count(), 1);
+    assert_eq!(run.stdout().matches("~/beta").count(), 1);
+    assert!(
+        run.stdout().starts_with("docket 2 projects\n"),
+        "{}",
+        run.stdout()
+    );
+}
+
+#[test]
+fn projects_rank_by_the_head_that_has_waited_longest() {
+    let docket = Docket::new();
+    let alpha = docket.project("alpha");
+    let beta = docket.project("beta");
+    let (early, early_path) = docket.create(&alpha, "handoff", "EARLY_HEAD");
+    let (late, late_path) = docket.create(&beta, "handoff", "LATE_HEAD");
+    swap_key(&early_path, "created", "created: 2020-01-01T00:00:00Z");
+    swap_key(&late_path, "created", "created: 2024-01-01T00:00:00Z");
+
+    let run = docket.run(&["list", "--all"]);
+    assert_eq!(listed_ids(&run.stdout()), vec![early.clone(), late.clone()]);
+
+    // A head that cannot answer its age ranks last, whatever its path.
+    let (damaged, damaged_path) = docket.create(&docket.project("aardvark"), "spec", "NO_AGE");
+    drop_key(&damaged_path, "stage");
+    let again = docket.run(&["list", "--all"]);
+    assert_eq!(listed_ids(&again.stdout()), vec![early, late, damaged]);
+}
+
+#[test]
+fn a_listing_across_projects_keeps_each_project_in_its_own_order() {
+    let docket = Docket::new();
+    let alpha = docket.project("alpha");
+    let beta = docket.project("beta");
+    let (first, first_path) = docket.create(&alpha, "handoff", "ALPHA_ONE");
+    let (second, second_path) = docket.create(&alpha, "handoff", "ALPHA_TWO");
+    let (other, other_path) = docket.create(&beta, "handoff", "BETA_ONE");
+    swap_key(&first_path, "created", "created: 2020-01-01T00:00:00Z");
+    swap_key(&second_path, "created", "created: 2019-01-01T00:00:00Z");
+    swap_key(&other_path, "created", "created: 2024-01-01T00:00:00Z");
+
+    let moved = docket.run(&["reorder", &second, "--top", "--project", &alpha, "-q"]);
+    assert!(moved.ok(), "reorder failed: {}", moved.stderr());
+
+    let run = docket.run(&["list", "--all"]);
+    assert_eq!(listed_ids(&run.stdout()), vec![second, first, other]);
+}
+
+#[test]
+fn a_listing_across_projects_drops_a_project_that_answers_nothing() {
+    let docket = Docket::new();
+    let alpha = docket.project("alpha");
+    let beta = docket.project("beta");
+    let (spec, _) = docket.create(&alpha, "spec", "ALPHA_SPEC");
+    docket.create(&beta, "handoff", "BETA_WORK");
+
+    let run = docket.run(&["list", "--all", "--kind", "spec"]);
+    assert_eq!(listed_ids(&run.stdout()), vec![spec]);
+    assert!(!run.stdout().contains("~/beta"), "{}", run.stdout());
+    assert!(
+        run.stdout().starts_with("docket 1 project\n"),
+        "{}",
+        run.stdout()
+    );
+}
+
+#[test]
+fn a_printed_position_addresses_reorder_under_a_filter() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    docket.create(&project, "handoff", "FIRST_ITEM");
+    let (second, _) = docket.create(&project, "spec", "SECOND_ITEM");
+    docket.create(&project, "handoff", "THIRD_ITEM");
+    let (fourth, _) = docket.create(&project, "spec", "FOURTH_ITEM");
+
+    // A narrowed listing shows where each item sits on the whole docket, not
+    // where it sits in the answer.
+    let specs = docket.run(&["list", "--kind", "spec", "--project", &project]);
+    assert_eq!(listed_ids(&specs.stdout()), vec![second, fourth.clone()]);
+    assert_eq!(listed_positions(&specs.stdout()), vec!["2", "4"]);
+
+    // So a position read off it means the same thing to reorder.
+    let held = docket.run(&["reorder", "--position", "4", "--project", &project, "-q"]);
+    assert!(!held.ok(), "an id is required alongside a position");
+    let moved = docket.run(&[
+        "reorder",
+        &fourth,
+        "--position",
+        "1",
+        "--project",
+        &project,
+        "-q",
+    ]);
+    assert!(moved.ok(), "reorder failed: {}", moved.stderr());
+    let after = docket.run(&["list", "--project", &project]);
+    assert_eq!(listed_ids(&after.stdout())[0], fourth);
+}
+
+#[test]
+fn announce_carries_the_block_and_not_the_tags() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    let (id, _) = docket.create(&project, "handoff", "BANNER_ITEM");
+    docket.tag(&id, "ci");
+    let held = docket.run(&["set", &id, "--blocked", "the schema review", "-q"]);
+    assert!(held.ok(), "set failed: {}", held.stderr());
+
+    let run = docket.run(&["announce", "--project", &project]);
+    assert!(run.ok(), "announce failed: {}", run.stderr());
+    assert!(
+        run.stdout().contains("blocked: the schema review"),
+        "{}",
+        run.stdout()
+    );
+    assert!(!run.stdout().contains("tags:"), "{}", run.stdout());
+}
+
+#[test]
+fn json_is_one_shape_whichever_scope_produced_it() {
+    let docket = Docket::new();
+    let alpha = docket.project("alpha");
+    let beta = docket.project("beta");
+    let (_, path) = docket.write(
+        &alpha,
+        "spec",
+        "ALPHA_SPEC",
+        "One line about nothing.",
+        "The demotic register is the one that mattered.\n",
+    );
+    docket.create(&beta, "handoff", "BETA_WORK");
+    drop_key(&path, "stage");
+
+    for args in [
+        vec!["list", "--json", "--project", &alpha],
+        vec!["list", "--json", "--all"],
+    ] {
+        let run = docket.run(&args);
+        assert!(run.ok(), "list failed: {}", run.stderr());
+        let out = run.stdout();
+        assert_eq!(out.matches("\"items\"").count(), 1, "{out}");
+        assert!(out.starts_with("{\n  \"items\": ["), "{out}");
+        // Every item names its own project, whether or not it parsed.
+        assert!(out.contains("\"valid\": false"), "{out}");
+        assert!(out.contains(&format!("\"project\": \"{alpha}\"")), "{out}");
+        assert!(out.contains("\"kind\": \"spec\""), "{out}");
+    }
+
+    let searched = docket.run(&["list", "--json", "--search", "demotic", "--project", &alpha]);
+    assert!(
+        searched.stdout().contains("\"excerpt\""),
+        "{}",
+        searched.stdout()
+    );
+}
+
+#[test]
+fn list_help_states_how_the_filters_compose() {
+    let docket = Docket::new();
+    let run = docket.run(&["help", "list"]);
+    assert!(run.ok(), "help failed: {}", run.stderr());
+    let out = run.stdout();
+    for phrase in ["narrow", "--invalid", "--tag", "--search"] {
+        assert!(out.contains(phrase), "{phrase} is missing from {out}");
+    }
+    assert!(!out.contains('`'), "{out}");
+}
+
+#[test]
+fn an_empty_search_and_a_malformed_tag_are_refused() {
+    let docket = Docket::new();
+    let project = docket.project("proj");
+    docket.create(&project, "handoff", "SOUND_HANDOFF");
+
+    let blank = docket.run(&["list", "--search", "   ", "--project", &project]);
+    assert!(!blank.ok(), "{}", blank.stdout());
+    assert!(blank.stderr().contains("--search"), "{}", blank.stderr());
+
+    let spaced = docket.run(&["list", "--tag", "two words", "--project", &project]);
+    assert!(!spaced.ok(), "{}", spaced.stdout());
+    assert!(spaced.stderr().contains("tag"), "{}", spaced.stderr());
 }

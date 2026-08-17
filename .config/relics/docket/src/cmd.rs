@@ -13,9 +13,10 @@ use crate::id::Id;
 use jiff::Timestamp;
 
 use crate::item::{Chain, Item, Kind, Rung, Stage, now};
+use crate::query;
 use crate::render::{self, View};
 use crate::store::{Depot, Record};
-use crate::ui::{self, Format};
+use crate::ui::{self, Format, plural};
 
 pub struct Ctx {
     pub depot: Depot,
@@ -159,38 +160,21 @@ fn resolve_id(ctx: &Ctx, raw: &str) -> Result<Id> {
 }
 
 pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
-    let projects = if args.all {
-        ctx.depot.projects()
+    let filter = query::Filter::new(args)?;
+    let hits = if args.all {
+        query::roster(&ctx.depot, &filter)
     } else {
-        vec![ctx.project.clone()]
+        query::project(&ctx.depot, &ctx.project, &filter)
     };
-
-    for (index, project) in projects.iter().enumerate() {
-        let mut records = ctx.depot.list(project);
-        records.retain(|record| match &record.item {
-            Ok(item) => {
-                !args.invalid
-                    && args.kind.is_none_or(|k| k == item.kind())
-                    && (!args.blocked || item.is_blocked())
-            }
-            Err(_) => args.kind.is_none() && !args.blocked,
-        });
-        if args.all && records.is_empty() {
-            continue;
-        }
-        if index > 0 {
-            println!();
-        }
-        render::list(
-            &View {
-                project,
-                records: &records,
-                color: ctx.color,
-            },
-            ctx.format,
-        )?;
-    }
-    Ok(())
+    render::list(
+        &View {
+            project: (!args.all).then_some(ctx.project.as_path()),
+            hits: &hits,
+            color: ctx.color,
+            narrowed: filter.is_narrowing(),
+        },
+        ctx.format,
+    )
 }
 
 pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
@@ -883,14 +867,6 @@ pub fn announce(ctx: &Ctx, args: &AnnounceArgs) -> Result<()> {
         print!("{out}");
     }
     Ok(())
-}
-
-fn plural(count: usize, one: &str, many: &str) -> String {
-    if count == 1 {
-        format!("{count} {one}")
-    } else {
-        format!("{count} {many}")
-    }
 }
 
 pub fn help_topic(args: &HelpArgs, command: &mut clap::Command) -> Result<()> {

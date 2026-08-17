@@ -6,6 +6,7 @@ mod guide;
 mod help;
 mod id;
 mod item;
+mod query;
 mod render;
 mod store;
 mod ui;

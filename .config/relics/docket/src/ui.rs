@@ -66,6 +66,16 @@ pub fn age_days(created: jiff::Timestamp) -> i64 {
     (jiff::Timestamp::now() - created).get_seconds().max(0) / 86_400
 }
 
+/// A count and the word for it, so a line reads as a sentence at one as well as
+/// at many.
+pub fn plural(count: usize, one: &str, many: &str) -> String {
+    if count == 1 {
+        format!("{count} {one}")
+    } else {
+        format!("{count} {many}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
