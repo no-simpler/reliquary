@@ -44,8 +44,8 @@ These bind help text, guide text, notes and error messages alike.
 
 `src/cli.rs` argument surface and help. `src/item.rs` the typed ladder — a kind
 is only constructible in a valid shape, so `stage` cannot exist on a handoff and
-a relay cannot lack its chain. `src/store.rs` the depot: project keys, metadata,
-atomic writes, locking. `src/git.rs` the git layer. `src/query.rs` what a
+a relay cannot lack its chain. `src/store.rs` the depot: metadata, atomic
+writes, locking. `src/git.rs` the depot's history. `src/query.rs` what a
 listing asks the depot for. `src/render/` one module per output shape, over the
 shared row model. `src/cmd.rs` the commands. `src/help.rs` reference topics;
 `src/guide.rs` doctrine.
@@ -53,7 +53,13 @@ shared row model. `src/cmd.rs` the commands. `src/help.rs` reference topics;
 ## The git layer
 
 `src/git.rs` is the only module that names git, and nothing else may shell out
-to it. Two consumers: project keys, and the depot's history.
+to it. It owns the **depot's history** — one repository over the whole depot.
+
+*How* git is invoked is not docket's: `relic-core::git` owns the constructor that
+strips the ambient `GIT_*` environment, and `src/git.rs` re-exports `Git` and
+`detect` so callers here are unchanged. Project keys come from
+`relic_core::path::project_key`, shared with `midden` so a note and an item about
+one repository cannot key differently. Neither may be reimplemented here.
 
 It is **additive** — ask `git::detect` and take the ungit path when it answers
 nothing — with exactly one exception. `close` is refused without a repository,
@@ -100,18 +106,19 @@ name — never to keys.
 `install_on_path` copies the built binary, so nothing may be read from beside
 the executable at runtime.
 
-`scripts/publish.sh` overrides the default because the entrypoint symlink dangles
-until `cargo build --release` has run — see the note in the script.
-
-`relic::test` dispatches on `RUNTIME`, and `RUNTIME="rust"` runs
-`scripts/test.sh`: format, then clippy at `-D warnings`, then the suite.
+Publishing and testing carry **no per-relic scripts**. `relic::publish` builds
+and installs from the workspace `target/release/`, and `relic::test` runs format,
+then clippy at `-D warnings`, then the suite — over this crate and every
+`crates/*` member. Do not reintroduce `scripts/publish.sh` or `scripts/test.sh`;
+the lib's rust branch is the whole story.
 
 Every test must set `DOCKET_ROOT` to a scratch directory. A test that forgets it
 writes into the live depot. `HOME` points at the same scratch tree, which is
 also what keeps git from reading the machine's global config.
 
-`DOCKET_GIT` is the seam: a path overrides the binary, and an empty value takes
-the ungit path. It is how the refusal to close is tested at all.
+`RELIC_GIT` is the seam, and it belongs to `relic-core`: a path overrides the
+binary, and an empty value takes the ungit path. It is how the refusal to close is
+tested at all.
 
-`scripts/update.sh` overrides the default, so it calls `scripts/publish.sh`
-itself — see the note in the script.
+`scripts/update.sh` overrides the default because packing the depot is a real
+periodic job. It calls `relic::publish` itself — see the note in the script.

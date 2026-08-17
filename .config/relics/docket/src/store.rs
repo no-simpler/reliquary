@@ -1,6 +1,6 @@
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -21,73 +21,6 @@ pub fn depot_root() -> Result<PathBuf> {
     }
     let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is unset"))?;
     Ok(PathBuf::from(home).join(".claude").join("docket"))
-}
-
-/// Absolute and symlink-free as far as the path exists, lexical the rest of the
-/// way, so a target that has not been created yet keys the same as it will once
-/// it is.
-pub fn resolve_lenient(path: &Path) -> PathBuf {
-    let expanded = expand_tilde(path);
-    let absolute = if expanded.is_absolute() {
-        expanded
-    } else {
-        std::env::current_dir().unwrap_or_default().join(expanded)
-    };
-
-    let mut real = PathBuf::new();
-    let mut tail = PathBuf::new();
-    for component in absolute.components() {
-        match component {
-            Component::CurDir => continue,
-            Component::ParentDir if tail.as_os_str().is_empty() => {
-                real.pop();
-            }
-            other => {
-                if tail.as_os_str().is_empty() {
-                    let candidate = real.join(other);
-                    match candidate.canonicalize() {
-                        Ok(resolved) => real = resolved,
-                        Err(_) => tail.push(other),
-                    }
-                } else {
-                    tail.push(other);
-                }
-            }
-        }
-    }
-    // Joining an empty tail would append a separator, and a trailing separator
-    // makes a different slug for the same directory.
-    if tail.as_os_str().is_empty() {
-        real
-    } else {
-        real.join(tail)
-    }
-}
-
-fn expand_tilde(path: &Path) -> PathBuf {
-    let text = path.to_string_lossy();
-    let Some(rest) = text.strip_prefix('~') else {
-        return path.to_owned();
-    };
-    if !(rest.is_empty() || rest.starts_with('/')) {
-        return path.to_owned();
-    }
-    let Some(home) = std::env::var_os("HOME") else {
-        return path.to_owned();
-    };
-    PathBuf::from(home).join(rest.trim_start_matches('/'))
-}
-
-/// The main checkout root of the repository containing `path`, or `path`
-/// itself when there is none and when git is absent. The single keying
-/// entry point: a path names the same project however it arrives, whether from
-/// the working directory, from --project, or from create --to.
-pub fn project_key(path: &Path) -> PathBuf {
-    let resolved = resolve_lenient(path);
-    match git::detect().and_then(|git| git.main_worktree(&resolved)) {
-        Some(main) => resolve_lenient(&main),
-        None => resolved,
-    }
 }
 
 /// Claude Code's own project-directory convention, so a docket sits beside the
@@ -548,13 +481,6 @@ mod tests {
             slug_for_path(Path::new("/Users/example/.config")),
             "-Users-example--config"
         );
-    }
-
-    #[test]
-    fn lenient_resolution_keeps_the_missing_tail() {
-        let resolved = resolve_lenient(Path::new("/tmp/definitely-absent-xyz/deeper"));
-        assert!(resolved.is_absolute());
-        assert!(resolved.ends_with("definitely-absent-xyz/deeper"));
     }
 
     #[test]

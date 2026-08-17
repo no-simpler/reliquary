@@ -1,11 +1,11 @@
 [package]
 name = "ernest"
 version = "0.1.0"
-edition = "2024"
-rust-version = "1.88"
+edition.workspace = true
+rust-version.workspace = true
 description = "Measure prose density — the share of a codebase's text that is prose rather than code."
-license = "MIT"
-publish = false
+license.workspace = true
+publish.workspace = true
 
 [lib]
 name = "ernest"
@@ -15,19 +15,16 @@ path = "src/lib.rs"
 name = "ernest"
 path = "src/main.rs"
 
-[profile.release]
-opt-level = 3
-lto = "thin"
-strip = true
-
 [dependencies]
-anyhow = "1.0.104"
-clap = { version = "4.6.6", features = ["derive"] }
-clap_complete = "4.6"
+anyhow.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# ernest's own: no other relic parses source trees.
 ignore = "0.4.30"
 rayon = "1.12.0"
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
 tree-sitter = "0.26.12"
 tree-sitter-bash = "0.25.1"
 tree-sitter-css = "0.25.0"

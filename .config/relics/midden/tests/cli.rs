@@ -30,17 +30,86 @@ impl Midden {
     }
 
     fn run(&self, args: &[&str]) -> Run {
-        let output = Command::new(env!("CARGO_BIN_EXE_midden"))
+        self.invoke(&self.base, args, &[])
+    }
+
+    /// From a working directory of its own, which is what exercises keying:
+    /// every other invocation is filed from the base and asks git nothing.
+    fn run_in(&self, cwd: &Path, args: &[&str]) -> Run {
+        self.invoke(cwd, args, &[])
+    }
+
+    /// The same invocation carrying environment a caller exported into it — a
+    /// git hook being the case that matters.
+    fn run_with(&self, cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
+        self.invoke(cwd, args, env)
+    }
+
+    fn invoke(&self, cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_midden"));
+        command
             .args(args)
-            .current_dir(&self.base)
+            .current_dir(cwd)
             .env("MIDDEN_ROOT", &self.root)
             .env("CLAUDECODE", "1")
             .env("CLAUDE_CODE_SESSION_ID", "test-session")
+            // HOME is where git would look for a global config, so it points at
+            // the temporary tree as well.
             .env("HOME", &self.base)
             .env_remove("MIDDEN_UI")
-            .output()
-            .expect("running the midden binary");
+            .env_remove("RELIC_GIT");
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let output = command.output().expect("running the midden binary");
         Run { output }
+    }
+
+    /// Drives git against a tree the test built, never against the corpus.
+    fn git(&self, cwd: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(args)
+            .env("HOME", &self.base)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "midden tests")
+            .env("GIT_AUTHOR_EMAIL", "tests@localhost")
+            .env("GIT_COMMITTER_NAME", "midden tests")
+            .env("GIT_COMMITTER_EMAIL", "tests@localhost")
+            .output()
+            .expect("running git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// A seeded repository on `main`, for the tests that key against one.
+    fn repo(&self, name: &str) -> PathBuf {
+        let dir = self.base.join(name);
+        fs::create_dir_all(&dir).expect("creating the repository");
+        self.git(
+            &dir,
+            &["-c", "init.defaultBranch=main", "init", "--quiet", "."],
+        );
+        fs::write(dir.join("README.md"), "seed\n").expect("seeding the repository");
+        self.git(&dir, &["add", "-A"]);
+        self.git(&dir, &["commit", "--quiet", "-m", "seed"]);
+        dir
+    }
+
+    /// One front-matter field of a note.
+    fn field(&self, id: &str, key: &str) -> String {
+        let text = self.read(id);
+        let prefix = format!("{key}: ");
+        for line in text.lines() {
+            if let Some(value) = line.strip_prefix(&prefix) {
+                return value.to_owned();
+            }
+        }
+        panic!("no {key} in\n{text}")
     }
 
     /// Files a note and returns its id.
@@ -497,4 +566,109 @@ fn the_tool_describes_itself_before_a_corpus_exists() {
     m.run(&["guide"]).ok();
     m.run(&["help"]).ok();
     m.run(&["completions", "fish"]).ok();
+}
+
+/// A linked worktree folds into its main checkout, so a note filed from a
+/// worktree lands on the project its checkout names. midden keys by the same
+/// code docket does; without that, a note and an item about one repository key
+/// differently and neither can find the other.
+#[test]
+fn a_linked_worktree_keys_to_its_main_checkout() {
+    let midden = Midden::new();
+    let main = midden.repo("repo");
+
+    let linked = midden.base.join("linked");
+    midden.git(
+        &main,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "-b",
+            "side",
+            linked.to_str().expect("utf-8 path"),
+        ],
+    );
+
+    let filed = midden
+        .run_in(
+            &linked,
+            &[
+                "file",
+                "--kind",
+                "gap",
+                "--title",
+                "KEYED_FROM_WORKTREE",
+                "--body",
+                "Evidence.\n",
+            ],
+        )
+        .ok()
+        .stdout()
+        .trim()
+        .to_owned();
+
+    assert_eq!(
+        midden.field(&filed, "project"),
+        main.display().to_string(),
+        "a worktree should key to its main checkout"
+    );
+    assert_eq!(
+        midden.field(&filed, "cwd"),
+        linked.display().to_string(),
+        "while cwd still records where it was filed from"
+    );
+    assert_eq!(
+        midden.field(&filed, "branch"),
+        "side",
+        "and the branch is the worktree's own"
+    );
+}
+
+/// The environment a caller exported must not decide which project a note
+/// belongs to. `GIT_DIR` outranks `-C`, so an invocation that does not strip it
+/// answers for the exporting repository — and midden is filed from inside
+/// sessions that run git hooks, which is exactly where that is exported.
+#[test]
+fn an_ambient_git_dir_does_not_decide_the_project() {
+    let midden = Midden::new();
+    let here = midden.repo("here");
+    let elsewhere = midden.repo("elsewhere");
+    midden.git(&elsewhere, &["checkout", "--quiet", "-b", "hook-branch"]);
+
+    let filed = midden
+        .run_with(
+            &here,
+            &[
+                "file",
+                "--kind",
+                "gap",
+                "--title",
+                "FILED_UNDER_A_HOOK",
+                "--body",
+                "Evidence.\n",
+            ],
+            &[
+                (
+                    "GIT_DIR",
+                    elsewhere.join(".git").to_str().expect("utf-8 path"),
+                ),
+                ("GIT_WORK_TREE", elsewhere.to_str().expect("utf-8 path")),
+            ],
+        )
+        .ok()
+        .stdout()
+        .trim()
+        .to_owned();
+
+    assert_eq!(
+        midden.field(&filed, "project"),
+        here.display().to_string(),
+        "the ambient repository reached the invocation and decided the project"
+    );
+    assert_eq!(
+        midden.field(&filed, "branch"),
+        "main",
+        "the ambient repository decided the branch"
+    );
 }

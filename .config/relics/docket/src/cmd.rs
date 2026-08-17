@@ -180,7 +180,7 @@ pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
 pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
     let mutation = Mutation::open(ctx)?;
     let target = match &args.to {
-        Some(path) => crate::store::project_key(path),
+        Some(path) => relic_core::path::project_key(path),
         None => ctx.project.clone(),
     };
     if !target.exists() && !args.allow_missing {
@@ -479,7 +479,7 @@ pub fn r#move(ctx: &Ctx, args: &MoveArgs) -> Result<()> {
         .clone();
 
     let from = record.project.clone();
-    let target = crate::store::project_key(&args.to);
+    let target = relic_core::path::project_key(&args.to);
     if target == from {
         bail!(
             "{} is already on the docket of {}",
@@ -909,7 +909,7 @@ pub fn open_context(global: &Global) -> Result<Ctx> {
     } else {
         ui::resolve_format(global.format)
     };
-    let project = crate::store::project_key(&match &global.project {
+    let project = relic_core::path::project_key(&match &global.project {
         Some(path) => path.clone(),
         None => std::env::current_dir().context("reading the working directory")?,
     });

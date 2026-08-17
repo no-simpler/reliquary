@@ -1,7 +1,6 @@
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -38,102 +37,6 @@ pub fn corpus_root() -> Result<PathBuf> {
     }
     let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is unset"))?;
     Ok(PathBuf::from(home).join(".claude").join("midden"))
-}
-
-/// Absolute and symlink-free as far as the path exists, lexical the rest of the
-/// way, so a target that has not been created yet keys the same as it will once
-/// it is.
-pub fn resolve_lenient(path: &Path) -> PathBuf {
-    let expanded = expand_tilde(path);
-    let absolute = if expanded.is_absolute() {
-        expanded
-    } else {
-        std::env::current_dir().unwrap_or_default().join(expanded)
-    };
-
-    let mut real = PathBuf::new();
-    let mut tail = PathBuf::new();
-    for component in absolute.components() {
-        match component {
-            Component::CurDir => continue,
-            Component::ParentDir if tail.as_os_str().is_empty() => {
-                real.pop();
-            }
-            other => {
-                if tail.as_os_str().is_empty() {
-                    let candidate = real.join(other);
-                    match candidate.canonicalize() {
-                        Ok(resolved) => real = resolved,
-                        Err(_) => tail.push(other),
-                    }
-                } else {
-                    tail.push(other);
-                }
-            }
-        }
-    }
-    // Joining an empty tail would append a separator, and a trailing separator
-    // makes a different key for the same directory.
-    if tail.as_os_str().is_empty() {
-        real
-    } else {
-        real.join(tail)
-    }
-}
-
-fn expand_tilde(path: &Path) -> PathBuf {
-    let text = path.to_string_lossy();
-    let Some(rest) = text.strip_prefix('~') else {
-        return path.to_owned();
-    };
-    if !(rest.is_empty() || rest.starts_with('/')) {
-        return path.to_owned();
-    }
-    let Some(home) = std::env::var_os("HOME") else {
-        return path.to_owned();
-    };
-    PathBuf::from(home).join(rest.trim_start_matches('/'))
-}
-
-/// The main checkout root of the containing repository, or the working
-/// directory when there is none. Linked worktrees fold into their main
-/// checkout, because `git worktree list` reports it first; a submodule reports
-/// its own root, which is what a per-aspect repository layout needs.
-pub fn project_key(cwd: &Path) -> PathBuf {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(["worktree", "list", "--porcelain"])
-        .output();
-
-    if let Ok(output) = output
-        && output.status.success()
-        && let Ok(text) = String::from_utf8(output.stdout)
-        && let Some(main) = text
-            .lines()
-            .next()
-            .and_then(|line| line.strip_prefix("worktree "))
-        && !main.is_empty()
-    {
-        return resolve_lenient(Path::new(main));
-    }
-    resolve_lenient(cwd)
-}
-
-/// The branch a note was filed from, when there is one. A detached head names
-/// no branch, and neither does a directory outside a repository.
-pub fn branch_of(cwd: &Path) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let name = String::from_utf8(output.stdout).ok()?.trim().to_owned();
-    (!name.is_empty() && name != "HEAD").then_some(name)
 }
 
 /// One note as it sits on disk. Parsing is total: a file whose metadata does
@@ -487,13 +390,6 @@ pub fn render(note: &Note, body: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn lenient_resolution_keeps_the_missing_tail() {
-        let resolved = resolve_lenient(Path::new("/tmp/definitely-absent-xyz/deeper"));
-        assert!(resolved.is_absolute());
-        assert!(resolved.ends_with("definitely-absent-xyz/deeper"));
-    }
 
     #[test]
     fn splitting_finds_the_body_untouched() {

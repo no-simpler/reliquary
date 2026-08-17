@@ -46,6 +46,13 @@ atomic writes, locking, and the retention boundaries. `src/render/` one module
 per output shape, over the shared row model. `src/cmd.rs` the commands.
 `src/help.rs` reference topics; `src/guide.rs` doctrine.
 
+Project keys, path resolution and every git invocation come from **`relic-core`**
+and must not be reimplemented here. `relic_core::path::project_key` is shared with
+`docket`, so a note and an item about one repository cannot key differently.
+`relic_core::git` is the only thing allowed to build a git command, because it is
+what strips the ambient `GIT_*` environment — a hook exports `GIT_DIR`, `GIT_DIR`
+outranks `-C`, and midden is filed from inside sessions that run hooks.
+
 ## Constraints
 
 The corpus is **flat and machine-wide**, unlike a docket depot. Cross-project
@@ -59,14 +66,16 @@ time-bounded, or it stalls the machine-wide update.
 `install_on_path` copies the built binary, so nothing may be read from beside
 the executable at runtime.
 
-`scripts/publish.sh` overrides the default because the entrypoint symlink dangles
-until `cargo build --release` has run — see the note in the script.
-
-`relic::test` dispatches on `RUNTIME`, and `RUNTIME="rust"` runs
-`scripts/test.sh`: format, then clippy at `-D warnings`, then the suite.
+Publishing and testing carry **no per-relic scripts**. `relic::publish` builds
+and installs from the workspace `target/release/`, and `relic::test` runs format,
+then clippy at `-D warnings`, then the suite — over this crate and every
+`crates/*` member. Do not reintroduce `scripts/publish.sh` or `scripts/test.sh`;
+the lib's rust branch is the whole story.
 
 Every test must set `MIDDEN_ROOT` to a scratch directory. A test that forgets it
-writes into the live corpus.
+writes into the live corpus. `HOME` points at the same scratch tree, which is also
+what keeps git from reading the machine's global config, and `RELIC_GIT` is the
+seam: a path overrides the binary, an empty value takes the ungit path.
 
 Ages are whole days by truncation, so a test that backdates by exactly a
 retention boundary reads one day short of it. Backdate clear of the boundary.

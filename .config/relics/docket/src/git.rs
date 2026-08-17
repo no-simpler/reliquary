@@ -1,31 +1,27 @@
-//! The git layer: the only place in this crate that names git.
+//! The depot's history: the only place in this crate that names git.
+//!
+//! How git is *invoked* is not here — [`relic_core::git`] owns that, including
+//! the rule that no invocation inherits an ambient repository. This module owns
+//! what docket does with it, which is one repository over the whole depot.
 //!
 //! Additive by construction. Everything above asks [`detect`] first and takes
 //! the ungit path when it answers `None` — project keying falls back to the
 //! working directory, and the depot simply has no history. The one exception is
 //! closing, which is refused without a repository rather than performed blind.
 //!
-//! Two rules bind every caller:
-//!
-//! - **Lock ordering.** The depot lock is coarser than the per-project lock and
-//!   is always taken first. [`Repo`] never takes a lock itself; `cmd` holds the
-//!   depot lock for the whole of a mutating command.
-//! - **No ambient repository.** Every invocation is built by [`Git::command`],
-//!   which strips the inherited `GIT_*` environment. Without that, docket run
-//!   from inside a git hook answers for that hook's repository.
+//! **Lock ordering.** The depot lock is coarser than the per-project lock and is
+//! always taken first. [`Repo`] never takes a lock itself; `cmd` holds the depot
+//! lock for the whole of a mutating command.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::OnceLock;
+use std::process::Output;
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::id::Id;
+pub use relic_core::git::{Git, detect};
 
-/// Overrides the binary, and disables the layer outright when set to nothing.
-/// Tests reach the ungit path through it.
-const OVERRIDE: &str = "DOCKET_GIT";
+use crate::id::Id;
 
 /// Written into the depot repository's own config, so no invocation has to
 /// carry them and no commit depends on the user's identity.
@@ -51,91 +47,6 @@ const CONFIG: &[(&str, &str)] = &[
 /// atomic writes leave behind belong to a write in flight. Repo-local, so the
 /// depot an agent reads stays free of an ignore file.
 const EXCLUDE: &str = ".lock\n*.tmp\n";
-
-/// Git as a capability. Zero-sized: holding one is the proof that git answered.
-#[derive(Clone, Copy)]
-pub struct Git;
-
-/// One `git --version` per process, whatever asks.
-pub fn detect() -> Option<Git> {
-    static FOUND: OnceLock<Option<Git>> = OnceLock::new();
-    *FOUND.get_or_init(|| {
-        if std::env::var_os(OVERRIDE).is_some_and(|value| value.is_empty()) {
-            return None;
-        }
-        Git.command()
-            .arg("--version")
-            .output()
-            .ok()
-            .filter(|out| out.status.success())
-            .map(|_| Git)
-    })
-}
-
-fn program() -> PathBuf {
-    match std::env::var_os(OVERRIDE) {
-        Some(value) if !value.is_empty() => PathBuf::from(value),
-        _ => PathBuf::from("git"),
-    }
-}
-
-impl Git {
-    /// The single constructor. Strips the ambient repository so `-C` is the
-    /// only thing that decides which tree is acted on, and forbids anything
-    /// that could block on a prompt.
-    fn command(self) -> Command {
-        let mut command = Command::new(program());
-        for key in [
-            "GIT_DIR",
-            "GIT_WORK_TREE",
-            "GIT_INDEX_FILE",
-            "GIT_COMMON_DIR",
-            "GIT_OBJECT_DIRECTORY",
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-            "GIT_CEILING_DIRECTORIES",
-            "GIT_PREFIX",
-            "GIT_CONFIG",
-            "GIT_CONFIG_GLOBAL",
-            "GIT_CONFIG_COUNT",
-            "GIT_INDEX_VERSION",
-        ] {
-            command.env_remove(key);
-        }
-        command
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .stdin(Stdio::null());
-        command
-    }
-
-    fn at(self, dir: &Path) -> Command {
-        let mut command = self.command();
-        command.arg("-C").arg(dir);
-        command
-    }
-
-    /// The main checkout root of the repository containing `cwd`. Linked
-    /// worktrees fold into it, because `git worktree list` reports the main
-    /// checkout first; a submodule reports its own root, which is what a
-    /// per-aspect repository layout needs.
-    pub fn main_worktree(self, cwd: &Path) -> Option<PathBuf> {
-        let output = self
-            .at(cwd)
-            .args(["worktree", "list", "--porcelain"])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let text = String::from_utf8(output.stdout).ok()?;
-        let main = text.lines().next()?.strip_prefix("worktree ")?;
-        if main.is_empty() {
-            return None;
-        }
-        Some(PathBuf::from(main))
-    }
-}
 
 /// The depot's history. One repository covers every project's docket, because
 /// the depot is one tree and its commits read better in one log.

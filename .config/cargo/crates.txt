@@ -13,6 +13,7 @@ cargo-public-api
 cargo-release
 cargo-semver-checks
 cargo-smart-release
+cargo-sweep
 cargo-tarpaulin
 cargo-udeps
 cargo-update

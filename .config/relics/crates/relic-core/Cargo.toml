@@ -1,0 +1,17 @@
+[package]
+name = "relic-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "What more than one relic needs: git as a capability, and one meaning for a path."
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "relic_core"
+path = "src/lib.rs"
+
+# Deliberately none. Everything here shells out to git or reads the filesystem,
+# and a shared crate that pulled in dependencies would push them onto every
+# relic that wants a project key.
+[dependencies]

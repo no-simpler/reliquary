@@ -1,4 +1,0 @@
-/target
-
-# Written by scripts/publish.sh — it points at the build artifact above.
-/entrypoints/ernest

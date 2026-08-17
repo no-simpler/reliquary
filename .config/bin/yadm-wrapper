@@ -312,6 +312,26 @@ _doctor_run() {
         _doctor_warn "check-brew-health not found — skipped"
     fi
 
+    # 6b. Relic build cache. cargo never reclaims artifacts for dependency
+    #     versions it no longer resolves, so the lane's target/ only grows. `up`
+    #     sweeps it, but a machine that has not run `up` in a while, or that lacks
+    #     cargo-sweep, would balloon silently — so it is reported here. Never a
+    #     failure: the whole tree is regenerable by a rebuild.
+    _doctor_head "relic build cache"
+    local relic_target="$HOME/.config/relics/target"
+    if [ ! -d "$relic_target" ]; then
+        _doctor_skip "nothing built yet"
+    else
+        local tkb tmib
+        tkb=$(du -sk "$relic_target" 2>/dev/null | awk '{print $1}')
+        tmib=$(( ${tkb:-0} / 1024 ))
+        if [ "${tkb:-0}" -lt 4194304 ]; then
+            _doctor_ok "${tmib} MiB"
+        else
+            _doctor_warn "${tmib} MiB — run 'up', or 'cargo sweep --time 30' in ~/.config/relics"
+        fi
+    fi
+
     # 7. Encrypted-archive drift (SHA compare; no Touch ID)
     _doctor_head "encrypted archive drift"
     local drift

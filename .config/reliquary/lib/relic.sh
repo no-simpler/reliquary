@@ -20,15 +20,32 @@
 # Manifest schema (<dir>/relic.sh):
 #   NAME                  — required; published-name and META_NAME
 #   DESCRIPTION           — optional; one-line summary
-#   RUNTIME               — required; python|bash|fish|rust|docker|...
+#   RUNTIME               — required; rust by default, see the stance below
+#   RUNTIME_EXEMPTION     — required when RUNTIME is not rust; why not
 #   MIN_RUNTIME_VERSION   — optional; semver-ish, enforced at publish time
+#   ENTRYPOINTS           — optional; published names for a compiled relic
 #   BREW_DEPS             — optional; array of brew package names
 #   EXTERNAL_DEPS         — optional; free-form notes (not enforced)
 #   DOCKER                — optional; 1 if entrypoints are docker-run shims
 #
-# Entrypoint convention: <dir>/entrypoints/<published-name> is the source
-# (typically a symlink into <dir>/src/). Filename literally is the published
-# name. install_on_path copies the file (cp follows symlinks) into ~/.local/bin/.
+# Runtime stance: relics are Rust by default. Any other RUNTIME records why in
+# RUNTIME_EXEMPTION. Nothing here refuses to publish over it — `relic doctor`
+# reports the omission, because a relic awaiting its rewrite must keep working.
+#
+# Publishing splits on whether the artifact exists before a build:
+#
+#   interpreted (python|bash|fish|docker) — <dir>/entrypoints/<published-name>
+#       is the source, typically a symlink into <dir>/src/. The filename
+#       literally is the published name. install_on_path copies the file (cp
+#       follows symlinks) into ~/.local/bin/.
+#
+#   compiled (rust) — there is nothing on disk to publish until cargo has run,
+#       and the artifact lands in the workspace target/ rather than beside the
+#       source. So the published names are declared in ENTRYPOINTS (defaulting
+#       to NAME) and resolved against <workspace>/target/release/. No
+#       entrypoints/ directory is involved: a symlink into an unbuilt target/
+#       dangles on a fresh clone, which is what every Rust relic used to
+#       override publish to work around.
 
 relic::_die() {
     printf 'relic: %s\n' "$1" >&2
@@ -51,7 +68,9 @@ relic::load_manifest() {
     NAME=""
     DESCRIPTION=""
     RUNTIME=""
+    RUNTIME_EXEMPTION=""
     MIN_RUNTIME_VERSION=""
+    ENTRYPOINTS=()
     BREW_DEPS=()
     EXTERNAL_DEPS=()
     DOCKER=0
@@ -130,6 +149,72 @@ relic::check_deps() {
     return "$fail"
 }
 
+# The cargo workspace root above <dir>. `cargo locate-project` is the only
+# thing that knows, and asking it beats hardcoding a depth that a relocated lane
+# would silently invalidate.
+relic::_cargo_workspace_root() {
+    local dir="${1:-}" manifest
+    manifest="$( cd "$dir" 2>/dev/null && cargo locate-project --workspace --message-format plain 2>/dev/null )"
+    [[ -n "$manifest" ]] || return 1
+    dirname "$manifest"
+}
+
+# Package names of the workspace's shared crates, one per line. Read from each
+# manifest rather than assumed from the directory name, and the first `name =`
+# in a manifest is [package]'s by construction.
+relic::_shared_crates() {
+    local root="${1:-}" toml
+    for toml in "$root"/crates/*/Cargo.toml; do
+        [[ -f "$toml" ]] || continue
+        sed -n 's/^name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$toml" | head -1
+    done
+}
+
+# Where a compiled relic's built binary lands. For the rare scripts/update.sh
+# that has to run the thing it just published.
+relic::rust_binary() {
+    local dir="${1:-}" name="${2:-}" root
+    root="$(relic::_cargo_workspace_root "$dir")" || return $?
+    printf '%s' "$root/target/release/$name"
+}
+
+# The published names of a compiled relic: ENTRYPOINTS, or NAME when it is
+# silent. Requires a loaded manifest.
+relic::_published_names() {
+    if [[ ${#ENTRYPOINTS[@]} -gt 0 ]]; then
+        printf '%s\n' "${ENTRYPOINTS[@]}"
+    else
+        printf '%s\n' "$NAME"
+    fi
+}
+
+relic::_publish_compiled() {
+    local dir="${1:-}" root n
+    root="$(relic::_cargo_workspace_root "$dir")" || {
+        relic::_die "no cargo workspace above $dir"; return $?
+    }
+
+    # Unconditionally, not only when the binary is missing: guarding on absence
+    # would publish whatever was built last, shipping a source change as a stale
+    # binary. cargo is incremental, so an up-to-date tree makes this a no-op.
+    printf 'relic[%s]: building\n' "$NAME"
+    ( cd "$dir" && cargo build --release --quiet ) || return $?
+
+    local names=()
+    while IFS= read -r n; do
+        [[ -n "$n" ]] && names=( "${names[@]}" "$n" )
+    done < <(relic::_published_names)
+
+    (
+        export META_NAME="$NAME"
+        # shellcheck disable=SC1091
+        source "$HOME/.config/reliquary/lib/install-on-path.sh" || exit $?
+        for n in "${names[@]}"; do
+            install_on_path "$root/target/release/$n" "$n" || exit $?
+        done
+    )
+}
+
 relic::publish() {
     local dir="${1:-}"
     [[ -n "$dir" ]] || { relic::_die "publish: missing dir"; return $?; }
@@ -140,6 +225,11 @@ relic::publish() {
     fi
 
     relic::check_deps "$dir" || return $?
+
+    if [[ "$RUNTIME" == "rust" ]]; then
+        relic::_publish_compiled "$dir"
+        return $?
+    fi
 
     local entrypoints_dir="$dir/entrypoints"
     if [[ ! -d "$entrypoints_dir" ]]; then
@@ -183,6 +273,14 @@ relic::test() {
 
     relic::load_manifest "$dir" || return $?
 
+    # A compiled relic's unit tests live beside the source, so tests/ is not the
+    # thing that decides whether there is anything to run — and format and lint
+    # are worth running either way.
+    if [[ "$RUNTIME" == "rust" ]]; then
+        relic::_test_compiled "$dir"
+        return $?
+    fi
+
     local tests_dir="$dir/tests"
     if [[ ! -d "$tests_dir" ]]; then
         printf 'relic[%s]: no tests/ directory; nothing to run\n' "$NAME"
@@ -209,14 +307,44 @@ relic::test() {
                 return "$fail"
             fi
             ;;
-        rust)
-            ( cd "$dir" && cargo test )
-            ;;
         *)
             printf 'relic[%s]: no default test runner for RUNTIME=%s\n' "$NAME" "$RUNTIME"
             return 0
             ;;
     esac
+}
+
+# The gate for a compiled relic: format, lint, suite — fail-fast in ascending
+# cost, so the cheapest station reports first. Every shared crate is included, so
+# code that moved into crates/ is covered from each of its dependents rather than
+# by nothing: a path dependency outside the workspace is linted by no one, which
+# is the whole reason the lane is a workspace.
+relic::_test_compiled() {
+    local dir="${1:-}" root c
+    root="$(relic::_cargo_workspace_root "$dir")" || {
+        relic::_die "no cargo workspace above $dir"; return $?
+    }
+
+    local pkgs=( -p "$NAME" )
+    while IFS= read -r c; do
+        [[ -n "$c" ]] && pkgs=( "${pkgs[@]}" -p "$c" )
+    done < <(relic::_shared_crates "$root")
+
+    (
+        cd "$dir" || exit $?
+
+        if ! cargo fmt "${pkgs[@]}" --check; then
+            printf '\nformatting: run `cargo fmt --all`\n' >&2
+            exit 1
+        fi
+
+        cargo clippy "${pkgs[@]}" --all-targets --all-features -- -D warnings || exit $?
+
+        if command -v cargo-nextest >/dev/null 2>&1; then
+            exec cargo nextest run "${pkgs[@]}"
+        fi
+        exec cargo test "${pkgs[@]}"
+    )
 }
 
 relic::update() {
@@ -231,12 +359,8 @@ relic::update() {
     relic::load_manifest "$dir" || return $?
 
     case "$RUNTIME" in
-        rust)
-            ( cd "$dir" && cargo build --release ) || return $?
-            relic::publish "$dir"
-            ;;
-        *)
-            return 0
-            ;;
+        # publish builds, so there is nothing to do first.
+        rust) relic::publish "$dir" ;;
+        *)    return 0 ;;
     esac
 }

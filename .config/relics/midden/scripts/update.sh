@@ -6,12 +6,16 @@
 # there rather than by a schedule of its own.
 #
 # Pruning never fails the update. A corpus that cannot be read is a matter for
-# `midden doctor`, not for a reason to abort `up`.
+# `midden doctor`, not a reason to abort `up`.
 
 set -euo pipefail
 
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-"$dir/scripts/publish.sh"
+# shellcheck disable=SC1091
+source "$HOME/.config/reliquary/lib/relic.sh"
+relic::publish "$dir"
 
-"$dir/target/release/midden" gc --quiet || true
+# The binary just published, reached in the workspace target rather than on
+# PATH: the corpus this prunes is the one this build understands.
+"$(relic::rust_binary "$dir" midden)" gc --quiet || true

@@ -104,7 +104,7 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `bbs` - interactive Brewfile scope selector (applies `Brewfile@<scope>` files)
 - `gh` - shadows Homebrew's `gh` (same PATH trick as `yadm-wrapper`); exports `GH_CONFIG_DIR` to the benefactor profile when the *physical* cwd is under `~/Developer/benefactor/`, else leaves the personal default. See "Two GitHub identities" below
 - `pb` - lists personal bin executables, shows which are yadm-managed
-- `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm); writes timestamp to `~/.local/state/up/last_upped_at`
+- `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm, relics, relic build cache); writes timestamp to `~/.local/state/up/last_upped_at`
 - `check-shell-parity` - detects POSIX↔fish alias/abbr/function name drift across the paired `shell/interactive.d/*.sh` ↔ `fish/conf.d/*.fish` files; exits non-zero on drift (run by the dream procedure in `~/.config/.claude/DREAM.md`)
 - `check-brew-health` - detects Homebrew rot: installed formulae/casks deprecated or disabled upstream (warn), kegs orphaned by a formula's removal, and Brewfile entries that no longer resolve (fail). Tap-aware, offline, side-effect-free; exit 0/1/2 like `check-bedrock`. Wired into `yadm doctor` and, advisory-only, into `up`
 - `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt; tries `ske read` first, falls back to `op read` (never hard-depend — it decrypts the attic `ske` lives in)
@@ -131,10 +131,18 @@ Sanctioned sidesteps: a meta-project may bypass the helper for advanced cases (t
 Personal CLI utils have a three-stage lifecycle. A **relic** is a personal tool the author keeps:
 
 - **Stage 1 — one-shot util**: single file in `~/.config/bin/` (status quo; `bbs`, `pb`, `up`, etc.).
-- **Stage 2 — in-house relic**: directory at `~/.config/relics/<name>/`, yadm-tracked, with a manifest (`relic.sh`), an `entrypoints/` directory, and optional `src/`, `tests/`, `scripts/`. Published onto PATH via the shared lib. The `relic` CLI itself is the first Stage-2 relic.
+- **Stage 2 — in-house relic**: directory at `~/.config/relics/<name>/`, yadm-tracked, with a manifest (`relic.sh`) and optional `src/`, `tests/`, `scripts/`. Published onto PATH via the shared lib. The `relic` CLI itself is the first Stage-2 relic.
 - **Stage 3 — external relic**: independent repo at `~/Developer/<name>/` (`bb`, `halo` today). The dependency is strictly **unidirectional** (relic → reliquary, via `install-on-path.sh`). Reliquary's "known external relics" list in `GRADUATION.md` is a best-effort convenience, not authoritative; it can also discover registrants via the registry's owner column, but doesn't chase this exhaustively.
 
-The `relic` CLI (`relic list|status|publish|test|update|scaffold|registry|migrate|doctor`) is the user-facing surface over all of this — see `GRADUATION.md`. `scaffold <name>` promotes a Stage-1 `~/.config/bin` util (or a fresh idea) into a Stage-2 relic — infers RUNTIME from the script's shebang (or `-r/--runtime`), publishes, and stages the result in yadm. `registry` takes `--migrate`/`--prune`; `doctor` is a read-only registry ↔ PATH ↔ entrypoints health check.
+**Relics are Rust by default.** Any other `RUNTIME` records a `RUNTIME_EXEMPTION` in its manifest saying why; `relic doctor` lists the ones that have not, informationally and never as a failure, and that list is the worklist. Existing non-Rust relics (`relic`, `blab`, `nexus`, `ske`) are being addressed one at a time — rewritten into the workspace, or exempted.
+
+**`~/.config/relics/` is a cargo workspace.** The lane root carries `Cargo.toml` (one `members` whitelist, `[workspace.dependencies]`, and the only `[profile]` blocks cargo honours), `Cargo.lock`, `rustfmt.toml`, and one gitignored `target/`. A relic carries none of those itself. `crates/` is the shared-library boundary — a member with no `relic.sh`, which is what makes it invisible to `relic`, to bootstrap, and to `up`, all of which gate on a readable manifest. `crates/relic-core` is the first: git as a capability (the constructor that strips the ambient `GIT_*` environment, so a relic run from a git hook does not answer for the hook's repository) and one meaning for a path (`project_key`, shared by `docket` and `midden`). Code moves there when a *second* relic needs it, not in anticipation. A Rust relic therefore carries **no `scripts/publish.sh`, no `scripts/test.sh`, and no `entrypoints/`** — the lib's rust branch builds, tests and publishes manifest-declared names out of the workspace `target/release/`.
+
+**Never add an attic relic to `members`**: a member's name lands in the publicly tracked `Cargo.lock`, and `.config/attic/**` is an encrypt pattern that would tar its `target/` into the archive. `GRADUATION.md` records what to do instead, including the `yadm encrypt` exclusion to write *before* the first attic Rust relic exists.
+
+The build cache is held down by `[profile.dev] debug = "line-tables-only"` and by `up`'s **Cargo build cache** step (`cargo sweep --installed`, then `--time 30`, above a 2 GiB ceiling, skipped silently below it or when `cargo-sweep` is absent). `yadm doctor` reports the size.
+
+The `relic` CLI (`relic list|status|publish|test|update|scaffold|registry|migrate|doctor`) is the user-facing surface over all of this — see `GRADUATION.md`. `scaffold <name>` promotes a Stage-1 `~/.config/bin` util (or a fresh idea) into a Stage-2 relic — RUNTIME from `-r/--runtime`, else a promoted script's shebang, else `rust`; a non-Rust choice needs `-e/--exempt "<why>"`. A Rust scaffold writes a member `Cargo.toml` and appends to `members`; an interpreted one publishes and stages the result in yadm. `registry` takes `--migrate`/`--prune`; `doctor` is a read-only registry ↔ PATH ↔ entrypoints health check that also carries the runtime-stance worklist.
 
 `~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`, `AGENTIC-TOOLING.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton), and deferred-work handoffs (`design/`: `relic graduate`).
 
@@ -157,7 +165,8 @@ edited through the path it prints before adding its own. Closing an item therefo
 grows no command that restates that. The repository carries its own identity and
 `commit.gpgsign=false`, so no depot commit ever reaches for Touch ID. Everything git-dependent
 lives behind one module (`src/git.rs`), switched on by git's presence — without git, items can
-still be opened and read, but none can be closed.
+still be opened and read, but none can be closed. *How* git is invoked is not docket's: that
+belongs to `crates/relic-core`, along with the project key it shares with `midden`.
 
 A `SessionStart` hook in `~/.claude/settings.json` runs `docket announce --hook`, which is silent
 when nothing is outstanding. The skill at `~/.claude/skills/docket/` is a trigger stub, and its
@@ -299,7 +308,7 @@ Reachable as `yadm` in **every** shell — `~/.config/bin/yadm` is a symlink to 
 - `yadm check` - compares archive SHA256 to detect drift
 - `yadm verify` - decrypts archive to tmpdir and diffs against disk
 - `yadm ls-all` - complete tracked set: `yadm ls-files` (plaintext) + archive listing (`decrypt -l`, Touch ID)
-- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, bedrock, Homebrew package health, archive drift, ske wiring); detect-only, Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
+- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, bedrock, Homebrew package health, relic build-cache size, archive drift, ske wiring); detect-only, Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
 - `yadm update` - `pull --ff-only`, then `doctor --quiet` (silent when healthy; surfaces drift/regressions the pull introduced — the quiet doctor already covers the encrypted-archive check)
 - All other commands pass through to real yadm, followed by an encrypted-files check
 

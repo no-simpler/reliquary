@@ -13,7 +13,9 @@ set -euo pipefail
 
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-"$dir/scripts/publish.sh"
+# shellcheck disable=SC1091
+source "$HOME/.config/reliquary/lib/relic.sh"
+relic::publish "$dir"
 
 depot="${DOCKET_ROOT:-$HOME/.claude/docket}"
 if [[ -d "$depot/.git" ]]; then

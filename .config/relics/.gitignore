@@ -1,0 +1,7 @@
+# One target/ for the whole lane — see Cargo.toml.
+#
+# Unanchored on purpose. `/target` would cover only the workspace root's, and a
+# stray per-relic target/ — a leftover from before the workspace, or a member
+# built with an overridden target-dir — would go unignored and be staged. There
+# is no tracked path named target/ at any depth, so the broad rule costs nothing.
+target/

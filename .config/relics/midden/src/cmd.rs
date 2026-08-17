@@ -96,7 +96,7 @@ pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
 
 pub fn file(ctx: &Ctx, args: &FileArgs) -> Result<()> {
     let project = match &args.to {
-        Some(path) => crate::store::project_key(&crate::store::resolve_lenient(path)),
+        Some(path) => relic_core::path::project_key(path),
         None => ctx.project.clone(),
     };
 
@@ -134,7 +134,7 @@ pub fn file(ctx: &Ctx, args: &FileArgs) -> Result<()> {
         occurrences: 1,
         project,
         cwd: Some(cwd.clone()),
-        branch: crate::store::branch_of(&cwd),
+        branch: relic_core::git::detect().and_then(|git| git.branch(&cwd)),
         session: std::env::var("CLAUDE_CODE_SESSION_ID")
             .ok()
             .filter(|value| !value.is_empty()),
@@ -476,7 +476,7 @@ fn absent_target(target: &str) -> Option<String> {
     }
     // A target may point into a file, so only the leading path is tested.
     let head = target.split_whitespace().next().unwrap_or(target);
-    let resolved = crate::store::resolve_lenient(Path::new(head));
+    let resolved = relic_core::path::resolve_lenient(Path::new(head));
     (!resolved.exists()).then(|| head.to_owned())
 }
 
@@ -526,10 +526,10 @@ pub fn open_context(global: &Global) -> Result<Ctx> {
         format,
         color: ui::use_color(global.color, format),
         quiet: global.quiet,
-        project: crate::store::project_key(&cwd),
+        project: relic_core::path::project_key(&cwd),
         scope: global
             .project
             .as_ref()
-            .map(|path| crate::store::project_key(&crate::store::resolve_lenient(path))),
+            .map(|path| relic_core::path::project_key(path)),
     })
 }

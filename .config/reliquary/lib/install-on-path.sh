@@ -161,8 +161,18 @@ install_on_path() {
     fi
 
     mkdir -p "$_INSTALL_ON_PATH_DIR"
-    cp "$src" "$target"
-    chmod +x "$target"
+
+    # Staged then renamed, never copied over the target in place. `cp` truncates
+    # and rewrites the same inode, so publishing a relic that is *itself* the
+    # running script — `relic publish relic`, and any interpreted relic that
+    # republishes itself — moves the ground under the interpreter mid-read and
+    # fails on a syntax error at whatever offset it had reached. rename(2) leaves
+    # the running process on the old inode. It is also atomic, so a concurrent
+    # reader never sees a half-written binary.
+    local staged="$target.new.$$"
+    cp "$src" "$staged" || { rm -f "$staged"; return 1; }
+    chmod +x "$staged" || { rm -f "$staged"; return 1; }
+    mv -f "$staged" "$target" || { rm -f "$staged"; return 1; }
 
     _install_on_path_registry_add "$name"
 

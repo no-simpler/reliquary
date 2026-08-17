@@ -149,7 +149,7 @@ check "manifest keeps comment" "$(grep -c '# x' "$mf")" "1"
 # scaffold_tree against a scratch template
 TEMPLATE_DIR="$sdir/template"
 mkdir -p "$TEMPLATE_DIR/src" "$TEMPLATE_DIR/entrypoints" "$TEMPLATE_DIR/tests"
-printf 'NAME=""\nRUNTIME=""\n' > "$TEMPLATE_DIR/relic.sh"
+printf 'NAME=""\nRUNTIME=""\nRUNTIME_EXEMPTION=""\n' > "$TEMPLATE_DIR/relic.sh"
 printf 'template doc\n'        > "$TEMPLATE_DIR/CLAUDE.md"
 : > "$TEMPLATE_DIR/src/.gitkeep"; : > "$TEMPLATE_DIR/entrypoints/.gitkeep"; : > "$TEMPLATE_DIR/tests/.gitkeep"
 
@@ -170,6 +170,44 @@ check "scaffold promo src moved"   "$([[ -f "$prom/src/prom" ]] && echo y)"     
 check "scaffold promo source gone" "$([[ -e "$sdir/prom-src" ]] && echo present)"          ""
 check "scaffold promo symlink"     "$(readlink "$prom/entrypoints/prom")"                  "../src/prom"
 check "scaffold promo drops gitkeep" "$([[ -e "$prom/entrypoints/.gitkeep" ]] && echo y)"  ""
+
+# ── the runtime stance: rust is the default, and it scaffolds a cargo member ──
+check "default runtime is rust" "$DEFAULT_RUNTIME" "rust"
+
+ws="$sdir/relics/Cargo.toml"
+printf '[workspace]\nresolver = "3"\nmembers = [\n    "crates/*",\n    "docket",\n    "midden",\n]\n' > "$ws"
+
+workspace_add_member "$ws" "ernest"
+check "member inserted sorted" "$(awk '/^ *"/{gsub(/[^a-z*\/]/,"");printf "%s ",$0}' "$ws")" \
+    "crates/* docket ernest midden "
+workspace_add_member "$ws" "ernest"
+check "member insert idempotent" "$(grep -c '"ernest",' "$ws")" "1"
+workspace_add_member "$ws" "zebra"
+check "member appended last" "$(awk '/^\]/{print prev} {prev=$0}' "$ws" | tr -d ' ",')" "zebra"
+
+rustdir="$sdir/relics/rusty"
+scaffold_tree rusty "$rustdir" rust "" "" "$ws"
+( source "$rustdir/relic.sh"; printf '%s %s\n' "$NAME" "$RUNTIME" ) > "$sdir/_rusty"
+check "rust scaffold manifest"     "$(cat "$sdir/_rusty")"                                   "rusty rust"
+check "rust scaffold cargo bin"    "$(grep -c 'path = "src/main.rs"' "$rustdir/Cargo.toml")" "1"
+check "rust scaffold inherits ws"  "$(grep -c 'edition.workspace = true' "$rustdir/Cargo.toml")" "1"
+check "rust scaffold main.rs"      "$([[ -f "$rustdir/src/main.rs" ]] && echo y)"            "y"
+check "rust scaffold no entrypoints" "$([[ -e "$rustdir/entrypoints" ]] && echo present)"    ""
+check "rust scaffold is a member"  "$(grep -c '"rusty",' "$ws")"                             "1"
+
+# A promoted Stage-1 script cannot become a compiled relic as-is; it is parked.
+printf '#!/usr/bin/env bash\necho old\n' > "$sdir/port-src"; chmod +x "$sdir/port-src"
+portdir="$sdir/relics/ported"
+scaffold_tree ported "$portdir" rust "$sdir/port-src" "" "$ws"
+check "rust scaffold parks the script" "$([[ -f "$portdir/src/ported.port-me" ]] && echo y)" "y"
+check "rust scaffold moved it"         "$([[ -e "$sdir/port-src" ]] && echo present)"        ""
+
+# An exemption is written into the manifest when one is given.
+exdir="$sdir/relics/exempted"
+scaffold_tree exempted "$exdir" bash "" "needs bash 3.2 at bootstrap" "$ws"
+( source "$exdir/relic.sh"; printf '%s\n' "$RUNTIME_EXEMPTION" ) > "$sdir/_ex"
+check "exemption recorded" "$(cat "$sdir/_ex")" "needs bash 3.2 at bootstrap"
+
 rm -rf "$sdir"
 
 rm -rf "$tmp"

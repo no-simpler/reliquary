@@ -348,6 +348,39 @@ update_relics() {
     return "$rc"
 }
 
+# --- Cargo build cache (~/.config/relics/target) ----------------------------
+# cargo never reclaims artifacts for dependency versions it no longer resolves,
+# or for toolchains that are gone — and the "Rust toolchains" step above is what
+# makes the latter happen. So this runs after the relic step, which also means
+# the binaries just built are the freshest thing in the tree and survive.
+#
+# Best-effort throughout: an unswept cache costs disk, never correctness.
+# 2 GiB — under this, sweeping is churn. Overridable for a machine that wants
+# a different budget, and for exercising the sweep path deliberately.
+RELIC_TARGET_CEILING_KB="${RELIC_TARGET_CEILING_KB:-2097152}"
+prune_cargo_cache() {
+    local target="$HOME/.config/relics/target"
+    [ -d "$target" ] || return 3
+    command -v cargo-sweep &>/dev/null || {
+        echo "cargo-sweep is not installed. Skipping."
+        return 3
+    }
+
+    local size_kb
+    size_kb="$(du -sk "$target" 2>/dev/null | awk '{print $1}')"
+    if [ -z "$size_kb" ] || [ "$size_kb" -lt "$RELIC_TARGET_CEILING_KB" ]; then
+        echo "Build cache is $(( ${size_kb:-0} / 1024 )) MiB, under the $(( RELIC_TARGET_CEILING_KB / 1024 )) MiB ceiling. Skipping."
+        return 3
+    fi
+
+    local lane="$HOME/.config/relics"
+    # Artifacts from toolchains no longer installed, then anything untouched for
+    # a month. Neither is allowed to fail the run.
+    ( cd "$lane" && cargo sweep --installed ) || print_warn "  cargo sweep --installed failed; continuing."
+    ( cd "$lane" && cargo sweep --time 30 )   || print_warn "  cargo sweep --time failed; continuing."
+    echo "Build cache now $(du -sh "$target" 2>/dev/null | awk '{print $1}')."
+}
+
 # --- OS cruft sweep (decruft) ----------------------------------------------
 # Remove inert OS metadata cruft (.DS_Store, ._*, …) left in browsable git repos
 # and the XDG depots — the local-disk counterpart to the macOS net/USB defaults
@@ -393,6 +426,7 @@ run_step "vim-plug plugins"               update_vimplug
 run_step "gcloud components"              update_gcloud
 run_step "TPM"                            update_tpm
 run_step "In-house relics"                update_relics "$@"
+run_step "Cargo build cache"               prune_cargo_cache
 run_step "OS cruft sweep"                 update_decruft "$@"
 
 # Record the attempt timestamp (marks "last ran up", regardless of per-step

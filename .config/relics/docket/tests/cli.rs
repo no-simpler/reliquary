@@ -44,7 +44,7 @@ impl Docket {
         self.invoke(&self.base, args, &[])
     }
 
-    /// The same invocation with extra environment, for the seams: `DOCKET_GIT`
+    /// The same invocation with extra environment, for the seams: `RELIC_GIT`
     /// set to nothing takes the ungit path.
     fn run_with(&self, args: &[&str], env: &[(&str, &str)]) -> Run {
         self.invoke(&self.base, args, env)
@@ -89,7 +89,7 @@ impl Docket {
             // temporary tree as well.
             .env("HOME", &self.base)
             .env_remove("DOCKET_UI")
-            .env_remove("DOCKET_GIT");
+            .env_remove("RELIC_GIT");
         for (key, value) in env {
             command.env(key, value);
         }
@@ -1328,7 +1328,7 @@ fn closing_is_refused_without_git() {
     let project = docket.project("proj");
     let (id, path) = docket.create(&project, "handoff", "UNRECORDED_WORK");
 
-    let run = docket.run_with(&["close", &id, "-q"], &[("DOCKET_GIT", "")]);
+    let run = docket.run_with(&["close", &id, "-q"], &[("RELIC_GIT", "")]);
     assert!(!run.ok(), "close should refuse without git");
     assert!(
         run.stderr().contains("git"),

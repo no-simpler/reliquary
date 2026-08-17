@@ -13,8 +13,10 @@
 #   publish [<name>]      publish an in-house relic's entrypoints onto PATH
 #   test    [<name>]      run an in-house relic's tests
 #   update  [<name>]      update/rebuild an in-house relic
-#   scaffold <name> [-r <rt>]  promote a Stage-1 bin/ util (or a fresh idea)
-#                         into a Stage-2 in-house relic
+#   scaffold <name> [-r <rt>] [-e <why>]
+#                         promote a Stage-1 bin/ util (or a fresh idea) into a
+#                         Stage-2 in-house relic. Rust unless -r says otherwise,
+#                         and anything but rust needs -e/--exempt.
 #   registry [--migrate|--prune]  show / fold / prune the shared PATH registry
 #   migrate               fold legacy per-meta registries into .reliquary-managed
 #   doctor                cross-check registry ↔ ~/.local/bin ↔ entrypoints
@@ -117,6 +119,29 @@ doctor_unpublished() {
     done < <(inhouse_relics)
 }
 
+# Relics that are not Rust and do not say why. Relics are Rust by default; any
+# other runtime records its reason in RUNTIME_EXEMPTION. Emits "<relic>\t<runtime>"
+# per omission.
+#
+# Informational, never a failure: a relic awaiting its rewrite has to keep
+# publishing, and this list is the worklist for getting through them — it empties
+# as each one is either rewritten into the workspace or given its reason.
+doctor_runtime_stance() {
+    local name dir lane runtime why
+    while IFS=$'\t' read -r name dir lane; do
+        runtime="$(relic_runtime "$dir")"
+        [[ "$runtime" == "rust" ]] && continue
+        why="$(
+            RUNTIME_EXEMPTION=""
+            # shellcheck disable=SC1090
+            source "$dir/relic.sh" 2>/dev/null
+            printf '%s' "${RUNTIME_EXEMPTION:-}"
+        )"
+        [[ -n "$why" ]] && continue
+        printf '%s\t%s\n' "$name" "$runtime"
+    done < <(inhouse_relics)
+}
+
 # Executable files in $LOCAL_BIN (non-dotfiles) absent from the registry —
 # foreign or sanctioned-sidestep binaries sharing the lane. Informational.
 doctor_unmanaged() {
@@ -174,8 +199,29 @@ external_relics() {
     done < "$GRADUATION"
 }
 
+# The names a relic publishes, one per line. A compiled relic declares them in
+# its manifest, because its artifact does not exist until cargo has run and lands
+# in the workspace target/ rather than beside the source; an interpreted one
+# declares them by filename in entrypoints/, where the file *is* the artifact.
+# Both are read without leaking globals, like relic_runtime.
 relic_entrypoints() {
     local dir="$1" ep n
+    if [[ "$(relic_runtime "$dir")" == "rust" ]]; then
+        (
+            # Reset rather than unset: `${#ENTRYPOINTS[@]}` on an unset name is
+            # an error under `set -u`, which this CLI runs with.
+            NAME=""
+            ENTRYPOINTS=()
+            # shellcheck disable=SC1090
+            source "$dir/relic.sh" 2>/dev/null
+            if [[ ${#ENTRYPOINTS[@]} -gt 0 ]]; then
+                printf '%s\n' "${ENTRYPOINTS[@]}"
+            elif [[ -n "${NAME:-}" ]]; then
+                printf '%s\n' "$NAME"
+            fi
+        )
+        return 0
+    fi
     [[ -d "$dir/entrypoints" ]] || return 0
     for ep in "$dir"/entrypoints/*; do
         [[ -e "$ep" ]] || continue
@@ -285,6 +331,69 @@ valid_runtime() {
     esac
 }
 
+# The runtime a relic gets when nothing says otherwise. Relics are Rust by
+# default; anything else records a RUNTIME_EXEMPTION.
+DEFAULT_RUNTIME="rust"
+
+# Add <name> to a cargo workspace manifest's members list. Idempotent, and keeps
+# the list sorted so the next insert lands predictably. Assumes the multi-line
+# array form, which is why the workspace manifest is written that way.
+workspace_add_member() {
+    local file="$1" name="$2" tmp
+    [[ -f "$file" ]] || return 1
+    awk -v n="\"$name\"," 'index($0, n) { f = 1 } END { exit !f }' "$file" && return 0
+    tmp="$(mktemp)" || return 1
+    awk -v n="$name" '
+        BEGIN { inarr = 0; added = 0 }
+        /^members[[:space:]]*=[[:space:]]*\[/ { inarr = 1; print; next }
+        inarr && /^\]/ {
+            if (!added) { printf "    \"%s\",\n", n; added = 1 }
+            inarr = 0; print; next
+        }
+        inarr {
+            if (!added) {
+                entry = $0
+                gsub(/[^A-Za-z0-9_\/*-]/, "", entry)
+                if (entry > n) { printf "    \"%s\",\n", n; added = 1 }
+            }
+            print; next
+        }
+        { print }
+    ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+# Lay down the cargo half of a Rust relic: a member manifest that inherits
+# everything the workspace holds, a main.rs that runs, and the members entry. No
+# entrypoints/ — a compiled relic declares its published names in the manifest,
+# because its artifact does not exist until cargo has run.
+scaffold_cargo() {
+    local name="$1" dir="$2" workspace="$3"
+    cat > "$dir/Cargo.toml" <<EOF
+[package]
+name = "$name"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "$name"
+path = "src/main.rs"
+
+[dependencies]
+EOF
+    cat > "$dir/src/main.rs" <<EOF
+fn main() {
+    println!("$name");
+}
+EOF
+    rm -f "$dir/src/.gitkeep"
+    rm -rf "$dir/entrypoints"
+    [[ -f "$workspace" ]] && { workspace_add_member "$workspace" "$name" || return 1; }
+    return 0
+}
+
 # Map a script's shebang to a relic RUNTIME. Emits the runtime, or nothing when
 # it can't be inferred (caller then prompts / requires --runtime).
 infer_runtime() {
@@ -325,10 +434,11 @@ manifest_set() {
 # wire the entrypoint symlink. Parameterised on <dir>/$TEMPLATE_DIR so tests can
 # drive it against scratch dirs.
 scaffold_tree() {
-    local name="$1" dir="$2" runtime="$3" src_script="${4:-}"
+    local name="$1" dir="$2" runtime="$3" src_script="${4:-}" exempt="${5:-}" workspace="${6:-}"
     cp -r "$TEMPLATE_DIR" "$dir" || return 1
     manifest_set "$dir/relic.sh" NAME "$name" || return 1
     manifest_set "$dir/relic.sh" RUNTIME "$runtime" || return 1
+    [[ -n "$exempt" ]] && { manifest_set "$dir/relic.sh" RUNTIME_EXEMPTION "$exempt" || return 1; }
     cat > "$dir/CLAUDE.md" <<EOF
 # \`$name\` — in-house (Stage-2) relic
 
@@ -338,6 +448,16 @@ publish flow.
 
 TODO: describe what \`$name\` does and any agent context worth keeping.
 EOF
+    if [[ "$runtime" == "rust" ]]; then
+        # A Stage-1 script cannot be promoted into a compiled relic as-is; it is
+        # kept beside the skeleton as the thing to port, and the caller says so.
+        if [[ -n "$src_script" ]]; then
+            mv "$src_script" "$dir/src/$name.port-me" || return 1
+        fi
+        scaffold_cargo "$name" "$dir" "${workspace:-$RELICS_LANE/Cargo.toml}" || return 1
+        return 0
+    fi
+
     if [[ -n "$src_script" ]]; then
         mv "$src_script" "$dir/src/$name" || return 1
         chmod +x "$dir/src/$name"
@@ -464,10 +584,11 @@ _run_op() {
 }
 
 cmd_scaffold() {
-    local name="" runtime=""
+    local name="" runtime="" exempt=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -r|--runtime) runtime="${2:-}"; shift 2 || die "missing value for $1" ;;
+            -e|--exempt)  exempt="${2:-}";  shift 2 || die "missing value for $1" ;;
             -*) die "unknown flag: $1" ;;
             *) [[ -z "$name" ]] || die "unexpected extra argument: $1"; name="$1"; shift ;;
         esac
@@ -486,24 +607,41 @@ cmd_scaffold() {
     local src=""
     [[ -f "$BIN_LANE/$name" ]] && src="$BIN_LANE/$name"
 
-    # Resolve RUNTIME: explicit flag → shebang inference → prompt (TTY) → die.
+    # Resolve RUNTIME: explicit flag → shebang of a Stage-1 source → the default.
+    # Inference reads what the promoted script *is*, so it is not overridden by
+    # the stance; a rewrite is a deliberate `-r rust`, not a silent one that
+    # leaves the old script unrunnable.
     if [[ -z "$runtime" && -n "$src" ]]; then
         runtime="$(infer_runtime "$src")"
         [[ -n "$runtime" ]] && info "${_c_dim}inferred runtime '$runtime' from $src${_c_rst}"
     fi
     if [[ -z "$runtime" ]]; then
-        if [[ -t 0 ]]; then
-            local ans
-            printf 'runtime (python|bash|fish|rust|docker): ' >&2
-            IFS= read -r ans || true
-            runtime="$ans"
-        fi
-        [[ -n "$runtime" ]] || die "could not infer RUNTIME; pass --runtime <python|bash|fish|rust|docker>"
-        valid_runtime "$runtime" || die "invalid runtime: $runtime"
+        runtime="$DEFAULT_RUNTIME"
+        info "${_c_dim}runtime '$runtime' (the default — relics are Rust unless exempted)${_c_rst}"
     fi
 
-    scaffold_tree "$name" "$dir" "$runtime" "$src" || die "failed to scaffold $dir"
+    # The stance, enforced at the one moment it is cheap to follow.
+    if [[ "$runtime" != "rust" && -z "$exempt" ]]; then
+        die "runtime '$runtime' needs a reason: pass --exempt \"<why this one is not Rust>\" (see GRADUATION.md)"
+    fi
+
+    scaffold_tree "$name" "$dir" "$runtime" "$src" "$exempt" "$RELICS_LANE/Cargo.toml" \
+        || die "failed to scaffold $dir"
     info "${_c_grn}scaffolded${_c_rst} $dir ${_c_dim}(runtime: $runtime)${_c_rst}"
+
+    if [[ "$runtime" == "rust" ]]; then
+        info "${_c_dim}added to the workspace members in $RELICS_LANE/Cargo.toml${_c_rst}"
+        info ""
+        info "next steps:"
+        info "  1. write $dir/src/main.rs"
+        if [[ -n "$src" ]]; then
+            info "     ${_c_yel}$src moved to src/$name.port-me${_c_rst} — port it, then delete it"
+        fi
+        info "  2. relic test $name"
+        info "  3. relic publish $name"
+        info "${_c_dim}staging is left until there's something publishable.${_c_rst}"
+        return 0
+    fi
 
     if [[ -n "$src" ]]; then
         info "promoted ${_c_bold}$name${_c_rst} from $src → src/$name"
@@ -566,7 +704,7 @@ cmd_prune() {
 }
 
 cmd_doctor() {
-    local problems=0 any name owner ep
+    local problems=0 any name owner ep runtime
 
     info "${_c_bold}Orphan registry entries${_c_rst} ${_c_dim}(registered, no file in ~/.local/bin)${_c_rst}"
     any=0
@@ -593,6 +731,20 @@ cmd_doctor() {
         printf '  %s(none)%s\n' "$_c_grn" "$_c_rst"
     else
         info "  ${_c_dim}fix: relic publish <relic>${_c_rst}"
+    fi
+
+    info ""
+    info "${_c_bold}Runtime stance${_c_rst} ${_c_dim}(not rust, no RUNTIME_EXEMPTION — informational)${_c_rst}"
+    any=0
+    while IFS=$'\t' read -r name runtime; do
+        [[ -z "$name" ]] && continue
+        any=1
+        info "  ${_c_dim}$name ($runtime)${_c_rst}"
+    done < <(doctor_runtime_stance)
+    if [[ $any -eq 0 ]]; then
+        printf '  %s(none)%s\n' "$_c_grn" "$_c_rst"
+    else
+        info "  ${_c_dim}rewrite into the workspace, or record why not in relic.sh${_c_rst}"
     fi
 
     info ""
@@ -626,8 +778,9 @@ commands:
   publish [<name>]      publish an in-house relic's entrypoints onto PATH
   test    [<name>]      run an in-house relic's tests
   update  [<name>]      update/rebuild an in-house relic
-  scaffold <name> [-r <rt>]  promote a Stage-1 ~/.config/bin util (or fresh
-                        idea) into a Stage-2 relic, then publish + stage
+  scaffold <name> [-r <rt>] [-e <why>]
+                        promote a Stage-1 ~/.config/bin util (or fresh idea)
+                        into a Stage-2 relic, then publish + stage
   registry [--migrate|--prune]  show / fold / prune the shared PATH registry
   migrate               fold legacy per-meta registries into .reliquary-managed
   doctor                cross-check registry ↔ ~/.local/bin ↔ entrypoints
@@ -635,8 +788,9 @@ commands:
 
 <name> is optional for status/publish/test/update when run from inside a
 relic directory. Unambiguous command prefixes are accepted (e.g. \`relic st\`).
-\`scaffold\` infers RUNTIME from a promoted script's shebang; pass \`-r/--runtime\`
-to override, or for a fresh relic with no source to sniff.
+\`scaffold\` infers RUNTIME from a promoted script's shebang and otherwise
+defaults to rust — relics are Rust unless exempted. Pass \`-r/--runtime\` to
+choose, and \`-e/--exempt "<why>"\` to record why a non-rust one stays that way.
 EOF
 }
 
