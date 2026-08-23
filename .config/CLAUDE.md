@@ -178,11 +178,9 @@ when nothing is outstanding. The skill at `~/.claude/skills/docket/` is a trigge
 `docket help`, doctrine in `docket guide`. Do not restate either here or anywhere else; the relic's
 `CLAUDE.md` records why.
 
-The four older conventions it supersedes are still in place and unmigrated: Pillar's
-`.claude/handoffs/` and `.claude/specs/`, the `bb`/`halo` depot inboxes under
-`~/.local/share/<meta>/.handoffs/`, the `.claude/handoffs/` references in
-`~/.claude/commands/modes/{afk,tree}.md`, and `~/.config/reliquary/design/`. Migration is
-deliberate and one at a time.
+Two older conventions it supersedes are still in place: halo's depot inboxes under
+`~/.local/share/halo/.handoffs/`, and `~/.config/reliquary/design/`. Migration is deliberate
+and one at a time.
 
 ### Friction corpus (`midden`)
 
