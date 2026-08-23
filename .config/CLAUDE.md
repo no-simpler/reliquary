@@ -107,6 +107,8 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm, relics, relic build cache); writes timestamp to `~/.local/state/up/last_upped_at`
 - `check-shell-parity` - detects POSIX↔fish alias/abbr/function name drift across the paired `shell/interactive.d/*.sh` ↔ `fish/conf.d/*.fish` files; exits non-zero on drift (run by the dream procedure in `~/.config/.claude/DREAM.md`)
 - `check-brew-health` - detects Homebrew rot: installed formulae/casks deprecated or disabled upstream (warn), kegs orphaned by a formula's removal, and Brewfile entries that no longer resolve (fail). Tap-aware, offline, side-effect-free; exit 0/1/2 like `check-bedrock`. Wired into `yadm doctor` and, advisory-only, into `up`
+- `compose-gc` - reclaims Docker Compose state left behind by dead git worktrees of the current repo, sweeping by label (no compose file needed) across both worktree layouts; `down <path>` is the profile-complete teardown of one stack. `-n` dry-runs. Used by the `transplant-worktrees` skill as its single Docker surface
+- `check-md-shell-blocks` - validates the auto-executed ```! blocks in Claude Code skills/slash commands: they are statically analysed with no prompt path, so an inline program is always denied and takes the whole invocation with it. Checks Claude Code's brace-with-quote prefilter, demands a single simple command, and verifies `allowed-tools`/settings.json coverage. Read-only, exit 0/1/2; wired into `yadm doctor`
 - `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt; tries `ske read` first, falls back to `op read` (never hard-depend — it decrypts the attic `ske` lives in)
 - `ske-prompt` - prints the open `ske` Touch ID window for the oh-my-posh right prompt; silent when closed (`sh`, not bash: `$BASH_ENV` would cost ~230ms per render)
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below); also reachable as `yadm` via the `~/.config/bin/yadm` symlink (shadows brew's yadm — see "Path availability")
@@ -308,7 +310,7 @@ Reachable as `yadm` in **every** shell — `~/.config/bin/yadm` is a symlink to 
 - `yadm check` - compares archive SHA256 to detect drift
 - `yadm verify` - decrypts archive to tmpdir and diffs against disk
 - `yadm ls-all` - complete tracked set: `yadm ls-files` (plaintext) + archive listing (`decrypt -l`, Touch ID)
-- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, bedrock, Homebrew package health, relic build-cache size, archive drift, ske wiring); detect-only, Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
+- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, Claude Code `!` blocks, bedrock, Homebrew package health, relic build-cache size, archive drift, ske wiring); detect-only, Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
 - `yadm update` - `pull --ff-only`, then `doctor --quiet` (silent when healthy; surfaces drift/regressions the pull introduced — the quiet doctor already covers the encrypted-archive check)
 - All other commands pass through to real yadm, followed by an encrypted-files check
 
@@ -381,6 +383,7 @@ a single file rather than globbing the directory.
 - `quartz-filters` - macOS PDF compression filters
 - `tmux` - tmux configuration
 - `zsh/completion/docker` - docker completions for zsh
+- `~/.claude/skills/transplant-worktrees/` - folds Claude Code worktree branches onto main (rebase + ff-merge), then reclaims their Docker state via `compose-gc`. Domain-free, so it travels; the benefactor-flavoured skills alongside it stay untracked
 
 ### Deliberately not tracked (audited)
 

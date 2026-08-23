@@ -9,6 +9,7 @@
       "Bash(git mv:*)",
       "Bash(docket:*)",
       "Bash(midden:*)",
+      "Bash(compose-gc:*)",
       "Edit(~/.claude/docket/**)"
     ],
     "deny": [

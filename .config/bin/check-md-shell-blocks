@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""check-md-shell-blocks — validates auto-executed shell blocks in Claude Code markdown.
+
+A ```! fence (and the inline !`cmd` form) in a skill or slash command is executed
+when the file loads. There is no prompt path for it: the command is analysed
+statically and must come back `allow` against the file's `allowed-tools`, or the
+whole invocation throws. So an inline program can never run — it is denied for
+being unanalysable long before anything gets to consider whether it is safe.
+
+Three ways a block gets denied, all checked here:
+
+  1. Claude Code's own `too-complex` prefilter. The rule ported below is the
+     brace-with-quote one — /\\{[^}]*['"]/ applied *after* every `{` inside
+     quotes is blanked — because it is the one an ordinary shell program trips
+     without looking wrong. An unquoted `{` reaching a quote before its `}` is
+     usually a shell function definition.
+  2. Compound shape. The real analyser decomposes a compound command and
+     requires every leaf to be allowed, which no multi-statement block survives.
+     This check is deliberately stricter than the analyser — it demands a single
+     simple command. The question is "will this be denied", and a false positive
+     costs one edit.
+  3. Coverage. The head command must be granted by the file's `allowed-tools`
+     frontmatter or by ~/.claude/settings.json permissions.allow.
+
+Read-only, offline, side-effect-free. Exit: 0 = every block would run;
+1 = soft issues (a file with blocks but no allowed-tools declaration);
+2 = at least one block would be denied.
+"""
+
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+
+# Roots holding markdown whose ! blocks Claude Code executes. Explicit list, not
+# auto-discovery (the check-shell-parity PAIRS idiom): most markdown on this
+# machine is prose, and globbing it all would be noise.
+ROOTS = [
+    HOME / ".claude" / "skills",
+    HOME / ".claude" / "commands",
+    HOME / ".config" / ".claude",
+]
+
+SETTINGS = HOME / ".claude" / "settings.json"
+
+BOLD, RED, GREEN, YELLOW, DIM, RESET = (
+    "\033[1m", "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
+)
+
+FENCE_RE = re.compile(r"^```!\s*$(.*?)^```\s*$", re.MULTILINE | re.DOTALL)
+INLINE_RE = re.compile(r"!`([^`\n]+)`")
+BRACE_QUOTE_RE = re.compile(r"""\{[^}]*['"]""")
+RULE_RE = re.compile(r"Bash\(([^)]*)\)")
+
+# Metacharacters that make a block more than one simple command.
+COMPOUND_CHARS = ";|&<>(){}`"
+
+fails = 0
+warns = 0
+
+
+def ok(msg):
+    print(f"  {GREEN}✓{RESET} {msg}")
+
+
+def warn(msg):
+    global warns
+    print(f"  {YELLOW}!{RESET} {msg}")
+    warns += 1
+
+
+def fail(msg):
+    global fails
+    print(f"  {RED}✗{RESET} {msg}")
+    fails += 1
+
+
+def note(msg):
+    print(f"      {DIM}{msg}{RESET}")
+
+
+def head(msg):
+    print(f"{BOLD}==>{RESET} {BOLD}{msg}{RESET}")
+
+
+def blank_quoted_braces(s):
+    """Port of Claude Code's brace collapser: every `{` inside single quotes,
+    double quotes or backticks becomes a space, so only unquoted braces survive
+    into the brace-with-quote test. Comments pass through untouched, as there."""
+    out = []
+    in_single = in_double = in_back = False
+    at_cmd_start = True
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if in_back:
+            if c == "\\" and i + 1 < len(s) and s[i + 1] in "`\\$":
+                out.append(c); out.append(s[i + 1]); i += 2; continue
+            if c == "`":
+                in_back = False
+            out.append(" " if c == "{" else c); i += 1
+        elif in_single:
+            if c == "'":
+                in_single = False
+            out.append(" " if c == "{" else c); i += 1
+        elif in_double:
+            if c == "\\" and i + 1 < len(s) and s[i + 1] in '"\\`':
+                out.append(c); out.append(s[i + 1]); i += 2; continue
+            if c == "`":
+                in_back = True
+                out.append(c); i += 1; continue
+            if c == '"':
+                in_double = False
+            out.append(" " if c == "{" else c); i += 1
+        elif c == "\\" and i + 1 < len(s):
+            out.append(c); out.append(s[i + 1])
+            if s[i + 1] != "\n":
+                at_cmd_start = False
+            i += 2
+        elif c == "#" and at_cmd_start:
+            while i < len(s) and s[i] != "\n":
+                out.append(s[i]); i += 1
+            at_cmd_start = True
+        elif c == "`":
+            in_back = True
+            at_cmd_start = False
+            out.append(c); i += 1
+        else:
+            if c == "'":
+                in_single = True
+            elif c == '"':
+                in_double = True
+            at_cmd_start = c in " \t\n;|&()<>"
+            out.append(c); i += 1
+    return "".join(out)
+
+
+def grants(rules):
+    """Normalise permission rule bodies into (kind, text) grants. `X:*` and the
+    legacy `X *` are prefixes; a bare `X` is an exact command."""
+    out = []
+    for r in rules:
+        r = r.strip()
+        if not r:
+            continue
+        if r.endswith(":*"):
+            out.append(("prefix", r[:-2].strip()))
+        elif r.endswith(" *"):
+            out.append(("prefix", r[:-2].strip()))
+        elif r == "*":
+            out.append(("prefix", ""))
+        else:
+            out.append(("exact", r))
+    return out
+
+
+def covered(cmd, allow):
+    for kind, text in allow:
+        if kind == "exact" and cmd == text:
+            return True
+        if kind == "prefix" and (text == "" or cmd == text or cmd.startswith(text + " ")):
+            return True
+    return False
+
+
+def settings_grants():
+    if not SETTINGS.is_file():
+        return []
+    try:
+        data = json.loads(SETTINGS.read_text())
+    except (OSError, ValueError):
+        warn(f"{SETTINGS} is unreadable — settings grants ignored")
+        return []
+    rules = data.get("permissions", {}).get("allow", []) or []
+    return grants([m.group(1) for r in rules for m in RULE_RE.finditer(r)])
+
+
+def frontmatter_grants(text):
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    if end == -1:
+        return None
+    fm = text[3:end]
+    m = re.search(r"^allowed-tools:\s*(.+)$", fm, re.MULTILINE)
+    if not m:
+        return None
+    return grants([g.group(1) for g in RULE_RE.finditer(m.group(1))])
+
+
+def blocks(text):
+    for m in FENCE_RE.finditer(text):
+        yield text[: m.start()].count("\n") + 1, m.group(1).strip(), "fence"
+    for m in INLINE_RE.finditer(text):
+        yield text[: m.start()].count("\n") + 1, m.group(1).strip(), "inline"
+
+
+def check(path, base_allow):
+    global warns
+    text = path.read_text(errors="replace")
+    found = list(blocks(text))
+    if not found:
+        return
+    fm = frontmatter_grants(text)
+    rel = path.relative_to(HOME)
+    if fm is None:
+        warn(f"~/{rel}: has ! blocks but declares no allowed-tools")
+        fm = []
+    allow = fm + base_allow
+    for line, cmd, kind in found:
+        where = f"~/{rel}:{line}"
+        if not cmd:
+            fail(f"{where}: empty ! {kind}")
+            continue
+        if BRACE_QUOTE_RE.search(blank_quoted_braces(cmd)):
+            fail(f"{where}: brace with quote character (expansion obfuscation)")
+            note(cmd.splitlines()[0][:100])
+            continue
+        if "\n" in cmd or any(c in cmd for c in COMPOUND_CHARS) or "$(" in cmd:
+            fail(f"{where}: not a single simple command — extract it to a script on PATH")
+            note(cmd.splitlines()[0][:100])
+            continue
+        if not covered(cmd, allow):
+            fail(f"{where}: `{cmd}` granted by neither allowed-tools nor settings.json")
+            continue
+        ok(f"{where}: `{cmd}`")
+
+
+def main():
+    base_allow = settings_grants()
+    head("Claude Code ! blocks")
+    seen = False
+    for root in ROOTS:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.md")):
+            seen = True
+            try:
+                check(path, base_allow)
+            except OSError as exc:
+                warn(f"{path}: {exc}")
+    if not seen:
+        note("no markdown found under any known root")
+    print()
+    if fails:
+        print(f"{BOLD}{RED}{fails} block(s) would be denied at load time{RESET}")
+        return 2
+    if warns:
+        print(f"{BOLD}{YELLOW}{warns} soft issue(s){RESET}")
+        return 1
+    print(f"{BOLD}{GREEN}every ! block would run{RESET}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

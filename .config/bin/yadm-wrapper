@@ -272,6 +272,29 @@ _doctor_run() {
         _doctor_warn "check-shell-parity not found — skipped"
     fi
 
+    # 4b. Claude Code ! blocks. A ```! fence executes when its skill or slash
+    #     command loads, with no prompt path: it is statically analysed against
+    #     the file's allowed-tools and throws if the verdict is not `allow`,
+    #     taking the whole invocation with it. Nothing surfaces that until the
+    #     command is typed, so it is checked here instead.
+    _doctor_head "Claude Code ! blocks"
+    local mdblocks="$HOME/.config/bin/check-md-shell-blocks"
+    if [ -x "$mdblocks" ]; then
+        local mout mrc
+        mout=$("$mdblocks" 2>&1); mrc=$?
+        if [ "$mrc" -eq 0 ]; then
+            _doctor_ok "every block would run"
+        elif [ "$mrc" -eq 1 ]; then
+            _doctor_warn "soft issues:"
+            printf '%s\n' "$mout" | sed 's/^/      /'
+        else
+            _doctor_fail "block(s) would be denied at load time:"
+            printf '%s\n' "$mout" | sed 's/^/      /'
+        fi
+    else
+        _doctor_warn "check-md-shell-blocks not found — skipped"
+    fi
+
     # 5. Bedrock dependencies (present, configured, PATH-accessible)
     _doctor_head "bedrock dependencies"
     local bedrock="$HOME/.config/bin/check-bedrock"
