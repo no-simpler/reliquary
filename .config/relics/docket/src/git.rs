@@ -34,10 +34,13 @@ const CONFIG: &[(&str, &str)] = &[
     ("tag.gpgsign", "false"),
     // The machine-wide excludes file must never silently drop an item.
     ("core.excludesFile", ""),
-    // Nothing templated or global runs inside the depot. The path is relative
-    // to the working tree and deliberately absent, and sits under .git so it
-    // could never be mistaken for depot content.
-    ("core.hooksPath", ".git/no-hooks"),
+    // Nothing templated or global runs inside the depot: `init.templateDir`
+    // populates `.git/hooks` at init time, so pointing away from it is what
+    // neutralises the template. Repo-local, under .git so it could never be
+    // mistaken for depot content, and normally empty — but a hook installed for
+    // *this* depot deliberately, as `nexus enroll` does, belongs here and runs.
+    // The directory is therefore not named for being empty.
+    ("core.hooksPath", ".git/hooks-local"),
     // Auto-gc must not print into a session-start hook. scripts/update.sh
     // compacts instead.
     ("gc.auto", "0"),
