@@ -82,7 +82,6 @@ the other spokes (4).
 Surfaced by the survey that seeded the bank; build them when a second project would benefit:
 
 - Specs system (`.claude/specs/` multi-session design+implementation).
-- Handoff system + `SessionStart` hooks (cross-session / cross-project coordination).
 - LLM-wiki shape (index catalog, flat unique slugs, three-layer source→wiki→schema).
 - Meta / aspect / depot submodule topology.
 - `.claude/settings.json` aspect-permission template.

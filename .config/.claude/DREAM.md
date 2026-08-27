@@ -67,7 +67,7 @@ never as an inference from a clean `yadm doctor` run.
 ## The recurring passes
 
 Each runs every session over `CLAUDE.md` (root + any nested), `.claude/TODO.md`, and the canonical
-meta docs under `~/.config/reliquary/` (`GRADUATION.md`, `AUX.md`, `design/`). Surface candidate
+meta docs under `~/.config/reliquary/` (`GRADUATION.md`, `AUX.md`). Surface candidate
 edits as a list before writing anything large.
 
 ### 1. Compaction

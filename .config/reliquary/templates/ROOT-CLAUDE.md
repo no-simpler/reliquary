@@ -40,7 +40,9 @@ look up.>
 The agent-facing knowledge layer is the `CLAUDE.md` network (root + any nesting) plus the entire
 `.claude/` directory. It is <gitignored / personally version-controlled — state which>, so its
 vocabulary is unconstrained. It documents structure, conventions, and approach — not specifics a
-reader can get by reading the code or running the tool.
+reader can get by reading the code or running the tool. `CLAUDE.md` is for invariants; hooks
+are for conditional context — anything relevant only in some sessions is better emitted by a
+script the hook calls than written as static prose.
 
 ### Documentation hygiene   [CORE]
 
@@ -137,16 +139,6 @@ self-handoff). One spec = one file. Lifecycle: inception → design → implemen
 checkbox detalization → per-session batching → finalization → completion → graduation (distill
 residual knowledge into committed docs) → expunge. Edit in place at every stage; version control
 owns the history. Specs are durable-while-alive — distinct from disposable session scratch.
-
-### Handoffs + SessionStart hooks   [OPTIONAL — multi-project / cross-session coordination]
-
-Temporary, non-regenerable data that doesn't fit a durable doc: a sender writes
-`<source>--<slug>.md` into a handoff inbox; the recipient reads it, incorporates it into its own
-VCS, then deletes it (recipient owns cleanup). Recipient may equal sender — a delayed prompt to
-your own future session. A `SessionStart` hook surfaces pending handoffs at boot and is silent
-when none exist. **Principle:** `CLAUDE.md` is for invariants; hooks are for conditional context
-— anything relevant only in some sessions is better emitted by a script the hook calls than
-written as static prose.
 
 ### Worktree anchoring   [OPTIONAL — projects that work in linked git worktrees]
 

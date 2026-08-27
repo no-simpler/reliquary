@@ -154,7 +154,7 @@ The `relic` CLI (`relic list|status|publish|test|update|scaffold|registry|migrat
 
 **The roster is `relic list`, not a list in this file.** Each relic's doctrine lives in its own `CLAUDE.md`, and the sections below exist only for the relics whose *system-wide* integration needs explaining — a hook, a command surface, a Touch ID vector. A relic that is simply a tool on `$PATH` (`ernest`, which measures prose density and backs `/modes:deprose`) gets no section here, because a hand-maintained roster in the root file is a roster that silently goes stale.
 
-`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`, `AGENTIC-TOOLING.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton), and deferred-work handoffs (`design/`: `relic graduate`).
+`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`, `AGENTIC-TOOLING.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton).
 
 ### Session docket (`docket`)
 
@@ -185,10 +185,6 @@ when nothing is outstanding. The skill at `~/.claude/skills/docket/` is a trigge
 **The binary is the single source of truth for its own surface** — reference in `docket --help` and
 `docket help`, doctrine in `docket guide`. Do not restate either here or anywhere else; the relic's
 `CLAUDE.md` records why.
-
-Two older conventions it supersedes are still in place: halo's depot inboxes under
-`~/.local/share/halo/.handoffs/`, and `~/.config/reliquary/design/`. Migration is deliberate
-and one at a time.
 
 ### Friction corpus (`midden`)
 

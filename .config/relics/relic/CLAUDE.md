@@ -5,8 +5,7 @@ The first in-house (Stage-2) relic. It manages the relic lifecycle and
 same `relic::publish` / `install-on-path.sh` rails it exposes.
 
 For the lifecycle, stages, and registry model, see
-`~/.config/reliquary/GRADUATION.md`. For deferred work (`relic graduate`),
-see `~/.config/reliquary/design/`.
+`~/.config/reliquary/GRADUATION.md`.
 
 ## Anatomy
 

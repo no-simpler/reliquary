@@ -294,8 +294,8 @@ inferred from the script's shebang, or `-r/--runtime`, defaulting to `rust` when
 neither says otherwise), publishes, and stages the result in yadm. A Rust relic is
 scaffolded as a workspace member — `Cargo.toml`, `src/main.rs`, and an appended
 `members` entry — and a non-Rust `-r` requires `--exempt "<why>"`. With no Stage-1
-source it scaffolds a bare skeleton and prints next steps. The deferred `graduate` subcommand is sketched in `design/` for a
-later session.
+source it scaffolds a bare skeleton and prints next steps. The `graduate` subcommand stays
+deferred.
 
 ## Private lane: `~/.config/attic/`
 
@@ -352,7 +352,6 @@ wedge the whole update run.
 - `~/.config/attic/`                                  — private relics (encrypted)
 - `~/.config/reliquary/lib/relic.sh`                  — shared library
 - `~/.config/reliquary/template/`                     — relic skeleton
-- `~/.config/reliquary/design/`                       — deferred work (graduate)
 - `~/.config/reliquary/lib/install-on-path.sh`        — stable PATH API + single registry
 - `~/.local/bin/.reliquary-managed`                   — the shared PATH registry (not tracked)
 - `~/.config/yadm/snippets/shared/12-publish-relics.sh` — bootstrap migrate + re-publish

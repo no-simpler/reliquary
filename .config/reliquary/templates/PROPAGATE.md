@@ -89,13 +89,13 @@ the target's brain can be *versioned* where it arrives. When it can't — the br
 nowhere (locally git-ignored *and* un-enrolled in any separate VCS), or the target is one member of
 a clone group whose other members aren't individually versioned, so editing one would either strand
 an un-versioned floating edit or break the group's byte-identicality — do **not** push the edit.
-Instead leave a **handoff** inside the target (e.g. `.claude/handoffs/<topic>.md`) that records the
-template payload and has a future session run the harmonization in the **pull** direction: version
-the brain first (enroll it), then pull the current template in and merge per this runbook. The
-handoff itself rides whatever VCS *is* available at the target — e.g. a `clc`-enrolled superproject
-brain can carry and promote a handoff covering its un-enrolled submodules. This inverts the usual
-hub→spoke push into a spoke-pulls-from-hub step, which is the only safe direction when the spoke
-isn't yet a versioned destination.
+Instead open a **handoff on the target's own docket** (`docket create handoff --to <target>`, with
+`--allow-missing` where the path isn't there yet) that records the template payload and has a future
+session run the harmonization in the **pull** direction: version the brain first (enroll it), then
+pull the current template in and merge per this runbook. The docket is machine-wide and keyed by
+path, so it writes nothing into the target tree and needs no VCS there — neither hazard above
+applies to it. This inverts the usual hub→spoke push into a spoke-pulls-from-hub step, which is the
+only safe direction when the spoke isn't yet a versioned destination.
 
 **Stay on the checked-out branch.** Apply and commit on whatever branch the target currently has
 checked out. Never switch, create, or rebase branches to land a propagation.
