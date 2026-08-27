@@ -28,6 +28,7 @@ re-installing or re-checking it in every project would be absurd," not "useful t
 | **git**     | present (yadm *is* git; everything assumes it) | — |
 | **curl**    | present (the bootstrap entrypoint) | — |
 | **just**    | present; **latest, never pinned** — the host-side task entrypoint into every repo | — |
+| **cargo**   | present, with a working toolchain; **latest, never pinned** — rustup owns it, the way brew owns python3 | `rustc`, `cargo fmt`, `cargo clippy` |
 
 ### bash
 macOS freezes `/bin/bash` at 3.2 (GPLv3 licensing); countless scripts target `#!/usr/bin/env bash`
@@ -77,11 +78,30 @@ Contract is presence only: no sub-API, and **no version floor** — brew tracks 
 on `brew upgrade`, the same ownership model as python3. A repo needing newer recipe syntax than the
 host has is a floor to declare in that repo, not a reason to pin the system.
 
+### cargo
+The relic lane is a cargo workspace and relics are Rust by default, so `relic publish` *builds from
+source* — there are no prebuilt binaries. Without a toolchain, every relic on `$PATH` is
+unbuildable, and on a fresh machine simply absent. That is the same argument that admitted `just`:
+guaranteeing the engine and not the ignition is not a guarantee.
+
+**rustup owns the toolchain**, exactly as Homebrew owns `python3`, and it self-heals the same way —
+`up` runs `rustup update`, so nothing is ever pinned. This makes cargo the **first bedrock member
+not installed from the Brewfile**: brew's `rustup` formula is keg-only, so routing through it would
+*add* PATH plumbing rather than remove any. Bootstrap installs the official rustup instead
+(`yadm/snippets/shared/11-rustup.sh`, `--no-modify-path` because `shell/env.d/040-env.*` owns
+cargo's PATH). The install *mechanism* is therefore per-member; the *guarantee* is uniform.
+
+The sub-APIs are not decoration. `rustc`, because cargo without a compiler builds nothing; and
+`cargo fmt` / `cargo clippy`, which are rustup **components** rather than parts of cargo — `relic
+test` runs both, so a toolchain missing either makes the entire verification gate unenforceable.
+They are failures, not warnings, on the same reasoning as docker's `compose`/`buildx`. `rustup`'s
+own absence is only a warning: another toolchain still builds, it just loses the self-healing.
+
 ## Where each concern lives
 
 | Concern | Owner |
 |---------|-------|
-| **Install** (macOS) | base `brew/Brewfile` — members tagged with a trailing `# bedrock` marker. `git`, `bash`, `curl`, `python`, `uv`, `just` + the `orbstack` cask. Applied by `yadm/snippets/macos/02-brewfile.sh`; bash is front-run by `macos/02-bash.sh`. |
+| **Install** (macOS) | base `brew/Brewfile` — members tagged with a trailing `# bedrock` marker. `git`, `bash`, `curl`, `python`, `uv`, `just` + the `orbstack` cask. Applied by `yadm/snippets/macos/02-brewfile.sh`; bash is front-run by `macos/02-bash.sh`. **`cargo` is the exception**: rustup owns it, installed by `yadm/snippets/shared/11-rustup.sh`, and carries no `# bedrock` tag. |
 | **Install** (Linux/WSL) | **not yet implemented** — see the TODO queue. Verification already runs and fails loud there. |
 | **Verify** | `bin/check-bedrock` — cross-platform, side-effect-free, offline. Presence + version/sub-API probes + a shadow/duplicate scan. Exit `0` satisfied / `1` warnings / `2` incomplete. |
 | **Enforce** | `yadm doctor` runs `check-bedrock` (so the dream pre-pass and `yadm update --quiet` both cover it); `yadm/snippets/shared/98-bedrock.sh` re-asserts it loudly at the end of bootstrap. |
@@ -109,8 +129,9 @@ the 3.2-safe authoring rule is simpler and robust.)
 To add a member:
 1. Add it to `MEMBERS` in `bin/check-bedrock`, with a `check_<name>` sub-API probe if it has one and
    an `expected_extra` entry if the OS ships a shadowable copy.
-2. Add it to the base `brew/Brewfile` with a `# bedrock` marker (and, eventually, the Linux install
-   path).
+2. Give it an install path: the base `brew/Brewfile` with a `# bedrock` marker for anything brew
+   ships, or a bootstrap snippet where an upstream installer is the better owner (as with
+   rustup). Either way, note which lane in the member table. Linux install remains a TODO.
 3. Document it in the member table above.
 
 Keep the bar high: a new member must be *universally assumed*, not merely convenient. If it's only

@@ -46,7 +46,7 @@ done
 # --- Members ---------------------------------------------------------------
 # Each must resolve on PATH (hard requirement). Per-member version / sub-API
 # probes live in the check_<name> functions below.
-MEMBERS="bash python3 uv docker git curl just"
+MEMBERS="bash python3 uv docker git curl just cargo"
 
 # Expected, benign secondary copies per member: the OS baseline that bedrock
 # deliberately shadows by PATH order (cannot be expunged). Their mere presence
@@ -145,6 +145,31 @@ check_just() {
     ok "just ${ver#just } — $w"
 }
 
+# cargo: the member is `cargo`, and the sub-APIs are what actually gets used.
+# rustc, because cargo without a compiler builds nothing. `cargo fmt` and
+# `cargo clippy` are rustup *components*, not part of cargo — and `relic test`
+# runs both, so a toolchain missing them makes the whole verification gate
+# unenforceable. Same treatment as docker's compose/buildx: a missing sub-API is
+# a failure, not a warning. rustup itself is only a warning: another toolchain
+# still builds, it just loses the self-healing `up` relies on.
+check_cargo() {
+    local w="$1" ver
+    ver="$("$w" --version 2>/dev/null)"
+    if [ -z "$ver" ]; then
+        fail "cargo — '$w' failed to run (no default toolchain?)"
+        return
+    fi
+    ok "cargo ${ver#cargo } — $w"
+    command -v rustc >/dev/null 2>&1 \
+        || fail "cargo: 'rustc' not on PATH (cargo without a compiler builds nothing)"
+    "$w" fmt --version >/dev/null 2>&1 \
+        || fail "cargo: 'cargo fmt' unavailable (rustup component rustfmt; relic test needs it)"
+    "$w" clippy --version >/dev/null 2>&1 \
+        || fail "cargo: 'cargo clippy' unavailable (rustup component clippy; relic test needs it)"
+    command -v rustup >/dev/null 2>&1 \
+        || warn "cargo: 'rustup' not on PATH — the toolchain will not self-heal on \`up\`"
+}
+
 # git / curl: presence is the whole contract — no sub-API to verify.
 check_plain() { ok "$1 — $2"; }
 
@@ -188,6 +213,7 @@ check_member() {
         uv)      check_uv "$winner" ;;
         docker)  check_docker "$winner" ;;
         just)    check_just "$winner" ;;
+        cargo)   check_cargo "$winner" ;;
         *)       check_plain "$m" "$winner" ;;
     esac
     check_shadows "$m" "$winner" "$hits"

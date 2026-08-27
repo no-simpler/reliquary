@@ -17,9 +17,13 @@ used), **python3** (latest, *never* minor-pinned; brew owns the interpreter and 
 upgrade`; uv supplements it but doesn't own it; per-app floors live in relic manifests' `MIN_RUNTIME_VERSION`),
 **uv** (+`uvx`), **docker** (full API: CLI +`compose`+`buildx`; any impl), **git**, **curl**, **just**
 (latest, never pinned — the host-side task entrypoint into every repo, and the ignition for the
-docker-isolated ones).
+docker-isolated ones), **cargo** (latest, never pinned — rustup owns the toolchain the way brew owns
+python3; sub-APIs `rustc`, `cargo fmt`, `cargo clippy`, because `relic test` runs the latter two and
+the relic lane builds from source).
 
 - **Install:** base `brew/Brewfile`, members tagged `# bedrock` (macOS only for now; Linux is a TODO).
+  `cargo` is the one exception — rustup owns it, installed by `yadm/snippets/shared/11-rustup.sh`,
+  untagged. The install mechanism is per-member; the guarantee is uniform.
 - **Verify:** `bin/check-bedrock` (cross-platform, offline, side-effect-free; exit 0/1/2).
 - **Enforce:** wired into `yadm doctor` (so the dream pre-pass and `yadm update` cover it) and re-asserted
   at the end of bootstrap (`yadm/snippets/shared/98-bedrock.sh`).

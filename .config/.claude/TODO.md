@@ -22,6 +22,10 @@ Consider a small guard (parallel to `check-shell-parity`) asserting that every `
 line in `brew/Brewfile` has a matching member in `check-bedrock`'s `MEMBERS`, and vice-versa, so the
 install list and the contract can't silently diverge.
 
+**`cargo` is a deliberate exemption** — rustup owns it, so it is a member with no Brewfile tag. Any
+such guard needs an exemption list from the outset, not a special case bolted on later. Note this
+belongs in `assay` as a station rather than as a fourth `check-*` script; see docket spec 7d1m.
+
 ## Bedrock — revisit "uv owns python3" (only if needed)
 
 v1 has Homebrew own the system `python3` with uv supplementary (no shims). The rejected alternative —
