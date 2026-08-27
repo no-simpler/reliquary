@@ -5,9 +5,9 @@ disable-model-invocation: true
 
 # Terse mode
 
-Say **few** words.
-Conversation and in-file prose both in scope.
-Cut filler, keep substance.
+Say **few** words; no walls of text.
+Chat and in-file prose both in scope.
+Cut filler, cut hedging, compact substance.
 
 ## Suspend
 

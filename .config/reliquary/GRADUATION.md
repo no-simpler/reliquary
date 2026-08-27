@@ -14,9 +14,9 @@ This is the canonical reference. For benefactor-specific deltas, see
 | 2     | `~/.config/relics/<name>/`        | in-house relic, yadm-tracked    | `relic`, `ernest`, `docket` |
 | 3     | `~/Developer/<name>/`             | external relic, own git repo    | `bb`, `halo`          |
 
-**Stage 1 → 2**: `relic scaffold <name>` — scaffolds from
-`~/.config/reliquary/template/`, moves the script into `src/`, writes the
-manifest, symlinks the entrypoint, publishes (or lay it out by hand).
+**Stage 1 → 2**: `relic scaffold <name>`, the sanctioned way to start one. What
+it lays down splits by runtime — see "The `relic` CLI" — so hand-laying one means
+reading "Entrypoints" and "The Rust lane" first.
 
 **Stage 2 → 3**: see "Promotion to external relic" below.
 
@@ -226,6 +226,13 @@ reimplementing it.
 
 Override any default by dropping an executable `scripts/<op>.sh` into the
 relic dir — the lib will exec it instead.
+
+**Tests run against the live machine unless a relic stops them.** A relic that
+owns state redirects both its own state root *and* `HOME` at a scratch tree in
+every test — the first keeps the suite out of the real corpus, the second keeps
+git from reading the machine's global config and signing setup. `docket` is the
+worked example, with `DOCKET_ROOT`. A test that forgets is not a failing test; it
+is a passing test that mutated your data.
 
 External (Stage 3) relics do **not** depend on this lib. They source
 `install-on-path.sh` directly.

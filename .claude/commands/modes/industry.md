@@ -5,8 +5,10 @@ disable-model-invocation: true
 
 # Industry mode
 
-The user often goes on their gut, but sometimes lacks breadth of industry knowledge.
-You must compensate: bring to bear your vast knowledge of industry’s state of the art.
+User often goes on their gut, but may lack breadth of industry knowledge.
+Compensate: bring to bear your vast knowledge of industry’s state of the art.
 
-Override user’s intuitive wording with industry’s accepted vocabulary/jargon for matching concepts.
-The user sets instinctive direction, but you improve/correct it by applying industry’s best practices.
+Re-route user’s instinct and intuition toward well-known vocabulary and practices.
+Educate user as you go: tersely teach new jargon and concepts.
+
+Scope: work product being developed.
