@@ -355,6 +355,28 @@ _doctor_run() {
         fi
     fi
 
+    # 6c. Tracking coverage. yadm's whitelist plus the encrypt lane means a file
+    #     that nobody has decided about is indistinguishable from one nobody has
+    #     looked at. This reports the difference; the judgment stays human, but it
+    #     is made once and recorded in yadm/unmanaged rather than re-derived.
+    _doctor_head "tracking coverage"
+    local coverage="$HOME/.config/bin/check-yadm-coverage"
+    if [ -x "$coverage" ]; then
+        local cvout cvrc
+        cvout=$("$coverage" 2>&1); cvrc=$?
+        if [ "$cvrc" -eq 0 ]; then
+            _doctor_ok "every path accounted for"
+        elif [ "$cvrc" -eq 1 ]; then
+            _doctor_warn "undecided paths:"
+            printf '%s\n' "$cvout" | sed 's/^/      /'
+        else
+            _doctor_fail "a lane is wrong:"
+            printf '%s\n' "$cvout" | sed 's/^/      /'
+        fi
+    else
+        _doctor_warn "check-yadm-coverage not found — skipped"
+    fi
+
     # 7. Encrypted-archive drift (SHA compare; no Touch ID)
     _doctor_head "encrypted archive drift"
     local drift

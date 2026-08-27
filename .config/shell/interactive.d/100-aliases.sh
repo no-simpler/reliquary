@@ -134,7 +134,9 @@ alias df='df -kh'
 ##
 
 if [[ $D__SHELL == zsh ]]; then
-    alias rzc='rm -f ~/.zcompdump* && source ~/.zshrc'
+    # Both paths follow ZDOTDIR: compinit writes its dump beside .zshrc, and
+    # there is no ~/.zshrc to fall back on.
+    alias rzc='rm -f "${ZDOTDIR:-$HOME}"/.zcompdump* && source "${ZDOTDIR:-$HOME}/.zshrc"'
 fi
 
 ##

@@ -35,7 +35,9 @@ Patterns are listed in `~/.config/yadm/encrypt`.
 The password for `yadm encrypt`, `yadm decrypt`, and `yadm verify` is fetched from 1Password implicitly (Touch ID prompt).
 The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/yadm/last_decrypted` to detect encrypt/decrypt drift.
 
-**Convention:** Encryption patterns in `encrypt` are intentionally obfuscated — they should not reveal what they protect. When adding new patterns, use opaque names that don't hint at content. Do not describe or document the contents of encrypted files in any tracked file (including this one). Future sessions can read encrypted file contents locally after decryption.
+**Convention:** Encryption patterns in `encrypt` are intentionally obfuscated — they should not reveal what they protect. When adding new patterns, use opaque names that don't hint at content. Do not describe or document the contents of encrypted files in any tracked file (including this one). Future sessions can read encrypted file contents locally after decryption. The same convention governs `~/.config/yadm/unmanaged` (see "Deliberately not tracked" below): a path kept out of both lanes still gets a reason, and the reason must not name what the path is for.
+
+**The identity guard.** What may never reach the public plaintext tree is defined once, in `~/.config/yadm/hooks/identity-guard.sh` — encrypted, because the definition names what it protects. Two consumers read it: `hooks/pre_commit` refuses a commit whose tracked files trip it, and `bin/check-yadm-coverage` runs the same test backwards, treating a hit on an *untracked* file as positive evidence that it belongs in the encrypt lane. Never restate that definition anywhere else, and never inline it into a public file. It is unavailable before the first `yadm decrypt`; both consumers say so rather than silently passing.
 
 ## yadm operations
 
@@ -104,11 +106,15 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `bbs` - interactive Brewfile scope selector (applies `Brewfile@<scope>` files)
 - `gh` - shadows Homebrew's `gh` (same PATH trick as `yadm-wrapper`); exports `GH_CONFIG_DIR` to the benefactor profile when the *physical* cwd is under `~/Developer/benefactor/`, else leaves the personal default. See "Two GitHub identities" below
 - `pb` - lists personal bin executables, shows which are yadm-managed
+- `pm` - print message: typed, coloured terminal output (notice/info/success/warning/error), the interactive counterpart to the bootstrap's `util/00-print.sh`
+- `timeout` - GNU-style `timeout(1)` shim, so scripts can rely on it being present
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm, relics, relic build cache); writes timestamp to `~/.local/state/up/last_upped_at`
 - `check-shell-parity` - detects POSIX↔fish alias/abbr/function name drift across the paired `shell/interactive.d/*.sh` ↔ `fish/conf.d/*.fish` files; exits non-zero on drift (run by the dream procedure in `~/.config/.claude/DREAM.md`)
 - `check-brew-health` - detects Homebrew rot: installed formulae/casks deprecated or disabled upstream (warn), kegs orphaned by a formula's removal, and Brewfile entries that no longer resolve (fail). Tap-aware, offline, side-effect-free; exit 0/1/2 like `check-bedrock`. Wired into `yadm doctor` and, advisory-only, into `up`
+- `decruft` - removes inert OS metadata and interpreter caches from browsable git repos under `$HOME` and from the XDG data dir. In repos `git clean -Xdn` is the oracle, so per-repo unignores are respected and tracked files are never touched. Editor swap/backup files stay (live crash-recovery state); dependency and build trees stay (expensive to rebuild). `-n` dry-runs
 - `compose-gc` - reclaims Docker Compose state left behind by dead git worktrees of the current repo, sweeping by label (no compose file needed) across both worktree layouts; `down <path>` is the profile-complete teardown of one stack. `-n` dry-runs. Used by the `transplant-worktrees` skill as its single Docker surface
 - `check-md-shell-blocks` - validates the auto-executed ```! blocks in Claude Code skills/slash commands: they are statically analysed with no prompt path, so an inline program is always denied and takes the whole invocation with it. Checks Claude Code's brace-with-quote prefilter, demands a single simple command, and verifies `allowed-tools`/settings.json coverage. Read-only, exit 0/1/2; wired into `yadm doctor`
+- `check-yadm-coverage` - reports paths nobody has decided about: every path under `~/.config`, `~/.claude`, `~/.ssh`, `~/.github`, `~/.local/bin` and `$HOME`'s own dotfiles must be plaintext-tracked, matched by an encrypt pattern, inside a pruned runtime dir, or declared in `yadm/unmanaged`. Also catches both-lanes-at-once, missing managed paths, dead encrypt patterns, loose credential shapes, and unreachable-object bloat in the yadm object DB. Derives archive membership by expanding `yadm/encrypt`, never by decrypting — offline, side-effect-free, Touch-ID-free; exit 0/1/2. Wired into `yadm doctor`
 - `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt; tries `ske read` first, falls back to `op read` (never hard-depend — it decrypts the attic `ske` lives in)
 - `ske-prompt` - prints the open `ske` Touch ID window for the oh-my-posh right prompt; silent when closed (`sh`, not bash: `$BASH_ENV` would cost ~230ms per render)
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below); also reachable as `yadm` via the `~/.config/bin/yadm` symlink (shadows brew's yadm — see "Path availability")
@@ -145,6 +151,8 @@ Personal CLI utils have a three-stage lifecycle. A **relic** is a personal tool 
 The build cache is held down by `[profile.dev] debug = "line-tables-only"` and by `up`'s **Cargo build cache** step (`cargo sweep --installed`, then `--time 30`, above a 2 GiB ceiling, skipped silently below it or when `cargo-sweep` is absent). `yadm doctor` reports the size.
 
 The `relic` CLI (`relic list|status|publish|test|update|scaffold|registry|migrate|doctor`) is the user-facing surface over all of this — see `GRADUATION.md`. `scaffold <name>` is how a relic starts — never hand-lay one without reading that reference first. It promotes a Stage-1 `~/.config/bin` util (or a fresh idea) into a Stage-2 relic — RUNTIME from `-r/--runtime`, else a promoted script's shebang, else `rust`; a non-Rust choice needs `-e/--exempt "<why>"`. A Rust scaffold writes a member `Cargo.toml` and appends to `members`; an interpreted one publishes and stages the result in yadm. `registry` takes `--migrate`/`--prune`; `doctor` is a read-only registry ↔ PATH ↔ entrypoints health check that also carries the runtime-stance worklist.
+
+**The roster is `relic list`, not a list in this file.** Each relic's doctrine lives in its own `CLAUDE.md`, and the sections below exist only for the relics whose *system-wide* integration needs explaining — a hook, a command surface, a Touch ID vector. A relic that is simply a tool on `$PATH` (`ernest`, which measures prose density and backs `/modes:deprose`) gets no section here, because a hand-maintained roster in the root file is a roster that silently goes stale.
 
 `~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`, `AGENTIC-TOOLING.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton), and deferred-work handoffs (`design/`: `relic graduate`).
 
@@ -308,7 +316,7 @@ Reachable as `yadm` in **every** shell — `~/.config/bin/yadm` is a symlink to 
 - `yadm check` - compares archive SHA256 to detect drift
 - `yadm verify` - decrypts archive to tmpdir and diffs against disk
 - `yadm ls-all` - complete tracked set: `yadm ls-files` (plaintext) + archive listing (`decrypt -l`, Touch ID)
-- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, Claude Code `!` blocks, bedrock, Homebrew package health, relic build-cache size, archive drift, ske wiring); detect-only, Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
+- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, Claude Code `!` blocks, bedrock, Homebrew package health, relic build-cache size, tracking coverage, archive drift, ske wiring); detect-only, Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
 - `yadm update` - `pull --ff-only`, then `doctor --quiet` (silent when healthy; surfaces drift/regressions the pull introduced — the quiet doctor already covers the encrypted-archive check)
 - All other commands pass through to real yadm, followed by an encrypted-files check
 
@@ -381,11 +389,14 @@ a single file rather than globbing the directory.
 - `quartz-filters` - macOS PDF compression filters
 - `tmux` - tmux configuration
 - `zsh/completion/docker` - docker completions for zsh
+- `zed` - editor settings and keymap
 - `~/.claude/skills/transplant-worktrees/` - folds Claude Code worktree branches onto main (rebase + ff-merge), then reclaims their Docker state via `compose-gc`. Domain-free, so it travels; the benefactor-flavoured skills alongside it stay untracked
 
 ### Deliberately not tracked (audited)
 
-These were reviewed and **intentionally excluded** — neither plaintext-tracked nor encrypted. All are regenerated by their tool's normal auth/setup flow on a new machine, so the sync value is low and the leak/footgun risk is not worth it:
+**`~/.config/yadm/unmanaged` is the authoritative list** — one line per path or glob, with the reason. `bin/check-yadm-coverage` reads it, so a decision recorded there is a decision that stops resurfacing; anything under a scanned root that is in neither lane and not declared is reported as undecided. Add to that file first; this section carries only the entries whose reasoning needs more than a line.
+
+The shape of the judgment: these were reviewed and **intentionally excluded** — neither plaintext-tracked nor encrypted. All are regenerated by their tool's normal auth/setup flow on a new machine, so the sync value is low and the leak/footgun risk is not worth it:
 
 - `~/.config/raycast/config.json` - holds a live `rca_…` access token; regenerable, machine-local.
 - `~/.kube/config` - embeds a live orbstack `client-key-data` and benefactor GKE cluster names; GKE contexts re-fetch via `gcloud container clusters get-credentials`, orbstack regenerates its own.

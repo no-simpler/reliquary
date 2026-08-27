@@ -313,10 +313,14 @@ update_gcloud() {
 
 # --- tmux plugin manager ---------------------------------------------------
 update_tpm() {
-    local tpm_path="$HOME/.tmux/plugins/tpm"
+    local tpm_path="$HOME/.config/tmux/plugins/tpm"
     [ -d "$tpm_path" ] || { echo "TPM is not installed. Skipping."; return 3; }
     # --ff-only so a diverged local checkout can't hang on an interactive merge.
-    net_timeout 300 git -C "$tpm_path" pull --ff-only
+    net_timeout 300 git -C "$tpm_path" pull --ff-only || return $?
+    # Then the plugins themselves. Pulling only their manager left every plugin
+    # frozen at whatever commit it was first installed at, updated by hand or
+    # not at all — the zinit/fisher/vim-plug steps all update the leaves.
+    net_timeout 600 "$tpm_path/bin/update_plugins" all
 }
 
 # --- In-house relics (~/.config/relics + ~/.config/attic) ------------------

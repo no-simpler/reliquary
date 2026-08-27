@@ -1,0 +1,432 @@
+#!/usr/bin/env bash
+#
+# check-yadm-coverage — reports paths nobody has decided about.
+#
+# yadm is whitelist-based, and Reliquary runs a second, invisible lane on top of
+# it: the GPG archive. So a file that is neither tracked, nor matched by an
+# encrypt pattern, nor deliberately excluded looks exactly like a file nobody
+# has ever looked at — because usually that is what it is.
+#
+# "Should this be tracked?" is a judgment call and always will be. "Has this
+# been decided?" is not: every path under a scanned root must be exactly one of
+#
+#   • plaintext-tracked        (yadm ls-files)
+#   • matched by an encrypt pattern   (yadm/encrypt, expanded — never decrypted)
+#   • inside a pruned runtime directory   (the built-in list below)
+#   • declared in yadm/unmanaged, with a reason
+#
+# Anything else is an undecided path, and this reports it once. The judgment
+# happens at first sighting and is then recorded, rather than re-derived every
+# time someone notices the file again.
+#
+# What it checks:
+#   R1  a path in BOTH lanes (plaintext-tracked and encrypt-matched)
+#   R2  a managed path that is not on disk
+#   R3  an encrypt pattern that matches nothing
+#   R4  an undecided file that trips the identity guard
+#   R5  an undecided file beside managed siblings
+#   R6  a credential shape in a plaintext-tracked file
+#   R7  a credential shape in an undecided file
+#   R8  unreachable objects dominating the yadm object database
+#
+# R4 is hooks/pre_commit run backwards. That hook proves a file *cannot* be
+# plaintext-tracked; here the same test is positive evidence of which lane an
+# untracked file belongs in. Both read one definition — hooks/identity-guard.sh
+# — which is encrypted, so this public script never names what it looks for. If
+# the archive has not been decrypted yet, R4 is skipped and says so.
+#
+# Archive membership is derived by EXPANDING the patterns in yadm/encrypt, never
+# by `yadm decrypt -l`. That keeps this offline, side-effect-free and free of
+# Touch ID, so it is safe in the unattended `yadm doctor` dream pre-pass.
+# Archive-vs-disk drift is a different question, and stays `yadm check` /
+# `yadm verify`'s job.
+#
+# Exit: 0 = every path is accounted for; 1 = accounted for with warnings
+#       (something undecided, nothing dangerous); 2 = a lane is wrong (both
+#       lanes at once, a managed path gone, private content or a credential
+#       loose). The 0/1/2 split matches check-bedrock and check-brew-health so
+#       `yadm doctor` can map results onto its own ok/warn/fail counters.
+
+set -o pipefail
+
+# --- Colors (house style, see bin/check-bedrock) ---------------------------
+BOLD="\033[1m"; RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; DIM="\033[2m"; RESET="\033[0m"
+
+FAILS=0
+WARNS=0
+VERBOSE=0
+
+ok()   { printf '%b\n' "  ${GREEN}✓${RESET} $1"; }
+warn() { printf '%b\n' "  ${YELLOW}!${RESET} $1"; WARNS=$((WARNS + 1)); }
+fail() { printf '%b\n' "  ${RED}✗${RESET} $1"; FAILS=$((FAILS + 1)); }
+note() { printf '%b\n' "      ${DIM}$1${RESET}"; }
+head() { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}$1${RESET}"; }
+
+# Route a LEVEL<TAB>message line (the analysis helper's output format).
+route() {
+    local level="${1%%	*}" msg="${1#*	}"
+    case "$level" in
+        OK)   ok   "$msg" ;;
+        WARN) warn "$msg" ;;
+        FAIL) fail "$msg" ;;
+        NOTE) note "$msg" ;;
+        *)    note "$1" ;;
+    esac
+}
+
+# --- Args ------------------------------------------------------------------
+for a in "$@"; do
+    case "$a" in
+        -v|--verbose) VERBOSE=1 ;;
+        -h|--help)
+            echo "usage: check-yadm-coverage [-v|--verbose]"
+            echo "  -v  list every undecided path instead of a capped sample"
+            exit 0 ;;
+        *) printf 'check-yadm-coverage: unknown argument: %s\n' "$a" >&2; exit 2 ;;
+    esac
+done
+
+[ -t 1 ] && head "yadm tracking coverage"
+
+# --- The real yadm ---------------------------------------------------------
+# Same PATH scan bin/yadm-wrapper uses on itself: ~/.config/bin/yadm is a
+# symlink to the wrapper and sits ahead of Homebrew, so a plain `yadm` here
+# would run the wrapper's post-command archive check and print its banner into
+# the middle of this report. Read straight from the real binary instead.
+YADM_BIN=""
+_self_dir="$HOME/.config/bin"
+_oldifs=$IFS
+IFS=:
+for _d in $PATH; do
+    if [ "$_d" != "$_self_dir" ] && [ -x "$_d/yadm" ]; then
+        YADM_BIN="$_d/yadm"
+        break
+    fi
+done
+IFS=$_oldifs
+unset _self_dir _oldifs _d
+
+if [ -z "$YADM_BIN" ]; then
+    fail "yadm not found on PATH (outside ~/.config/bin) — cannot read the tracked set"
+    exit 2
+fi
+
+cd "$HOME" || { fail "cannot cd to \$HOME"; exit 2; }
+
+TRACKED="$("$YADM_BIN" ls-files 2>/dev/null)"
+if [ -z "$TRACKED" ]; then
+    fail "yadm reports no tracked files — is the repository present?"
+    exit 2
+fi
+
+# --- Identity guard (encrypted; absent before the first decrypt) -----------
+GUARD_FILE="$HOME/.config/yadm/hooks/identity-guard.sh"
+IDENTITY_PATTERN=""
+if [ -r "$GUARD_FILE" ]; then
+    # shellcheck source=/dev/null
+    . "$GUARD_FILE"
+fi
+
+# --- Object database shape (for R8) ----------------------------------------
+OBJ_INPACK="$("$YADM_BIN" count-objects -v 2>/dev/null | awk '/^in-pack:/ {print $2}')"
+OBJ_PACKKIB="$("$YADM_BIN" count-objects -v 2>/dev/null | awk '/^size-pack:/ {print $2}')"
+OBJ_REACHABLE="$("$YADM_BIN" rev-list --objects --all 2>/dev/null | wc -l | tr -d ' ')"
+
+# --- Analysis --------------------------------------------------------------
+analysis="$(
+    YADM_TRACKED="$TRACKED" \
+    YADM_IDENTITY_PATTERN="$IDENTITY_PATTERN" \
+    YADM_VERBOSE="$VERBOSE" \
+    YADM_OBJ_INPACK="${OBJ_INPACK:-0}" \
+    YADM_OBJ_PACKKIB="${OBJ_PACKKIB:-0}" \
+    YADM_OBJ_REACHABLE="${OBJ_REACHABLE:-0}" \
+    python3 - <<'PY'
+import fnmatch
+import glob
+import os
+import re
+import sys
+
+HOME = os.path.expanduser("~")
+VERBOSE = os.environ.get("YADM_VERBOSE") == "1"
+SAMPLE = 12          # undecided paths listed before the report is capped
+MAX_SCAN_BYTES = 262144   # content rules skip anything larger; configs are small
+
+out = []
+def emit(level, msg): out.append(f"{level}\t{msg}")
+
+
+def rel(path):
+    """A $HOME-relative path, which is the only form any lane speaks."""
+    return os.path.relpath(path, HOME)
+
+
+# --- Lane 1: plaintext ------------------------------------------------------
+tracked = {line for line in os.environ["YADM_TRACKED"].splitlines() if line}
+
+# --- Lane 2: the encrypt patterns, expanded --------------------------------
+# yadm globs these with bash globstar, so `**` crosses directories and `*` does
+# not. Python's recursive glob has the same semantics. A leading `!` EXCLUDES
+# (the opposite of .gitignore) and is order-independent.
+encrypt_file = os.path.join(HOME, ".config/yadm/encrypt")
+includes, excludes = [], []
+try:
+    with open(encrypt_file, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            (excludes if line.startswith("!") else includes).append(line.lstrip("!"))
+except OSError:
+    emit("FAIL", f"cannot read {rel(encrypt_file)} — the encrypt lane is undefined")
+    print("\n".join(out))
+    sys.exit(0)
+
+
+def excluded(relpath):
+    """True if relpath, or any directory above it, matches an exclusion."""
+    parts = relpath.split(os.sep)
+    candidates = [os.sep.join(parts[: i + 1]) for i in range(len(parts))]
+    return any(
+        fnmatch.fnmatch(c, pat) or fnmatch.fnmatch(os.path.basename(c), os.path.basename(pat))
+        for pat in excludes
+        for c in candidates
+    )
+
+
+archived = set()
+dead_patterns = []
+for pat in includes:
+    hits = glob.glob(os.path.join(HOME, pat), recursive=True)
+    files = []
+    for hit in hits:
+        if os.path.isdir(hit):
+            for root, dirs, names in os.walk(hit):
+                dirs[:] = [d for d in dirs if not excluded(rel(os.path.join(root, d)))]
+                files.extend(os.path.join(root, n) for n in names)
+        else:
+            files.append(hit)
+    kept = {rel(f) for f in files if not excluded(rel(f))}
+    if not kept:
+        dead_patterns.append(pat)
+    archived |= kept
+
+managed = tracked | archived
+
+# --- Lane 3: pruned runtime directories ------------------------------------
+# Regenerable state with no configuration value. Built in rather than declared,
+# because these are tool-owned churn, not decisions anyone makes.
+PRUNE_DIRS = {
+    ".claude/projects", ".claude/file-history", ".claude/tasks", ".claude/plans",
+    ".claude/docket", ".claude/midden", ".claude/jobs", ".claude/backups",
+    ".claude/sessions", ".claude/paste-cache", ".claude/telemetry",
+    ".claude/shell-snapshots", ".claude/daemon", ".claude/cache", ".claude/debug",
+    ".claude/chrome", ".claude/plugins", ".claude/downloads", ".claude/session-env",
+    ".config/gcloud", ".config/raycast", ".config/intelephense/workspace",
+    ".config/vim/autoload", ".config/vim/plugged", ".config/tmux/plugins",
+    ".config/zed/embeddings", ".config/zed/prompts",
+}
+# Directory NAMES pruned at any depth. The first five are the exclusion block in
+# yadm/encrypt; the rest are build and dependency trees, which are never config.
+PRUNE_NAMES = {
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".DS_Store",
+    "node_modules", "target", ".git", ".venv", "venv", ".tox", "dist", "build",
+}
+
+# --- Lane 4: declared exclusions -------------------------------------------
+declared = []
+unmanaged_file = os.path.join(HOME, ".config/yadm/unmanaged")
+try:
+    with open(unmanaged_file, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.split("#", 1)[0].strip() if line.lstrip().startswith("#") else line.rstrip("\n")
+            if not line.strip():
+                continue
+            declared.append(line.split("\t", 1)[0].strip())
+except OSError:
+    emit("WARN", f"{rel(unmanaged_file)} not found — every undecided path will be reported")
+
+
+def is_declared(relpath):
+    return any(fnmatch.fnmatch(relpath, pat) for pat in declared)
+
+
+# --- Roots ------------------------------------------------------------------
+ROOTS = [".config", ".claude", ".ssh", ".github", ".local/bin"]
+
+def scan():
+    """Every file under the roots, plus $HOME's own dotfiles, minus prunes."""
+    seen = []
+    for entry in os.scandir(HOME):
+        if (entry.is_file(follow_symlinks=False)
+                and entry.name.startswith(".")
+                and entry.name not in PRUNE_NAMES):
+            seen.append(entry.name)
+    for root in ROOTS:
+        base = os.path.join(HOME, root)
+        if not os.path.isdir(base):
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in PRUNE_NAMES
+                and rel(os.path.join(dirpath, d)) not in PRUNE_DIRS
+            ]
+            for name in filenames:
+                if name in PRUNE_NAMES:
+                    continue
+                seen.append(rel(os.path.join(dirpath, name)))
+    return seen
+
+
+on_disk = scan()
+undecided = [p for p in on_disk if p not in managed and not is_declared(p)]
+
+# Directories holding at least one managed file. An undecided file beside a
+# managed sibling is a decision someone started making and did not finish; an
+# undecided file in a directory nobody has ever tracked from is just a tool's
+# private state, and is not this check's business.
+managed_dirs = {os.path.dirname(p) for p in managed}
+
+
+# --- Content rules ----------------------------------------------------------
+CREDENTIAL = re.compile(
+    r"sk-[A-Za-z0-9]{20,}"
+    r"|xox[abcdps]-[A-Za-z0-9-]{10,}"
+    r"|gh[pousr]_[A-Za-z0-9]{20,}"
+    r"|glpat-[A-Za-z0-9_-]{15,}"
+    r"|sntryu_[A-Za-z0-9]{20,}"
+    r"|AKIA[0-9A-Z]{16}"
+    r"|AIza[0-9A-Za-z_-]{30,}"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY"
+)
+identity_src = os.environ.get("YADM_IDENTITY_PATTERN", "")
+IDENTITY = re.compile(identity_src, re.IGNORECASE) if identity_src else None
+
+
+def text_of(relpath):
+    """File contents, or None when unreadable, oversized or binary."""
+    path = os.path.join(HOME, relpath)
+    try:
+        if os.path.getsize(path) > MAX_SCAN_BYTES:
+            return None
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return None
+    if b"\0" in raw:
+        return None
+    return raw.decode("utf-8", "replace")
+
+
+def report(rule, level, headline, paths, hint=None):
+    if not paths:
+        return
+    emit(level, f"{headline} ({len(paths)})")
+    shown = sorted(paths) if VERBOSE else sorted(paths)[:SAMPLE]
+    for p in shown:
+        emit("NOTE", p)
+    if len(paths) > len(shown):
+        emit("NOTE", f"… and {len(paths) - len(shown)} more — rerun with -v")
+    if hint:
+        emit("NOTE", hint)
+
+
+# R1 — both lanes at once. yadm would encrypt a file it also tracks in the
+# clear, so the plaintext copy silently becomes the authoritative one.
+report("R1", "FAIL", "tracked in BOTH lanes", sorted(tracked & archived),
+       "remove from yadm/encrypt, or `yadm rm --cached` the plaintext copy")
+
+# R2 — a managed path that is gone. Plaintext would show as a deletion in
+# `yadm status`; an encrypt-matched one shows up nowhere at all until the next
+# `yadm encrypt` quietly drops it from the archive.
+report("R2", "FAIL", "managed but missing from disk",
+       [p for p in sorted(managed) if not os.path.lexists(os.path.join(HOME, p))],
+       "restore the file, or retire its tracking / encrypt pattern")
+
+# R3 — a pattern matching nothing: either the file moved, or the pattern was
+# written for a machine this one is not.
+report("R3", "WARN", "encrypt patterns matching nothing", dead_patterns,
+       "harmless here, but it protects nothing — retire it or fix the path")
+
+# R4 — private content sitting outside both lanes.
+if IDENTITY is None:
+    emit("NOTE", "identity guard unavailable (archive not decrypted) — R4 skipped")
+else:
+    private = []
+    for p in undecided:
+        body = text_of(p)
+        if body and IDENTITY.search(body):
+            private.append(p)
+    report("R4", "FAIL", "undecided files carrying identifying content", private,
+           "these can never be plaintext-tracked: archive them, or declare them in yadm/unmanaged")
+
+# R5 — undecided beside managed siblings.
+orphans = [
+    p for p in undecided
+    if os.path.dirname(p) in managed_dirs
+    and not (IDENTITY and (text_of(p) or "") and IDENTITY.search(text_of(p) or ""))
+]
+report("R5", "WARN", "undecided files beside managed siblings", orphans,
+       "track them, archive them, or declare them in yadm/unmanaged with a reason")
+
+# R6 / R7 — credential shapes. Scanned everywhere under the roots, not just
+# beside managed files: a loose token matters regardless of its neighbours.
+cred_tracked, cred_loose = [], []
+for p in on_disk:
+    if is_declared(p) and p not in tracked:
+        continue
+    body = text_of(p)
+    if not body or not CREDENTIAL.search(body):
+        continue
+    (cred_tracked if p in tracked else cred_loose).append(p)
+
+report("R6", "FAIL", "credential shapes in PLAINTEXT-TRACKED files", cred_tracked,
+       "rotate the credential, then move the file into the encrypt lane")
+report("R7", "WARN", "credential shapes in undeclared files", cred_loose,
+       "fine to keep out of the repo — declare them in yadm/unmanaged so the decision is recorded")
+
+# R8 — object database bloat. yadm's whitelist means a `yadm add` on a build
+# tree stages thousands of files with nothing to stop it; resetting the stage
+# leaves every object behind, packed and unreachable, forever.
+inpack = int(os.environ.get("YADM_OBJ_INPACK") or 0)
+reachable = int(os.environ.get("YADM_OBJ_REACHABLE") or 0)
+packkib = int(os.environ.get("YADM_OBJ_PACKKIB") or 0)
+if inpack and reachable and packkib > 51200:
+    unreachable = inpack - reachable
+    if unreachable > 1000 and unreachable > inpack * 0.2:
+        pct = 100 * unreachable / inpack
+        emit("WARN", f"object database is {packkib // 1024} MiB, {pct:.0f}% unreachable "
+                     f"({unreachable} of {inpack} objects)")
+        emit("NOTE", "yadm reflog expire --expire-unreachable=now --all && yadm gc --prune=now")
+
+# --- Clean bill -------------------------------------------------------------
+if not out:
+    emit("OK", f"every path accounted for ({len(tracked)} tracked, "
+               f"{len(archived)} encrypted, {len(declared)} declared)")
+
+print("\n".join(out))
+PY
+)"
+
+while IFS= read -r line; do
+    [ -n "$line" ] && route "$line"
+done <<< "$analysis"
+
+# --- Summary ---------------------------------------------------------------
+# Cosmetic only, and suppressed when the output is captured (e.g. `yadm doctor`
+# via $(...)), which adds its own heading. Exit codes always apply.
+if [ -t 1 ]; then
+    echo
+    if [ "$FAILS" -gt 0 ]; then
+        printf '%b\n' "${BOLD}${RED}!!>${RESET} ${RED}coverage BROKEN — $FAILS failure(s), $WARNS warning(s)${RESET}"
+    elif [ "$WARNS" -gt 0 ]; then
+        printf '%b\n' "${BOLD}${YELLOW}==>${RESET} ${YELLOW}coverage ok with $WARNS warning(s)${RESET}"
+    else
+        printf '%b\n' "${BOLD}==>${RESET} ${BOLD}${GREEN}coverage ok — every path accounted for${RESET}"
+    fi
+fi
+
+[ "$FAILS" -gt 0 ] && exit 2
+[ "$WARNS" -gt 0 ] && exit 1
+exit 0

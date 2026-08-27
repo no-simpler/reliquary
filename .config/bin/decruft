@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
 # decruft — remove inert OS/filesystem metadata cruft (.DS_Store, ._*,
-# Thumbs.db, .Spotlight-V100, …) from browsable git repos under $HOME and from
-# the XDG data dir. Editor swap/backup/lock files (*~ *.swp \#*\# .#*) are
-# intentionally NOT deleted — they stay gitignored (commit-safe) but may be live
-# crash-recovery state; their lifecycle belongs to the editor.
+# Thumbs.db, .Spotlight-V100, …) and interpreter caches (__pycache__,
+# .pytest_cache, .mypy_cache, .ruff_cache) from browsable git repos under $HOME
+# and from the XDG data dir. Editor swap/backup/lock files (*~ *.swp \#*\# .#*)
+# are intentionally NOT deleted — they stay gitignored (commit-safe) but may be
+# live crash-recovery state; their lifecycle belongs to the editor.
 #
 # Two lanes, two policies:
 #
@@ -48,13 +49,17 @@ PRUNE_NAMES=(node_modules target target-native vendor Pods \
              .gradle .m2 .cargo .rustup .npm .cache .pnpm-store \
              __pycache__ .pytest_cache .mypy_cache .ruff_cache)
 
-# True if a basename is inert OS/filesystem metadata cruft — always safe to
-# delete. The central excludes (~/.config/git/ignore) ALSO ignore editor
-# swap/backup/lock files (*~ *.swp \#*\# .#*), but decruft deliberately does NOT
-# delete those: ignoring keeps them out of commits, but a live vim swap or emacs
-# lock/autosave is active crash-recovery state, and `up` may run while an editor
-# is open elsewhere. So decruft removes only inert OS metadata; editor files are
-# left to the editor.
+# True if a basename is inert cruft — always safe to delete because the tool
+# that wrote it rebuilds it on demand. Two families qualify: OS/filesystem
+# metadata, and interpreter caches (the same set ~/.config/yadm/encrypt excludes
+# from the archive, for the same reason).
+#
+# The central excludes (~/.config/git/ignore) ALSO ignore editor swap/backup/lock
+# files (*~ *.swp \#*\# .#*), but decruft deliberately does NOT delete those:
+# ignoring keeps them out of commits, but a live vim swap or emacs lock/autosave
+# is active crash-recovery state, and `up` may run while an editor is open
+# elsewhere. Dependency and build trees (node_modules, target, .venv) are inert
+# too, but they are expensive to rebuild — cost, not safety, keeps them out.
 is_cruft() {
     case "$1" in
         ._zinit) return 1 ;;          # zinit metadata, not an AppleDouble fork
@@ -62,7 +67,8 @@ is_cruft() {
         |.Spotlight-V100|.Trashes|.fseventsd|.DocumentRevisions-V100 \
         |.TemporaryItems|.VolumeIcon.icns|.com.apple.timemachine.donotpresent \
         |Thumbs.db|Thumbs.db:encryptable|ehthumbs.db|Desktop.ini \
-        |.directory) return 0 ;;
+        |.directory \
+        |__pycache__|.pytest_cache|.mypy_cache|.ruff_cache) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -142,7 +148,9 @@ if [ -d "$XDG_DATA" ]; then
                      -o -name '.fseventsd' -o -name '.DocumentRevisions-V100' \
                      -o -name '.TemporaryItems' -o -name '.VolumeIcon.icns' \
                      -o -name 'Thumbs.db' -o -name 'ehthumbs.db' -o -name 'Desktop.ini' \
-                     -o -name '.directory' \) \
+                     -o -name '.directory' \
+                     -o -name '__pycache__' -o -name '.pytest_cache' \
+                     -o -name '.mypy_cache' -o -name '.ruff_cache' \) \
                   -print 2>/dev/null)
 fi
 

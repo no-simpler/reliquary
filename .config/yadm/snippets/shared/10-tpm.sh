@@ -1,7 +1,9 @@
 #!/bin/bash
 
 # Externalize the path to a variable
-TPM_PATH="$HOME/.tmux/plugins/tpm"
+# Beside the plugins TPM installs, which it locates from tmux.conf's own
+# directory — not the pre-XDG ~/.tmux/plugins/.
+TPM_PATH="$HOME/.config/tmux/plugins/tpm"
 
 # Clone TPM repository into the target directory if it doesn't exist
 if [ ! -d "$TPM_PATH" ]; then
