@@ -16,6 +16,8 @@
 #   2. Installed kegs orphaned by a formula's removal (tap-aware, so formulae
 #      from third-party taps are not mistaken for orphans).
 #   3. Brewfile entries that no longer resolve to any formula or cask.
+#   4. Packages installed on request that are declared in no Brewfile — the
+#      inverse drift, and the one that only shows up on a restore.
 #
 # Verification only — it never installs, uninstalls, taps or upgrades anything.
 # It reads install receipts and Homebrew's local API cache, so it is offline on
@@ -326,6 +328,64 @@ else
     check_declared cask    "$(declared cask)"
     [ "$((FAILS + WARNS))" -eq "$before" ] \
         && ok "every Brewfile entry still resolves ($(echo $brewfiles | wc -w | tr -d ' ') file(s) read)"
+fi
+
+# --- Check 5: everything installed on request is declared somewhere ---------
+# The inverse of check 4, and the failure it prevents is quieter: a package
+# installed by hand, relied on by a repository, and named in no Brewfile survives
+# only as long as this disk does. Nothing announces it — the tool is on $PATH, so
+# every check passes right up until the restore that does not install it.
+#
+# `--installed-on-request` is the whole trick: it excludes packages pulled in as
+# dependencies, which are reproduced by declaring their dependents and must not be
+# declared themselves. Casks have no dependency lane, so all of them count.
+#
+# A warning, never a failure, for two reasons. A scope that is not decrypted on
+# this machine is not read, so an undeclared verdict can be incomplete — the same
+# caveat check 4 carries. And a machine is allowed to hold a package on purpose;
+# `brew/undeclared` is where that decision is recorded so it stops resurfacing,
+# exactly as `yadm/unmanaged` records a path nobody manages.
+UNDECLARED_FILE="$BREW_DIR/undeclared"
+
+# Names in a newline-separated list, tap prefixes dropped so `user/tap/name` and
+# `name` compare equal — a Brewfile may spell either.
+bare_names() { sed -E 's|.*/||' | sed -E 's/[[:space:]]+$//' | sort -u; }
+
+if [ -z "$brewfiles" ]; then
+    : # already reported above
+else
+    declared_all="$( { declared brew; declared cask; } | bare_names )"
+    excused=""
+    if [ -r "$UNDECLARED_FILE" ]; then
+        excused="$(sed -E 's/#.*//' "$UNDECLARED_FILE" | awk 'NF {print $1}' | bare_names)"
+    fi
+
+    installed_wanted="$( { brew leaves --installed-on-request 2>/dev/null
+                           brew list --cask 2>/dev/null; } | bare_names )"
+
+    # The subtraction happens in awk, with both lists reaching it through the
+    # environment rather than through -v: -v rescans its value for escapes, and an
+    # awk array index is a byte string whatever the locale, where `==` is not.
+    undeclared="$(SKIP="$declared_all
+$excused" awk '
+        BEGIN {
+            n = split(ENVIRON["SKIP"], a, "\n")
+            for (i = 1; i <= n; i++) if (a[i] != "") skip[a[i]] = 1
+        }
+        NF && !($0 in skip) { print }
+    ' <<EOF
+$installed_wanted
+EOF
+)"
+
+    if [ -z "$undeclared" ]; then
+        ok "every package installed on request is declared in a Brewfile"
+    else
+        for n in $undeclared; do
+            warn "$n is installed on request but declared in no Brewfile — it will not survive a restore"
+        done
+        note "declare it, uninstall it, or record the decision in ${UNDECLARED_FILE#$HOME/}"
+    fi
 fi
 
 # --- Summary ---------------------------------------------------------------

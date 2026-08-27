@@ -35,6 +35,16 @@ They are one crate because `project_key` is the composition of both, and it is t
 thing this crate exists for: `docket` and `midden` each assembled the halves
 themselves and drifted apart. Anything that can be assembled differently will be.
 
+`fs` — replacing a file's contents without ever exposing a partial one. Admitted on
+the same evidence: both stores had written the identical tmp-then-rename by hand,
+and both named the temporary with `with_extension("tmp")`, which *replaces* the
+extension — so `a.md` and `a.json` shared one temporary, and two writers to one path
+truncated each other. Centralising it was also the moment to make it correct:
+a unique dot-prefixed temporary beside the destination, the parent directory synced
+after the rename (without which the entry is not durable, which is the whole point),
+and a drop guard so no error path leaves litter. It returns `io::Result` — the
+no-dependency rule reaches the error type too, and callers add their own context.
+
 ## Adding a caller
 
 Depend by path (`relic-core = { path = "../crates/relic-core" }`) and delete the

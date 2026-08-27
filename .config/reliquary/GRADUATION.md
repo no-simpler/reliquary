@@ -178,9 +178,25 @@ ambient `GIT_*` environment, so a relic run from a git hook does not answer for
 the hook's repository) and one meaning for a path (`project_key`, so two relics
 asked about one directory agree).
 
+`fs::write_atomic` is the second admission, on the same evidence: `docket` and
+`midden` had the identical tmp-then-rename written out by hand in both stores.
+Centralising a duplicate is also the moment to make it right — the shared version
+fixed the collision both copies had (`with_extension("tmp")` *replaces* the
+extension, so `a.md` and `a.json` shared one temporary), synced the parent
+directory after the rename, and stopped leaking a temporary on the error path.
+
 **Admission is by demand, not anticipation** — code moves to `crates/` when a
 *second* relic needs it, and not before. A shared crate that collects what might
 one day be shared is a god crate, and every relic pays for it.
+
+The bar is per-language, and it does **not** reach across into the bash relics.
+`relic` and `nexus` each carry their own copy of four output helpers and eight
+lines of colour setup, and that stays duplicated on purpose: the population is two
+files and shrinks to zero as each is rewritten, so a `lib/output.sh` would be
+built for a lane that is being emptied. It would also cost `nexus` the property
+its header claims — one self-contained copied file in `~/.local/bin` — by handing
+it a runtime file dependency for four `printf`s. Revisit only if a bash relic is
+ever written that is *not* on the rewrite list.
 
 ### Build cache
 

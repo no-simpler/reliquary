@@ -1,5 +1,4 @@
 use std::fs::{self, File};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -316,16 +315,11 @@ fn filenames(dir: &Path) -> Vec<(Id, PathBuf)> {
     found
 }
 
+/// Atomic replacement lives in `relic-core`: both stores wrote this by hand, and
+/// both copies replaced the destination's extension to name their temporary.
 fn write_atomic(path: &Path, contents: &str) -> Result<()> {
-    let temp = path.with_extension("tmp");
-    {
-        let mut file =
-            File::create(&temp).with_context(|| format!("writing {}", temp.display()))?;
-        file.write_all(contents.as_bytes())?;
-        file.sync_all()?;
-    }
-    fs::rename(&temp, path).with_context(|| format!("replacing {}", path.display()))?;
-    Ok(())
+    relic_core::fs::write_atomic(path, contents)
+        .with_context(|| format!("replacing {}", path.display()))
 }
 
 /// Splits a document into its metadata and its body. The body is returned

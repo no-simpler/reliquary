@@ -44,6 +44,10 @@ brew "uv"             # bedrock
 # Personal CLIs (own tap)
 brew "clc"
 
+# Document processing
+brew "poppler"        # pdftotext (halo/fin filings)
+brew "pandoc"         # ad-hoc document conversion
+
 # macOS
 brew "mas"
 

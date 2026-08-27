@@ -10,5 +10,6 @@
 //! key, [`path`] because a key that depends on how a path was spelled is not one
 //! key.
 
+pub mod fs;
 pub mod git;
 pub mod path;
