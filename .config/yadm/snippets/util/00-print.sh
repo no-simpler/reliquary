@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export PM_PATH="$HOME/.pbin/pm"
+export PM_PATH="$HOME/.config/bin/pm"
 
 pm() {
     $PM_PATH "$@"

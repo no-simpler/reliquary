@@ -9,3 +9,10 @@ if ! command -v rustup &>/dev/null; then
 else
     print_info -ad "rustup already installed"
 fi
+
+# rustup was installed with --no-modify-path, so cargo is on no PATH the bootstrap
+# process can see: env.d only runs in interactive/login shells. Snippets 12 (publish
+# relics), 13 (cargo binaries) and 99 (up) all need it. Sourcing the file rustup
+# itself writes keeps this from drifting out of sync with env.d. POSIX-sh,
+# bash-3.2-safe, idempotent, and process-local — so --no-modify-path still holds.
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"

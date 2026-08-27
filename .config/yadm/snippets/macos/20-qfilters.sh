@@ -11,7 +11,7 @@ if [ ! -d "$TARGET_DIR" ]; then
     sudo mkdir -p "$TARGET_DIR"
     if [ $? -ne 0 ]; then
         print_error -ad "Failed to create $TARGET_DIR"
-        exit 1
+        return 1
     fi
 fi
 
@@ -35,6 +35,6 @@ for FILE in "$SOURCE_DIR"/*.qfilter; do
         fi
     else
         print_error -ad "No .qfilter files found in $SOURCE_DIR"
-        exit 1
+        return 1
     fi
 done

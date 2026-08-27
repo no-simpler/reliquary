@@ -11,7 +11,7 @@ elif [ -f /etc/SuSE-release ]; then
     DISTRO="suse"
 else
     echo "Unsupported Linux distribution"
-    exit 1
+    return 1
 fi
 
 # Update package lists and install Git based on the distribution
@@ -58,6 +58,6 @@ suse)
     ;;
 *)
     echo "Unsupported Linux distribution: $DISTRO"
-    exit 1
+    return 1
     ;;
 esac
