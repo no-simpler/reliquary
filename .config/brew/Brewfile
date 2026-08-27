@@ -21,6 +21,7 @@ brew "fzf"
 brew "coreutils"     # GNU coreutils; provides gtimeout (bare `timeout` via ~/.config/bin wrapper)
 brew "gnupg"
 brew "htop"
+brew "restic"        # encrypted, deduplicated offsite backup (POSTURE spec, sequence A)
 brew "tree"
 
 # Network
