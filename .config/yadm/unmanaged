@@ -14,14 +14,6 @@
 # Same obfuscation convention as yadm/encrypt: no entry, and no reason text,
 # may name a private organization or identity.
 
-# --- Deferred: awaiting a lane of their own (docket) ----------------------
-# Private Claude Code surfaces intermixed with public ones in one flat
-# namespace. Not a per-file call — the separation is being designed.
-.claude/commands/modes/mr.md	deferred — private surface pending the Claude Code lane split
-.claude/skills/acli/**	deferred — private surface pending the Claude Code lane split
-.claude/skills/blab/**	deferred — private surface pending the Claude Code lane split
-.claude/skills/sentry/**	deferred — private surface pending the Claude Code lane split
-
 # --- Credentials: live, revocable, never in a repo ------------------------
 .npmrc	registry auth tokens; re-issued by npm login
 .sentryclirc	auth token for an error tracker; re-issued from its web UI

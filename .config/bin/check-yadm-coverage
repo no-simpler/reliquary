@@ -24,7 +24,7 @@
 #   R2  a managed path that is not on disk
 #   R3  an encrypt pattern that matches nothing
 #   R4  an undecided file that trips the identity guard
-#   R5  an undecided file beside managed siblings
+#   R5  an undecided file under a directory something is managed from
 #   R6  a credential shape in a plaintext-tracked file
 #   R7  a credential shape in an undecided file
 #   R8  unreachable objects dominating the yadm object database
@@ -145,6 +145,7 @@ import fnmatch
 import glob
 import os
 import re
+import stat
 import sys
 
 HOME = os.path.expanduser("~")
@@ -254,6 +255,20 @@ def is_declared(relpath):
 # --- Roots ------------------------------------------------------------------
 ROOTS = [".config", ".claude", ".ssh", ".github", ".local/bin"]
 
+def trackable(path):
+    """A regular file or a symlink — the only things git can hold.
+
+    os.walk lists sockets and fifos among the filenames, and a live agent
+    socket is not a decision anybody can make: it cannot be committed, cannot
+    be archived, and is gone by the next boot.
+    """
+    try:
+        mode = os.lstat(path).st_mode
+    except OSError:
+        return False
+    return stat.S_ISREG(mode) or stat.S_ISLNK(mode)
+
+
 def scan():
     """Every file under the roots, plus $HOME's own dotfiles, minus prunes."""
     seen = []
@@ -273,20 +288,33 @@ def scan():
                 and rel(os.path.join(dirpath, d)) not in PRUNE_DIRS
             ]
             for name in filenames:
-                if name in PRUNE_NAMES:
+                full = os.path.join(dirpath, name)
+                if name in PRUNE_NAMES or not trackable(full):
                     continue
-                seen.append(rel(os.path.join(dirpath, name)))
+                seen.append(rel(full))
     return seen
 
 
 on_disk = scan()
 undecided = [p for p in on_disk if p not in managed and not is_declared(p)]
 
-# Directories holding at least one managed file. An undecided file beside a
-# managed sibling is a decision someone started making and did not finish; an
-# undecided file in a directory nobody has ever tracked from is just a tool's
-# private state, and is not this check's business.
+# Directories holding at least one managed file. An undecided file anywhere
+# BENEATH one is a decision someone started making and did not finish — the
+# same-directory test misses the common shape, a whole new subdirectory (a
+# skill, a plugin, a tool's config tree) where every file in it is new. An
+# undecided file under a directory nobody has ever tracked from is just a
+# tool's private state, and is not this check's business.
 managed_dirs = {os.path.dirname(p) for p in managed}
+
+
+def under_managed(relpath):
+    """True if any ancestor directory of relpath holds a managed file."""
+    d = os.path.dirname(relpath)
+    while d and d != ".":
+        if d in managed_dirs:
+            return True
+        d = os.path.dirname(d)
+    return False
 
 
 # --- Content rules ----------------------------------------------------------
@@ -361,13 +389,13 @@ else:
     report("R4", "FAIL", "undecided files carrying identifying content", private,
            "these can never be plaintext-tracked: archive them, or declare them in yadm/unmanaged")
 
-# R5 — undecided beside managed siblings.
+# R5 — undecided under a directory something is managed from.
 orphans = [
     p for p in undecided
-    if os.path.dirname(p) in managed_dirs
+    if under_managed(p)
     and not (IDENTITY and (text_of(p) or "") and IDENTITY.search(text_of(p) or ""))
 ]
-report("R5", "WARN", "undecided files beside managed siblings", orphans,
+report("R5", "WARN", "undecided files under a managed directory", orphans,
        "track them, archive them, or declare them in yadm/unmanaged with a reason")
 
 # R6 / R7 — credential shapes. Scanned everywhere under the roots, not just

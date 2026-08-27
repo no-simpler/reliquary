@@ -11,8 +11,10 @@ Two first-party entry points over one file per mode:
 
 ## Adding a mode
 
-Drop one file at `~/.claude/commands/modes/<name>.md` (machine-wide) or
-`<project>/.claude/commands/modes/<name>.md` (project-specific). No registry, nothing to enumerate.
+Drop one file at `~/.claude/commands/modes/<name>.md` (machine-wide),
+`<project>/.claude/commands/modes/<name>.md` (project-specific), or
+`<base>/skills/<plugin>/commands/modes/<name>.md` (shipped by a skills-dir plugin — a directory
+under `.claude/skills/` is adopted by Claude Code as a plugin). No registry, nothing to enumerate.
 
 ```
 ---
@@ -36,9 +38,14 @@ a task — keep the body directives, not steps.
   **leading run** of whitespace-separated tokens; the rest of the line stays as task text.
 - Token: exactly one leading `+`, then alphanumerics with `-`/`_` allowed inside. So `C++`, `a+b`,
   `+5` in prose never trigger.
-- Tokens resolve by basename against `commands/modes/` only — **home first, then project**
-  (mirrors native `/afk` precedence, so `/afk` and `+afk` never diverge; a project cannot override a
-  home mode of the same name — use a distinct name). Order preserved, duplicates collapsed.
+- Tokens resolve by basename against `commands/modes/` trees only, in order: **home tree, home
+  skills-dir plugins, project tree, project plugins**. Home-first mirrors native `/afk` precedence,
+  and a project cannot override a home mode of the same name — use a distinct name. Order
+  preserved, duplicates collapsed.
+- **Where a mode lives is invisible to `+token`.** The two asymmetries worth knowing: a
+  plugin-shipped mode's native form is `/<plugin>:modes:<name>` while its token stays bare
+  `+<name>`; and marketplace plugins (`~/.claude/plugins/`) are deliberately **not** searched, so a
+  `+token` can never pull directives out of third-party code.
 - The hook can only **append** context, never strip the prompt — so the `+token` text remains; the
   injected preamble marks it as a selector. It is a **strict no-op** unless ≥1 token matches a mode
   file, and it **fails open** (any error → the prompt is untouched).

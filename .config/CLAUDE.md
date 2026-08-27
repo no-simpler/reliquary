@@ -114,7 +114,7 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `decruft` - removes inert OS metadata and interpreter caches from browsable git repos under `$HOME` and from the XDG data dir. In repos `git clean -Xdn` is the oracle, so per-repo unignores are respected and tracked files are never touched. Editor swap/backup files stay (live crash-recovery state); dependency and build trees stay (expensive to rebuild). `-n` dry-runs
 - `compose-gc` - reclaims Docker Compose state left behind by dead git worktrees of the current repo, sweeping by label (no compose file needed) across both worktree layouts; `down <path>` is the profile-complete teardown of one stack. `-n` dry-runs. Used by the `transplant-worktrees` skill as its single Docker surface
 - `check-md-shell-blocks` - validates the auto-executed ```! blocks in Claude Code skills/slash commands: they are statically analysed with no prompt path, so an inline program is always denied and takes the whole invocation with it. Checks Claude Code's brace-with-quote prefilter, demands a single simple command, and verifies `allowed-tools`/settings.json coverage. Read-only, exit 0/1/2; wired into `yadm doctor`
-- `check-yadm-coverage` - reports paths nobody has decided about: every path under `~/.config`, `~/.claude`, `~/.ssh`, `~/.github`, `~/.local/bin` and `$HOME`'s own dotfiles must be plaintext-tracked, matched by an encrypt pattern, inside a pruned runtime dir, or declared in `yadm/unmanaged`. Also catches both-lanes-at-once, missing managed paths, dead encrypt patterns, loose credential shapes, and unreachable-object bloat in the yadm object DB. Derives archive membership by expanding `yadm/encrypt`, never by decrypting — offline, side-effect-free, Touch-ID-free; exit 0/1/2. Wired into `yadm doctor`
+- `check-yadm-coverage` - reports paths nobody has decided about: every path under `~/.config`, `~/.claude`, `~/.ssh`, `~/.github`, `~/.local/bin` and `$HOME`'s own dotfiles must be plaintext-tracked, matched by an encrypt pattern, inside a pruned runtime dir, or declared in `yadm/unmanaged`. Also catches both-lanes-at-once, missing managed paths, dead encrypt patterns, undecided files anywhere beneath a directory something is already managed from (R5 — which is how a whole new untracked subdirectory gets caught, not just a stray file beside tracked ones), loose credential shapes, and unreachable-object bloat in the yadm object DB. Sockets and fifos are skipped: git cannot hold them, so they are never a decision. Derives archive membership by expanding `yadm/encrypt`, never by decrypting — offline, side-effect-free, Touch-ID-free; exit 0/1/2. Wired into `yadm doctor`
 - `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt; tries `ske read` first, falls back to `op read` (never hard-depend — it decrypts the attic `ske` lives in)
 - `ske-prompt` - prints the open `ske` Touch ID window for the oh-my-posh right prompt; silent when closed (`sh`, not bash: `$BASH_ENV` would cost ~230ms per render)
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below); also reachable as `yadm` via the `~/.config/bin/yadm` symlink (shadows brew's yadm — see "Path availability")
@@ -359,6 +359,36 @@ because brew's node sets npm's global prefix to `/opt/homebrew`, npm globals lan
 `/opt/homebrew/lib/node_modules/` with a shim in `/opt/homebrew/bin/` — they look brew-installed
 but are not, and `brew list` will not show them.
 
+### Claude Code lanes (`~/.claude/`)
+
+`~/.claude/skills/` is not a skills folder — it is a **plugin auto-load root**. Claude Code adopts
+every non-dot entry under it (directory or symlink) as a local plugin named after the directory
+(`<name>@skills-dir`), with no install step and no `enabledPlugins` entry. A plugin root may carry
+`.claude-plugin/plugin.json` plus any of `commands/`, `agents/`, `skills/`, `output-styles/`,
+`workflows/`, `routines/`, `hooks/`, `.mcp.json`, `.lsp.json`. The familiar one-`SKILL.md` directory
+is just the degenerate single-skill plugin.
+
+That gives the tree two lanes, and **position decides the lane** — never a per-file judgment:
+
+- **Top level = public**, plaintext-tracked one directory at a time (`docket`, `php-lsp`,
+  `transplant-worktrees`).
+- **`~/.claude/skills/attic/` = private**, swept whole by the single `.claude/skills/attic/**`
+  pattern in `yadm/encrypt`. It is a plugin in its own right, so *every* private surface fits inside
+  it — a skill under `attic/skills/<name>/`, a mode under `attic/commands/modes/<name>.md`, and
+  later an agent, an output-style, an MCP or LSP server — and each arrives already covered, with no
+  new pattern to remember. `attic` means here what it means at `~/.config/attic/`: the private lane.
+
+Naming follows from the plugin shape: a private skill is addressed `attic:<name>`, a private command
+`/attic:<dir>:<name>`. Modes are the exception by design — `~/.claude/hooks/modes.py` searches every
+skills-dir plugin's `commands/modes/`, so `+<name>` is identical whichever lane the file sits in.
+
+Enforcement runs both ways and is already wired into `yadm doctor`. A private file left in the
+public lane trips `check-yadm-coverage`'s R4 (the `pre_commit` identity guard, run backwards) and
+fails. A public file that lands inside `attic/` is merely over-protected — and if it is also
+`yadm add`-ed, R1 (a path in both lanes) fails. Nothing is tracked publicly *and* archived. The
+public lane still needs one `yadm add` per file, because that is what plaintext tracking is; R5
+nags until it happens, a whole new skill directory included.
+
 ### PHP language server
 
 The first tool admitted under `~/.config/reliquary/AGENTIC-TOOLING.md` — the bar and registration
@@ -390,7 +420,7 @@ a single file rather than globbing the directory.
 - `tmux` - tmux configuration
 - `zsh/completion/docker` - docker completions for zsh
 - `zed` - editor settings and keymap
-- `~/.claude/skills/transplant-worktrees/` - folds Claude Code worktree branches onto main (rebase + ff-merge), then reclaims their Docker state via `compose-gc`. Domain-free, so it travels; the benefactor-flavoured skills alongside it stay untracked
+- `~/.claude/skills/transplant-worktrees/` - folds Claude Code worktree branches onto main (rebase + ff-merge), then reclaims their Docker state via `compose-gc`. Domain-free, so it travels; the private skills live in the `attic/` lane above
 
 ### Deliberately not tracked (audited)
 

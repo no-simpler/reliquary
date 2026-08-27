@@ -34,4 +34,5 @@
 .config/bin/gpg-yadm-op
 .config/bin/mm
 .config/attic/**
+.claude/skills/attic/**
 .config/reliquary/AUX.md

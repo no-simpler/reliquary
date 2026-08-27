@@ -73,16 +73,23 @@ The language-server admission is the reference implementation. Five steps:
    Reach for a non-brew lane only when no formula exists. Note that **bootstrap is the only thing
    that installs** from the non-brew manifests; `up` merely upgrades what is already present, so a
    package added on a running machine must also be installed by hand once.
-2. **`~/.claude/skills/<name>/SKILL.md`** — terse, per the rule above. A directory under
-   `~/.claude/skills/` auto-loads as a user-level plugin (`<name>@skills-dir`); there is no install
-   command and no `enabledPlugins` entry to add.
+2. **A `SKILL.md`, in the lane the tool belongs to** — terse, per the rule above. `~/.claude/skills/`
+   is a plugin auto-load root: a directory under it becomes a user-level plugin
+   (`<name>@skills-dir`) with no install command and no `enabledPlugins` entry. Public tools go at
+   the top level, `~/.claude/skills/<name>/SKILL.md`. A tool whose *existence* is sensitive goes to
+   the private lane instead, `~/.claude/skills/attic/skills/<name>/SKILL.md`, where the encrypt
+   pattern already covers it — see "Claude Code lanes" in `~/.config/CLAUDE.md`. Decide this on
+   first landing; a file in neither lane is the failure mode the lanes exist to prevent.
 3. **`.claude-plugin/plugin.json`** — only when the harness needs wiring (a language server, a
-   hook). Omit the file entirely otherwise.
+   hook), and only for a public top-level tool. The private lane is one plugin already, so a tool
+   inside it declares nothing of its own.
 4. **An ownership entry in `~/.config/CLAUDE.md`**, and **never** one in a project's `CLAUDE.md`.
    Reliquary records what it owns; projects stay unaware. That is also what keeps a global tool out
    of repositories whose public edge would leak it.
-5. **`yadm add` every new path explicitly.** yadm is whitelist-based — a new file is untracked
-   until named, and there is no usable blanket add. Verify with `yadm ls-files <path>`.
+5. **Put the paths in a lane.** Public: `yadm add` every new path explicitly — yadm is
+   whitelist-based, a new file is untracked until named, and there is no usable blanket add; verify
+   with `yadm ls-files <path>`. Private: nothing to add, but run `yadm encrypt` so the archive
+   catches up.
 
 ## Ledger
 

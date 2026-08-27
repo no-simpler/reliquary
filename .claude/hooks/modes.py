@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook — activate session "modes" from `+token` lines.
 
-A mode is a native slash-command file under `commands/modes/` (home or, for
-project-specific modes, `$CLAUDE_PROJECT_DIR/.claude/commands/modes/`). Typing
-`+afk` at the start of any prompt line appends that mode's directives to *that
-turn's* context. The hook runs on every prompt submission, not just the first, so
-a mode can ride along with the opening prompt in a single message, or be switched
-on by any later message just the same.
+A mode is a native slash-command file under a `commands/modes/` tree — home,
+project (`$CLAUDE_PROJECT_DIR/.claude/`), or one shipped by a skills-dir plugin
+(`<base>/skills/<plugin>/commands/`). Typing `+afk` at the start of any prompt
+line appends that mode's directives to *that turn's* context. The hook runs on
+every prompt submission, not just the first, so a mode can ride along with the
+opening prompt in a single message, or be switched on by any later message just
+the same.
 
 Boundaries baked in by design:
   - The hook can only *append* context; it cannot edit/strip the prompt. The
@@ -59,13 +60,45 @@ def _tokens_from_prompt(prompt):
     return ordered
 
 
+def _base_roots(base):
+    """`commands/modes/` trees under one `.claude` base: the tree itself, then
+    the one each skills-dir plugin ships.
+
+    A directory under `<base>/skills/` is adopted by Claude Code as a plugin, so
+    a mode it ships is as much a mode as any other. Marketplace plugins (under
+    `~/.claude/plugins/`) are deliberately out of scope: a `+token` must not be
+    able to pull directives out of third-party code.
+    """
+    roots = [base / "commands" / "modes"]
+    skills = base / "skills"
+    if skills.is_dir():
+        try:
+            plugins = sorted(d for d in skills.iterdir()
+                             if d.is_dir() and not d.name.startswith("."))
+        except OSError:
+            plugins = []
+        roots.extend(d / "commands" / "modes" for d in plugins)
+    return roots
+
+
 def _mode_file(name, home_root, project_root):
-    """First `<name>.md` under a `commands/modes/` tree, personal(home)-first."""
-    roots = [home_root / ".claude" / "commands" / "modes"]
+    """First `<name>.md` under any `commands/modes/` tree, personal(home)-first."""
+    bases = [home_root / ".claude"]
     if project_root is not None:
-        proj_modes = project_root / ".claude" / "commands" / "modes"
-        if proj_modes.resolve() != roots[0].resolve():  # skip when session cwd is $HOME
-            roots.append(proj_modes)
+        bases.append(project_root / ".claude")
+
+    roots, seen = [], set()
+    for base in bases:
+        for root in _base_roots(base):
+            try:
+                key = root.resolve()
+            except OSError:
+                continue
+            if key in seen:  # e.g. session cwd is $HOME
+                continue
+            seen.add(key)
+            roots.append(root)
+
     for root in roots:
         if not root.is_dir():
             continue
