@@ -25,7 +25,12 @@ to cargo. A relic **does not** carry its own `[profile]` (cargo ignores it),
 `crates/` is the shared-library boundary: a member with **no `relic.sh`**, which
 is what makes it inert to `relic list|status|doctor`, to the bootstrap snippet, and
 to `up` — all four gate on a readable manifest. `crates/relic-core` is the first.
-Code moves there when a **second** relic needs it, and not before.
+
+**Platform code is reuse-first; domain code keeps the second-consumer gate.**
+Colour, atomic writes, locking, subprocess capability, PATH resolution have their
+second consumer by construction and move in on sight. An item ladder or a prose
+metric waits for a second relic to actually need it. See the reuse ladder in
+`~/.config/reliquary/HARDENING.md`.
 
 Rust relics carry no `scripts/publish.sh` and no `scripts/test.sh` — the rust
 branch of `~/.config/reliquary/lib/relic.sh` is the whole story, and it publishes

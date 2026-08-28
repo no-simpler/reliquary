@@ -46,9 +46,12 @@ add the missing definition to the lagging shell (translating syntax — `alias N
 divergence is intentional and permanent, add the name to that pair's allowlist inside
 `check-shell-parity` with a one-line reason.
 
-**Extension policy:** as more Reliquary checks become scriptable, fold them into `yadm doctor`
-(a new section in the wrapper's `doctor()`), not into prose here. The pre-pass is the reliable
-floor; the passes below are the judgment layer it cannot replace.
+**Extension policy:** a new scriptable check is a **station** in `assay`, the aggregator
+`yadm doctor` calls — never a new section in the wrapper's bash `doctor()`, which is closed to
+extension, and never prose here. Until `assay` lands, a check that cannot wait goes in as a
+`bin/check-*` script and is absorbed as a station later. See
+`~/.config/reliquary/HARDENING.md`. The pre-pass is the reliable floor; the passes below are
+the judgment layer it cannot replace.
 
 ## The read IS the pass
 
@@ -67,7 +70,8 @@ never as an inference from a clean `yadm doctor` run.
 ## The recurring passes
 
 Each runs every session over `CLAUDE.md` (root + any nested), `.claude/TODO.md`, and the canonical
-meta docs under `~/.config/reliquary/` (`GRADUATION.md`, `AUX.md`). Surface candidate
+meta docs under `~/.config/reliquary/` (`GRADUATION.md`, `HARDENING.md`, `BEDROCK.md`,
+`AGENTIC-TOOLING.md`, `AUX.md`). Surface candidate
 edits as a list before writing anything large.
 
 ### 1. Compaction

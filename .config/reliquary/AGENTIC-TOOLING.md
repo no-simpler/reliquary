@@ -66,7 +66,7 @@ it costs more tokens than a terse line format.
 
 ## Registration protocol
 
-The language-server admission is the reference implementation. Five steps:
+The language-server admission is the reference implementation. Six steps:
 
 1. **Manifest entry**, so a fresh machine restores it — `~/.config/brew/Brewfile*`,
    `~/.config/npm/globals.txt`, `~/.config/cargo/crates.txt`, or a relic under `~/.config/relics/`.
@@ -90,6 +90,14 @@ The language-server admission is the reference implementation. Five steps:
    whitelist-based, a new file is untracked until named, and there is no usable blanket add; verify
    with `yadm ls-files <path>`. Private: nothing to add, but run `yadm encrypt` so the archive
    catches up.
+6. **Grant permissions in the form the harness actually matches.** A tool that needs the agent to
+   reach a path unprompted gets a rule in `~/.claude/settings.json`, and **a path grant is
+   `Edit(<glob>)` or `Read(<glob>)` only.** File permission checks consult exactly one gate per
+   operation: `Edit(path)` for *every* file-writing tool, `Read(path)` for *every* file-reading
+   tool. `Write(…)`, `MultiEdit(…)`, `NotebookEdit(…)` and `Glob(…)` are accepted and never match
+   — they warn once, at session start, to the human, in whichever project happens to load the file
+   — and **`Grep(…)` is dead and never warns at all**. A tool invocation is a separate grant,
+   `Bash(<name>:*)`; never express a path through it.
 
 ## Ledger
 

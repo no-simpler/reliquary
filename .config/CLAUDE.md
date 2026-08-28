@@ -68,10 +68,11 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 
 ### Shell configuration (`~/.config/shell/`)
 
-Three-tier layout — the directory name *is* the contract:
+Two-tier layout — the directory name *is* the contract:
 - `~/.config/shell/env.d/` = **always-on** (PATH, tool init, locale, auth env). Sourced by `~/.zshenv` (every zsh) and `~/.bash_env` (every non-interactive bash via `$BASH_ENV`; also from `~/.bash_profile` for login bash). Idempotent — re-sourcing is safe.
 - `~/.config/shell/interactive.d/` = **interactive only** (plugins, prompt, completions, aliases, update checks). Sourced by `~/.zshrc` / `~/.bashrc` behind their interactive gates.
-- `~/.config/shell/lib/` = **explicit-source-only** (libraries that downstream callers `source` on demand; never auto-loaded). Used to centralize logic shared across meta-projects so it lives in exactly one place. Currently empty: its first occupant, `install-on-path.sh`, graduated to `~/.config/reliquary/lib/` as relic infrastructure (see "Externally-managed PATH lane" below) — the tier remains the contract for any future shared library.
+
+Sourced-on-demand libraries do **not** live here — shared shell logic belongs to the subsystem that owns it, under `~/.config/reliquary/lib/` (see "Externally-managed PATH lane" below).
 
 Filename suffix selects shell:
 - `NNN-name.sh` = shared (bash + zsh only — fish cannot parse POSIX syntax)
@@ -82,8 +83,8 @@ Filename suffix selects shell:
 Numbering controls load order:
 ```
 env.d/         : 040-env  070-fixes  150-benefactor  999-path
-interactive.d/ : 010-colors  020-plugins  030-config  050-prompt
-                 060-fzf  080-check  090-funcs  100-aliases{,-git,-docker,-yadm}
+interactive.d/ : 020-plugins  030-config  050-prompt  060-fzf
+                 080-check  090-funcs  100-aliases{,-git,-docker,-yadm}
 ```
 Additional encrypted shell files may exist (see `~/.config/yadm/encrypt`).
 
@@ -158,7 +159,7 @@ The `relic` CLI (`relic list|status|publish|test|update|scaffold|registry|migrat
 
 **The roster is `relic list`, not a list in this file.** Each relic's doctrine lives in its own `CLAUDE.md`, and the sections below exist only for the relics whose *system-wide* integration needs explaining — a hook, a command surface, a Touch ID vector. A relic that is simply a tool on `$PATH` (`ernest`, which measures prose density and backs `/modes:deprose`) gets no section here, because a hand-maintained roster in the root file is a roster that silently goes stale.
 
-`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`, `AGENTIC-TOOLING.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton).
+`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`, `HARDENING.md`, `AGENTIC-TOOLING.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton).
 
 ### Session docket (`docket`)
 

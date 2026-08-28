@@ -7,14 +7,24 @@ it. It publishes nothing and owns no PATH name. See "The Rust lane" in
 
 ## The bar for living here
 
-Code moves in when a **second** relic needs it, and not before. A crate that
-collects what might one day be shared is a god crate, and every relic that
-depends on it pays for the collection. `docket` and `midden` still have
-overlapping `ui`, `render`, `id` and `field` modules; that is not sufficient
-reason on its own.
+**Split by kind — see the reuse ladder in `~/.config/reliquary/HARDENING.md`.**
 
-**No dependencies.** Everything here shells out to git or reads the filesystem.
-A dependency added here is pushed onto every relic that wants a project key.
+**Platform code is reuse-first.** Colour resolution, atomic writes, locking,
+subprocess-as-capability, PATH resolution: the second consumer exists by
+construction, because every relic needs them. One implementation, adopted on
+sight, so relics behave identically rather than each hand-rolling a ladder.
+
+**Domain code keeps the second-consumer gate.** An item ladder, a prose metric, a
+window state machine — the wrong abstraction costs more than the duplication, so
+it moves in when a *second* relic actually needs it and not before. A crate that
+collects what might one day be shared is a god crate, and every dependent pays
+for the collection.
+
+**Dependencies are judged, not counted.** Reach for a maintained ecosystem crate
+before writing one; the counterweight is supply-chain hygiene (`cargo deny`), not
+a budget. What does not belong here is a dependency pulled in for one relic's
+convenience — a platform crate's cost is paid by every relic that wants a project
+key.
 
 ## What is here, and why it is one crate and not two
 
@@ -42,8 +52,8 @@ extension — so `a.md` and `a.json` shared one temporary, and two writers to on
 truncated each other. Centralising it was also the moment to make it correct:
 a unique dot-prefixed temporary beside the destination, the parent directory synced
 after the rename (without which the entry is not durable, which is the whole point),
-and a drop guard so no error path leaves litter. It returns `io::Result` — the
-no-dependency rule reaches the error type too, and callers add their own context.
+and a drop guard so no error path leaves litter. It returns `io::Result`, and callers
+add their own context.
 
 ## Adding a caller
 

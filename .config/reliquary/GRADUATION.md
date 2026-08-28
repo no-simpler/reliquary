@@ -3,8 +3,11 @@
 The personal-CLI lifecycle inside Reliquary. A **relic** is a personal tool
 the author keeps; it moves through three stages as it earns more structure.
 
-This is the canonical reference. For benefactor-specific deltas, see
-[[see AUX]] (encrypted; readable in decrypted environments).
+This is the canonical reference for the lifecycle. `HARDENING.md` owns the
+verification standard a relic is held to — the typed-domain rules, the reuse
+ladder, the ratchets, and the method for replacing a script with one. For
+benefactor-specific deltas, see [[see AUX]] (encrypted; readable in decrypted
+environments).
 
 ## Stages
 
@@ -56,6 +59,10 @@ as each is either rewritten into the workspace or given its reason.
 
 `relic scaffold` defaults to `rust`, so the stance costs nothing to follow. An
 exemption is asked for explicitly (`-r bash --exempt "<why>"`).
+
+The stance reaches past relics to the whole executable surface, and what stays
+shell stays shell on purpose — `HARDENING.md`'s triage rule decides, and its
+irreducible-residue classes enumerate what it decides against.
 
 ## In-house relic anatomy
 
@@ -185,9 +192,14 @@ fixed the collision both copies had (`with_extension("tmp")` *replaces* the
 extension, so `a.md` and `a.json` shared one temporary), synced the parent
 directory after the rename, and stopped leaking a temporary on the error path.
 
-**Admission is by demand, not anticipation** — code moves to `crates/` when a
-*second* relic needs it, and not before. A shared crate that collects what might
-one day be shared is a god crate, and every relic pays for it.
+**Admission splits by kind.** *Platform* code — colour resolution, atomic writes,
+locking, subprocess capability, PATH resolution — is **reuse-first**: its second
+consumer exists by construction, because every relic needs it, and one
+implementation is what makes relics behave identically. *Domain* code keeps the
+**second-consumer gate**: an item ladder or a prose metric moves in when a second
+relic actually needs it and not before, because the wrong abstraction costs more
+than the duplication. A crate that collects what might one day be shared is a god
+crate, and every relic pays for it. See the reuse ladder in `HARDENING.md`.
 
 The bar is per-language, and it does **not** reach across into the bash relics.
 `relic` and `nexus` each carry their own copy of four output helpers and eight
