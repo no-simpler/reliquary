@@ -16,12 +16,8 @@
 ".config/bin/check-brew-health" = 2
 ".config/bin/up" = 1
 ".config/bin/yadm-wrapper" = 2
-".config/relics/docket/relic.sh" = 1
 ".config/relics/docket/scripts/update.sh" = 1
-".config/relics/ernest/relic.sh" = 1
-".config/relics/midden/relic.sh" = 1
 ".config/relics/midden/scripts/update.sh" = 1
-".config/relics/relic/relic.sh" = 1
 ".config/relics/relic/src/relic.sh" = 2
 ".config/relics/relic/tests/run.sh" = 1
 ".config/reliquary/lib/relic.sh" = 4

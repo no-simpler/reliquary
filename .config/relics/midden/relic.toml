@@ -1,0 +1,12 @@
+# Manifest for the `midden` CLI — Stage-2 in-house relic.
+# See ~/.config/reliquary/GRADUATION.md for the full schema.
+
+[relic]
+name = "midden"
+description = "Machine-wide friction corpus: what the harness cost an agent, filed as it happened."
+runtime = "rust"
+min-runtime-version = "1.89" # floor, never a pin — edition 2024 plus std file locking
+brew-deps = []               # rustup owns the toolchain
+external-deps = [
+    "git (project key resolution; absent git degrades to the working directory)",
+]

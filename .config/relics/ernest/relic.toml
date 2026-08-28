@@ -1,0 +1,9 @@
+# Manifest for the `ernest` CLI — the first Rust (Stage-2) relic.
+# See ~/.config/reliquary/GRADUATION.md for the full schema.
+
+[relic]
+name = "ernest"
+description = "Measure prose density: the share of a codebase's text that is prose, not code."
+runtime = "rust"
+min-runtime-version = "1.89" # floor, never a pin — the workspace's rust-version
+brew-deps = []               # rustup owns the toolchain; grammars build from source

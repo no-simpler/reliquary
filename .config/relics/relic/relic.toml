@@ -1,0 +1,12 @@
+# Manifest for the `relic` CLI — the first in-house (Stage-2) relic.
+# See ~/.config/reliquary/GRADUATION.md for the full schema.
+#
+# No runtime-exemption: this one is on the rewrite worklist, and `relic doctor`
+# is what keeps it there.
+
+[relic]
+name = "relic"
+description = "Manage Reliquary relics: list, status, publish, test, update, registry."
+runtime = "bash"
+min-runtime-version = "3.2" # macOS floor; the CLI is bash-3.2 compatible
+brew-deps = []              # none — awk/git are part of the base system/Brewfile

@@ -1,0 +1,12 @@
+# Manifest for the `docket` CLI — Stage-2 in-house relic.
+# See ~/.config/reliquary/GRADUATION.md for the full schema.
+
+[relic]
+name = "docket"
+description = "Outstanding agentic work, per project: handoffs, relays and specs bridging sessions."
+runtime = "rust"
+min-runtime-version = "1.89" # floor, never a pin — edition 2024 plus std file locking
+brew-deps = []               # rustup owns the toolchain
+external-deps = [
+    "git (project keys, and the depot's version control; absent git degrades to the working directory as the key, and no item can be closed)",
+]

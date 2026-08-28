@@ -9,7 +9,7 @@ For the lifecycle, stages, and registry model, see
 
 ## Anatomy
 
-- `relic.sh` — manifest (`NAME=relic`, `RUNTIME=bash`).
+- `relic.toml` — manifest (`name = "relic"`, `runtime = "bash"`).
 - `src/relic.sh` — the whole CLI, **one self-contained file**. This is load-bearing:
   the published entrypoint is a single `cp`-copied file in `~/.local/bin/`, so the
   CLI cannot rely on sibling files at runtime. It sources its libraries by absolute
