@@ -231,3 +231,37 @@ The renderer now names a finding's own station when it differs from the report's
 For all five built-in stations the two are the same name and nothing changed;
 here it is the difference between "the registry said so" and knowing which
 binary did.
+
+## A2 — what `yadm doctor` still owns, and what is left to take
+
+`_doctor_run` has ten sections. Six are already stations; the inventory, so the
+remaining work is a list rather than a rediscovery:
+
+| section | fate |
+| --- | --- |
+| yadm resolves to the wrapper · interactive startup is clean · `$PATH` has no duplicates | **`shell-startup`** — one station, because all three come out of one probe per shell |
+| shell alias/function parity | `shell-parity` |
+| Claude Code `!` blocks | `md-shell-blocks` |
+| bedrock dependencies | `bedrock` |
+| Homebrew package health | `brew-health` |
+| tracking coverage | `yadm-coverage` |
+| shell lint and format | **still to take** — a station over `check-shell-lint` |
+| relic build cache | **still to take** |
+| encrypted archive drift · archive vs disk verification | **stays in the wrapper.** Genuinely dotfile-specific, and the second is the one Touch-ID check |
+| ske wiring | the registry adapter, once `ske` speaks the protocol — which is migration ④. Until then the wrapper keeps one call, because losing it would lose the check that a broken `gpg.ssh.program` shim breaks every commit |
+
+## Deviations from `yadm doctor`'s shell sections
+
+Parity verified on the live machine: all nine of the wrapper's checks pass and
+the station reports nothing, which is the same verdict. The failure paths are
+pinned by tests rather than by a fixture run of the wrapper — `_doctor_run` is
+one function that cannot be asked for three of its ten sections.
+
+| deviation | why | pinned by |
+| --- | --- | --- |
+| Three sections become one station | they are three readings of **one probe**, and starting an interactive shell is the whole cost. Splitting them by subject would have tripled it | `a_shell_that_finds_the_wrapper_has_nothing_to_report` |
+| The probe is bounded, and a timeout *is* "startup did not complete" | a shell that hangs starting would hang the standing audit. From outside a process a hang and a very slow start are the same fact, and that fact is already what the section reports | `a_shell_that_never_returns_is_a_startup_that_did_not_complete` |
+| A shell that is not installed produces nothing, where the script printed a skip line per section | three skip lines saying the same absence is inventory, not verification. Same grade | `a_shell_that_is_not_installed_is_simply_not_asked` |
+| Duplicate `$PATH` entries are named once each, in first-repeat order, in the finding's detail | the script printed `sort | uniq -d`, which is duplicate-free but reordered — and a report that reshuffles between runs cannot be diffed | `duplicates_are_named_once_each_in_the_order_they_first_repeat` |
+| The dialect difference is a `Dialect` enum with one method, not an `if` on the shell's name | the two dialects differ in exactly one place — how a list variable is joined — and naming that makes it the only thing a fourth shell would have to supply | `the_fish_probe_joins_a_list_and_the_posix_one_does_not` |
+| `run_within`, not `capture_within` | an interactive shell's exit status is whatever its last rc line left behind. What is asked is whether the probe reached the end, and the marker answers that | `a_shell_that_never_reaches_the_marker_did_not_start` |
