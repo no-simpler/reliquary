@@ -1,4 +1,3 @@
-use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -44,7 +43,7 @@ impl Ctx {
 struct Mutation<'a> {
     ctx: &'a Ctx,
     repo: Option<git::Repo>,
-    _lock: File,
+    _lock: relic_core::lock::Lock,
 }
 
 impl<'a> Mutation<'a> {

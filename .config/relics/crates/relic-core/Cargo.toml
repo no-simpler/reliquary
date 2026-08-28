@@ -19,6 +19,7 @@ path = "src/lib.rs"
 anstream.workspace = true
 clap.workspace = true
 jiff.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

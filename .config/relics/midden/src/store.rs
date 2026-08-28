@@ -1,7 +1,8 @@
-use std::fs::{self, File};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
+use relic_core::lock::{Lock, Wait};
 
 use crate::id::{Id, slugify};
 use crate::note::{Note, Status};
@@ -80,11 +81,9 @@ impl Corpus {
     /// Held across every mutation, so two sessions filing at once cannot
     /// interleave a dedup read with the write that answers it. Dropping the
     /// returned handle releases it.
-    fn lock(&self) -> Result<File> {
+    fn lock(&self) -> Result<Lock> {
         self.ensure_root()?;
-        let file = File::create(self.root.join(LOCK))?;
-        file.lock()?;
-        Ok(file)
+        Ok(Lock::acquire(&self.root.join(LOCK), Wait::INTERACTIVE)?)
     }
 
     pub fn list(&self, archived: bool) -> Vec<Record> {

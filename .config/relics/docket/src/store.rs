@@ -1,7 +1,8 @@
-use std::fs::{self, File};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
+use relic_core::lock::{Lock, Wait};
 
 use crate::git;
 use crate::id::Id;
@@ -104,29 +105,24 @@ impl Depot {
     ///
     /// Always nested inside the depot lock, never taken around it — see the
     /// ordering rule in `git`.
-    fn lock(&self, project: &Path) -> Result<File> {
+    fn lock(&self, project: &Path) -> Result<Lock> {
         let dir = self.ensure_project(project)?;
-        let file = File::create(dir.join(LOCK))?;
-        file.lock()?;
-        Ok(file)
+        Ok(Lock::acquire(&dir.join(LOCK), Wait::INTERACTIVE)?)
     }
 
     /// The coarse lock, held by a whole mutating command, so a snapshot and the
     /// change it brackets are one unit against a concurrent session.
-    pub fn lock_depot(&self) -> Result<File> {
+    pub fn lock_depot(&self) -> Result<Lock> {
         fs::create_dir_all(&self.root)
             .with_context(|| format!("creating {}", self.root.display()))?;
-        let file = File::create(self.root.join(LOCK))?;
-        file.lock()?;
-        Ok(file)
+        Ok(Lock::acquire(&self.root.join(LOCK), Wait::INTERACTIVE)?)
     }
 
     /// The depot lock if it is free this instant, and nothing if it is not.
     /// What runs at session start takes this one: a hook that waits on another
     /// session's write would be a hook that hangs a terminal.
-    pub fn try_lock_depot(&self) -> Option<File> {
-        let file = File::create(self.root.join(LOCK)).ok()?;
-        file.try_lock().ok().map(|()| file)
+    pub fn try_lock_depot(&self) -> Option<Lock> {
+        Lock::try_acquire(&self.root.join(LOCK)).ok().flatten()
     }
 
     /// Every project that has a docket directory.

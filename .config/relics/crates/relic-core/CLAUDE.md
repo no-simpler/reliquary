@@ -62,6 +62,16 @@ can only be tested at the resolution of the machine's clock, and a render loop
 that reaches for it per row can report two different "now"s in one table — which
 is why `View` carries one instant for the whole frame.
 
+`lock` — advisory file locking with the rule made unrepresentable. **Bound the
+wait, never the hold**: `Wait` has no `Forever` variant, so an unbounded wait
+cannot be asked for. Both stores took `File::lock()`, which waits forever — a
+`docket set` blocked on another session was a hung terminal with no way out.
+`try_acquire` is a separate entry point rather than `acquire(…).ok()`, because
+`.ok()` folds a real filesystem error into "somebody else has it", which is the
+silent-failure shape this crate exists to close. std's own file locking is used
+directly: it went stable in 1.89, and an ecosystem crate that only re-exports it
+is a dependency for nothing.
+
 `fs` — replacing a file's contents without ever exposing a partial one. Admitted on
 the same evidence: both stores had written the identical tmp-then-rename by hand,
 and both named the temporary with `with_extension("tmp")`, which *replaces* the

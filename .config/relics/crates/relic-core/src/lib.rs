@@ -22,5 +22,6 @@
 pub mod fmt;
 pub mod fs;
 pub mod git;
+pub mod lock;
 pub mod path;
 pub mod ui;
