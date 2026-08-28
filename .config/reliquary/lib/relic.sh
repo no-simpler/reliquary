@@ -13,10 +13,9 @@
 #   relic::test    ~/.config/relics/<name>
 #   relic::update  ~/.config/relics/<name>
 #
-# Each operation reads the per-relic manifest — <dir>/relic.toml, or the legacy
-# <dir>/relic.sh where one has not been converted yet. If <dir>/scripts/<op>.sh
-# exists and is executable, it is run instead of the default behavior — relics
-# override only when they need to.
+# Each operation reads <dir>/relic.toml, the per-relic manifest. If
+# <dir>/scripts/<op>.sh exists and is executable, it is run instead of the
+# default behavior — relics override only when they need to.
 #
 # Manifest schema, TOML keys and the bash names they carry:
 #   name                  NAME                  required; published name + META_NAME
@@ -59,66 +58,17 @@ relic::_version_ge() {
     [[ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" == "$need" ]]
 }
 
-# Where a relic's manifest is, and in which format. Prints the path; the caller
-# reads the extension. Nothing else in the tree may test for a manifest by name:
-# a second predicate is how one lane comes to disagree with another about which
-# directories are relics at all.
+# Where a relic's manifest is. Nothing else in the tree may test for one by
+# name: a second predicate is how one lane comes to disagree with another about
+# which directories are relics at all.
 relic::manifest_path() {
     local dir="${1:-}"
-    if [[ -r "$dir/relic.toml" ]]; then
-        printf '%s' "$dir/relic.toml"
-    elif [[ -r "$dir/relic.sh" ]]; then
-        printf '%s' "$dir/relic.sh"
-    else
-        return 1
-    fi
+    [[ -r "$dir/relic.toml" ]] || return 1
+    printf '%s' "$dir/relic.toml"
 }
 
 relic::has_manifest() {
     relic::manifest_path "${1:-}" >/dev/null
-}
-
-# One legacy manifest as a record, sourced in a subshell so a manifest can no
-# longer reach the caller's scope with anything but the schema.
-relic::_manifest_legacy() {
-    local dir="$1"
-    (
-        NAME=""
-        DESCRIPTION=""
-        RUNTIME=""
-        RUNTIME_EXEMPTION=""
-        MIN_RUNTIME_VERSION=""
-        ENTRYPOINTS=()
-        BREW_DEPS=()
-        EXTERNAL_DEPS=()
-        DOCKER=0
-
-        # shellcheck disable=SC1090
-        if ! source "$dir/relic.sh" 2>/dev/null; then
-            printf '__RELIC_DIR=%q\n__RELIC_ERROR=%q\n__RELIC_END=1\n' \
-                "$dir" "failed to source $dir/relic.sh"
-            exit 0
-        fi
-
-        printf '__RELIC_DIR=%q\n__RELIC_ERROR=%q\n' "$dir" ""
-        printf 'NAME=%q\nDESCRIPTION=%q\nRUNTIME=%q\nRUNTIME_EXEMPTION=%q\n' \
-            "$NAME" "$DESCRIPTION" "$RUNTIME" "$RUNTIME_EXEMPTION"
-        printf 'MIN_RUNTIME_VERSION=%q\nDOCKER=%q\n' "$MIN_RUNTIME_VERSION" "$DOCKER"
-        relic::_emit_array ENTRYPOINTS ${ENTRYPOINTS[@]+"${ENTRYPOINTS[@]}"}
-        relic::_emit_array BREW_DEPS ${BREW_DEPS[@]+"${BREW_DEPS[@]}"}
-        relic::_emit_array EXTERNAL_DEPS ${EXTERNAL_DEPS[@]+"${EXTERNAL_DEPS[@]}"}
-        printf '__RELIC_END=1\n'
-    )
-}
-
-relic::_emit_array() {
-    local name="$1" value
-    shift
-    printf '%s=(' "$name"
-    for value in "$@"; do
-        printf ' %q' "$value"
-    done
-    printf ' )\n'
 }
 
 # Manifests for many directories as one eval-able record stream, in no
@@ -129,16 +79,12 @@ relic::_emit_array() {
 # Batched because an interpreter start costs more than every read that follows
 # it, and `relic list` reads each manifest more than once.
 relic::_manifest_read() {
-    local dir toml=()
+    local dir found=()
     for dir in "$@"; do
-        if [[ -r "$dir/relic.toml" ]]; then
-            toml=(${toml[@]+"${toml[@]}"} "$dir")
-        elif [[ -r "$dir/relic.sh" ]]; then
-            relic::_manifest_legacy "$dir"
-        fi
+        relic::has_manifest "$dir" && found=(${found[@]+"${found[@]}"} "$dir")
     done
-    [[ ${#toml[@]} -eq 0 ]] && return 0
-    python3 "$HOME/.config/reliquary/lib/manifest.py" "${toml[@]}"
+    [[ ${#found[@]} -eq 0 ]] && return 0
+    python3 "$HOME/.config/reliquary/lib/manifest.py" "${found[@]}"
 }
 
 # One manifest, into the caller's scope. Fields are always assigned, so a value
@@ -154,7 +100,7 @@ relic::load_manifest() {
     }
     local manifest
     manifest="$(relic::manifest_path "$dir")" || {
-        relic::_die "no manifest at $dir/relic.toml or $dir/relic.sh"
+        relic::_die "no manifest at $dir/relic.toml"
         return $?
     }
 

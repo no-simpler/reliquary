@@ -100,11 +100,11 @@ after a table header to that table, so a flat manifest would capture the first
 future `[section]`'s keys into itself. Unknown keys inside `[relic]` are refused;
 unknown *tables* are left alone, which is what the namespace buys.
 
-`~/.config/reliquary/lib/relic.sh` is the only reader, and it reads both this
-and the legacy bash `relic.sh` into one record, so nothing above it knows or
-cares which format a relic is in. Every other consumer — the `relic` CLI, the
-bootstrap publish snippet, `up` — asks it with `relic::has_manifest`, so a
-converted manifest is visible everywhere at once.
+`~/.config/reliquary/lib/relic.sh` is the only reader — `relic::load_manifest`
+for one relic, `relic::_manifest_read` for many at once, both parsing through
+`lib/manifest.py`. Every consumer that has to decide whether a directory is a
+relic at all asks `relic::has_manifest`: the `relic` CLI, the bootstrap publish
+snippet, `up`. One predicate, so no two of them can disagree.
 
 ### Entrypoints
 

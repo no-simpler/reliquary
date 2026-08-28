@@ -124,7 +124,10 @@ doctor_orphans() {
 
 # In-house entrypoints that aren't in the registry — i.e. declared but never
 # published (the inverse of an orphan). Emits "<relic>\t<entrypoint>" per gap.
-# Attic-safe: rides on inhouse_relics, which only surfaces readable manifests.
+#
+# Reads rows on stdin rather than discovering them: doctor asks more than one
+# question of the same lane, and discovery is the expensive half. Attic-safe
+# through its source — inhouse_relics only surfaces readable manifests.
 doctor_unpublished() {
     local name dir lane runtime why eps ep
     while IFS=$'\037' read -r name dir lane runtime why eps; do
@@ -132,7 +135,7 @@ doctor_unpublished() {
             reg_has "$ep" && continue
             printf '%s\t%s\n' "$name" "$ep"
         done
-    done < <(inhouse_relics)
+    done
 }
 
 # Relics that are not Rust and do not say why. Relics are Rust by default; any
@@ -148,7 +151,7 @@ doctor_runtime_stance() {
         [[ "$runtime" == "rust" ]] && continue
         [[ -n "$why" ]] && continue
         printf '%s\t%s\n' "$name" "$runtime"
-    done < <(inhouse_relics)
+    done
 }
 
 # Executable files in $LOCAL_BIN (non-dotfiles) absent from the registry —
@@ -826,7 +829,10 @@ cmd_prune() {
 }
 
 cmd_doctor() {
-    local problems=0 any name owner ep runtime
+    local problems=0 any name owner ep runtime rows
+
+    # One discovery for every question below.
+    rows="$(inhouse_relics)"
 
     info "${_c_bold}Orphan registry entries${_c_rst} ${_c_dim}(registered, no file in ~/.local/bin)${_c_rst}"
     any=0
@@ -850,7 +856,7 @@ cmd_doctor() {
         any=1
         problems=$((problems + 1))
         info "  ${_c_yel}$ep${_c_rst} ${_c_dim}($name)${_c_rst}"
-    done < <(doctor_unpublished)
+    done < <(doctor_unpublished <<<"$rows")
     if [[ $any -eq 0 ]]; then
         printf '  %s(none)%s\n' "$_c_grn" "$_c_rst"
     else
@@ -858,13 +864,13 @@ cmd_doctor() {
     fi
 
     info ""
-    info "${_c_bold}Runtime stance${_c_rst} ${_c_dim}(not rust, no RUNTIME_EXEMPTION — informational)${_c_rst}"
+    info "${_c_bold}Runtime stance${_c_rst} ${_c_dim}(not rust, no runtime-exemption — informational)${_c_rst}"
     any=0
     while IFS=$'\t' read -r name runtime; do
         [[ -z "$name" ]] && continue
         any=1
         info "  ${_c_dim}$name ($runtime)${_c_rst}"
-    done < <(doctor_runtime_stance)
+    done < <(doctor_runtime_stance <<<"$rows")
     if [[ $any -eq 0 ]]; then
         printf '  %s(none)%s\n' "$_c_grn" "$_c_rst"
     else

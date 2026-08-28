@@ -20,7 +20,7 @@
 ".config/relics/midden/scripts/update.sh" = 1
 ".config/relics/relic/src/relic.sh" = 2
 ".config/relics/relic/tests/run.sh" = 1
-".config/reliquary/lib/relic.sh" = 4
+".config/reliquary/lib/relic.sh" = 3
 ".config/shell/env.d/040-env.sh" = 1
 ".config/shell/interactive.d/100-aliases.sh" = 2
 ".config/yadm/snippets/shared/12-publish-relics.sh" = 2
