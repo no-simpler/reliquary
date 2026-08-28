@@ -151,58 +151,63 @@ relic::check_deps() {
         fi
     done
 
-    if [[ -n "$MIN_RUNTIME_VERSION" ]]; then
-        case "$RUNTIME" in
-            python)
-                if ! command -v python3 >/dev/null 2>&1; then
-                    printf 'relic[%s]: python3 not on PATH\n' "$NAME" >&2
+    # Presence is checked unconditionally; only the floor is conditional. Gating
+    # both on MIN_RUNTIME_VERSION meant a relic that declared no floor got no
+    # toolchain check at all, and a missing rustc then surfaced further down as
+    # "no cargo workspace above <dir>" — the wrong cause, named confidently.
+    case "$RUNTIME" in
+        python)
+            if ! command -v python3 >/dev/null 2>&1; then
+                printf 'relic[%s]: python3 not on PATH\n' "$NAME" >&2
+                fail=1
+            elif [[ -n "$MIN_RUNTIME_VERSION" ]]; then
+                local ver
+                ver="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
+                if [[ -z "$ver" ]] || ! relic::_version_ge "$ver" "$MIN_RUNTIME_VERSION"; then
+                    printf 'relic[%s]: python3 %s < required %s\n' \
+                        "$NAME" "${ver:-unknown}" "$MIN_RUNTIME_VERSION" >&2
                     fail=1
-                else
-                    local ver
-                    ver="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
-                    if [[ -z "$ver" ]] || ! relic::_version_ge "$ver" "$MIN_RUNTIME_VERSION"; then
-                        printf 'relic[%s]: python3 %s < required %s\n' \
-                            "$NAME" "${ver:-unknown}" "$MIN_RUNTIME_VERSION" >&2
-                        fail=1
-                    fi
                 fi
-                ;;
-            bash)
+            fi
+            ;;
+        bash)
+            # The interpreter running this; presence is a tautology.
+            if [[ -n "$MIN_RUNTIME_VERSION" ]]; then
                 local ver="${BASH_VERSION%%[^0-9.]*}"
                 if [[ -z "$ver" ]] || ! relic::_version_ge "$ver" "$MIN_RUNTIME_VERSION"; then
                     printf 'relic[%s]: bash %s < required %s\n' \
                         "$NAME" "${ver:-unknown}" "$MIN_RUNTIME_VERSION" >&2
                     fail=1
                 fi
-                ;;
-            rust)
-                if ! command -v rustc >/dev/null 2>&1; then
-                    printf 'relic[%s]: rustc not on PATH\n' "$NAME" >&2
-                    fail=1
-                else
-                    local ver
-                    ver="$(rustc --version 2>/dev/null | awk '{print $2}')"
-                    if [[ -z "$ver" ]] || ! relic::_version_ge "$ver" "$MIN_RUNTIME_VERSION"; then
-                        printf 'relic[%s]: rustc %s < required %s\n' \
-                            "$NAME" "${ver:-unknown}" "$MIN_RUNTIME_VERSION" >&2
-                        fail=1
-                    fi
-                fi
-                ;;
-            fish)
-                if ! command -v fish >/dev/null 2>&1; then
-                    printf 'relic[%s]: fish not on PATH\n' "$NAME" >&2
+            fi
+            ;;
+        rust)
+            if ! command -v rustc >/dev/null 2>&1; then
+                printf 'relic[%s]: rustc not on PATH\n' "$NAME" >&2
+                fail=1
+            elif [[ -n "$MIN_RUNTIME_VERSION" ]]; then
+                local ver
+                ver="$(rustc --version 2>/dev/null | awk '{print $2}')"
+                if [[ -z "$ver" ]] || ! relic::_version_ge "$ver" "$MIN_RUNTIME_VERSION"; then
+                    printf 'relic[%s]: rustc %s < required %s\n' \
+                        "$NAME" "${ver:-unknown}" "$MIN_RUNTIME_VERSION" >&2
                     fail=1
                 fi
-                ;;
-            docker)
-                if ! command -v docker >/dev/null 2>&1; then
-                    printf 'relic[%s]: docker not on PATH\n' "$NAME" >&2
-                    fail=1
-                fi
-                ;;
-        esac
-    fi
+            fi
+            ;;
+        fish)
+            if ! command -v fish >/dev/null 2>&1; then
+                printf 'relic[%s]: fish not on PATH\n' "$NAME" >&2
+                fail=1
+            fi
+            ;;
+        docker)
+            if ! command -v docker >/dev/null 2>&1; then
+                printf 'relic[%s]: docker not on PATH\n' "$NAME" >&2
+                fail=1
+            fi
+            ;;
+    esac
 
     return "$fail"
 }
@@ -215,6 +220,18 @@ relic::_cargo_workspace_root() {
     manifest="$(cd "$dir" 2>/dev/null && cargo locate-project --workspace --message-format plain 2>/dev/null)"
     [[ -n "$manifest" ]] || return 1
     dirname "$manifest"
+}
+
+# Why `relic::_cargo_workspace_root` came back empty. `cargo locate-project`
+# answers nothing whether the workspace is missing or cargo is, and blaming the
+# lane for an absent toolchain is how a broken PATH reads as a broken repository.
+relic::_workspace_die() {
+    local dir="${1:-}"
+    if command -v cargo >/dev/null 2>&1; then
+        relic::_die "no cargo workspace above $dir"
+    else
+        relic::_die "cargo not on PATH; cannot locate the workspace above $dir"
+    fi
 }
 
 # Package names of the workspace's shared crates, one per line. Read from each
@@ -249,7 +266,7 @@ relic::_published_names() {
 relic::_publish_compiled() {
     local dir="${1:-}" root n
     root="$(relic::_cargo_workspace_root "$dir")" || {
-        relic::_die "no cargo workspace above $dir"
+        relic::_workspace_die "$dir"
         return $?
     }
 
@@ -445,7 +462,7 @@ relic::_allow_ratchet() {
 relic::_test_compiled() {
     local dir="${1:-}" root c shared
     root="$(relic::_cargo_workspace_root "$dir")" || {
-        relic::_die "no cargo workspace above $dir"
+        relic::_workspace_die "$dir"
         return $?
     }
 
@@ -542,7 +559,7 @@ relic::cover() {
 
     local root
     root="$(relic::_cargo_workspace_root "$dir")" || {
-        relic::_die "no cargo workspace above $dir"
+        relic::_workspace_die "$dir"
         return $?
     }
 
