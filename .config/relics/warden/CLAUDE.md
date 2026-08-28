@@ -28,6 +28,11 @@ precisely the question, so `staged.rs` goes through `relic_core::tool::Tool` and
 inherits the environment — the same call `ernest --changed` makes, for the same
 reason.
 
+Failures are classified by asking git a question with a machine-readable answer
+(`rev-parse --is-inside-work-tree`), never by reading the complaint it printed —
+outside a repository `--cached` is not even a valid flag, so git's message is
+about the flag and says nothing about the cause. Paid only on the failure path.
+
 ## Fail-closed, and its sharp edge
 
 yadm runs its *own* `pre_commit`, and `git commit --no-verify` does not skip it.

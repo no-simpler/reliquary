@@ -248,6 +248,7 @@ fn a_path_with_a_space_is_one_path() {
 mod staged {
     use super::Fixture;
     use assert_cmd::Command;
+    use predicates::prelude::PredicateBooleanExt;
     use predicates::str::contains;
     use std::process::Command as Plain;
 
@@ -318,6 +319,17 @@ mod staged {
         fixture.file("hit.txt", b"barleycorn\n");
         stage(&fixture, "hit.txt");
         guard(&fixture).failure().stderr(contains("barleycorn"));
+    }
+
+    /// Outside a repository, git answers `--cached` with a usage screen about
+    /// the flag. The cause has to come from a question with a real answer.
+    #[test]
+    fn no_repository_says_so_rather_than_quoting_git() {
+        let fixture = Fixture::new();
+        guard(&fixture)
+            .failure()
+            .stderr(contains("not a git repository"))
+            .stderr(contains("usage").not());
     }
 
     /// Guarding nothing is legal and must never be silent: the same output
