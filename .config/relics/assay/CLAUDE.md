@@ -246,7 +246,7 @@ remaining work is a list rather than a rediscovery:
 | Homebrew package health | `brew-health` |
 | tracking coverage | `yadm-coverage` |
 | shell lint and format | **still to take** — a station over `check-shell-lint` |
-| relic build cache | **still to take** |
+| relic build cache | **`relic-cache`** |
 | encrypted archive drift · archive vs disk verification | **stays in the wrapper.** Genuinely dotfile-specific, and the second is the one Touch-ID check |
 | ske wiring | the registry adapter, once `ske` speaks the protocol — which is migration ④. Until then the wrapper keeps one call, because losing it would lose the check that a broken `gpg.ssh.program` shim breaks every commit |
 
@@ -265,3 +265,20 @@ one function that cannot be asked for three of its ten sections.
 | Duplicate `$PATH` entries are named once each, in first-repeat order, in the finding's detail | the script printed `sort | uniq -d`, which is duplicate-free but reordered — and a report that reshuffles between runs cannot be diffed | `duplicates_are_named_once_each_in_the_order_they_first_repeat` |
 | The dialect difference is a `Dialect` enum with one method, not an `if` on the shell's name | the two dialects differ in exactly one place — how a list variable is joined — and naming that makes it the only thing a fourth shell would have to supply | `the_fish_probe_joins_a_list_and_the_posix_one_does_not` |
 | `run_within`, not `capture_within` | an interactive shell's exit status is whatever its last rc line left behind. What is asked is whether the probe reached the end, and the marker answers that | `a_shell_that_never_reaches_the_marker_did_not_start` |
+
+## Deviations from `yadm doctor`'s relic-cache section
+
+Parity verified on the live machine: the same number, the same lane, the same
+grade — 10083 MiB in `~/.config/relics`, soft.
+
+| deviation | why | pinned by |
+| --- | --- | --- |
+| A lane under the ceiling prints nothing, where the script printed its size with a tick | inventory is not verification, and a size nobody needs to act on is a number nobody reads. Same grade | `a_small_build_tree_has_nothing_to_say` |
+| A lane `du` cannot measure is a `Note`, where the script silently reported nothing | "could not measure" and "measured, and it is fine" are different facts, and only one of them is a clean bill | `a_directory_that_does_not_exist_cannot_be_measured` |
+
+`du -sk` is kept rather than replaced by a walk, and it is not a house-rule
+violation: POSIX fixes the output as a number, a tab and the path, and `-k`
+fixes the unit so the answer does not depend on a `BLOCKSIZE` the environment
+happens to carry. It also counts **blocks**, which is what the disk is actually
+holding — a walk summing apparent sizes would answer a different question and
+report a different number from the one `up` acts on.

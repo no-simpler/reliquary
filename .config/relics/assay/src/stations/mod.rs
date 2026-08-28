@@ -8,6 +8,7 @@ pub mod bedrock;
 pub mod brew_health;
 pub mod md_blocks;
 pub mod registry;
+pub mod relic_cache;
 pub mod shell_parity;
 pub mod shell_startup;
 pub mod yadm_coverage;
