@@ -44,7 +44,11 @@ the restriction lints fire on every test file and get suppressed module-wide.
 `ratchets/` holds the committed baselines a subsystem carries with it if the lane
 ever moves. `allows.toml` counts `#[allow]` per package and `relic test` enforces
 it across the whole workspace — as an **equality**, so removing a suppression also
-means lowering the number. See "Track 3" in `~/.config/reliquary/HARDENING.md`.
+means lowering the number. `coverage.toml` joins it once the platform retro-fit has
+stopped moving the numbers; until then `relic test --cover` reports and does not
+gate. `deny.toml` is the supply-chain check (`cargo deny check`), and `cargo machete`
+covers the unused-dependency case it does not. See "Track 3" in
+`~/.config/reliquary/HARDENING.md`.
 
 Rust relics carry no `scripts/publish.sh` and no `scripts/test.sh` — the rust
 branch of `~/.config/reliquary/lib/relic.sh` is the whole story, and it publishes

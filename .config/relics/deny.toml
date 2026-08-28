@@ -1,0 +1,41 @@
+# Supply-chain hygiene for the relic lane. See "Track 3 — Supply chain" in
+# ~/.config/reliquary/HARDENING.md.
+#
+# This replaces dependency *counting* with dependency *hygiene*: the reuse
+# ladder says reach for a maintained ecosystem crate first, and no budget
+# constrains that, so the counterweight has to be a check rather than a rule.
+#
+# Not cargo-audit as well — `cargo deny check advisories` reads the same RustSec
+# database, and two tools doing one job is two things to keep current.
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+# The lane is `publish = false`, so this is not a distribution question. It is
+# a "would this be a problem if a relic ever graduated" question, answered once
+# here instead of at each graduation.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+# The real risk the two-workspace split creates: the attic's shared dependency
+# versions drifting from this lane's.
+multiple-versions = "warn"
+wildcards = "deny"
+# A path dependency inside the workspace carries no version, which reads as a
+# wildcard. `relic-core` is the case, and it is the whole point of a workspace.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

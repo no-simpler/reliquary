@@ -255,8 +255,11 @@ off. **A smoke alarm, not a benchmark suite** — no `hyperfine`, no criterion h
 ### Supply chain
 
 `cargo deny` (licences, advisories, duplicate versions) replaces dependency *counting* with
-dependency *hygiene*. Not `cargo-audit` as well: `cargo deny check advisories` reads the same
-RustSec database, and two tools doing one job is two things to keep current.
+dependency *hygiene*, against a committed `deny.toml`. Not `cargo-audit` as well:
+`cargo deny check advisories` reads the same RustSec database, and two tools doing one job is
+two things to keep current. `cargo machete` covers the one thing it does not — a dependency
+declared and never used — on stable and in milliseconds, where `cargo-udeps` needs nightly and
+a full build.
 
 **An installed tool nobody invokes is an unratcheted dependency** — upgraded forever, audited
 by nobody, its absence never noticed. Every entry in `cargo/crates.txt` carries a one-line

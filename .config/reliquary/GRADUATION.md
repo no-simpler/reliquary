@@ -242,7 +242,16 @@ source ~/.config/reliquary/lib/relic.sh
 relic::publish ~/.config/relics/<name>     # check_deps, then publish by RUNTIME
 relic::test    ~/.config/relics/<name>     # dispatches by RUNTIME
 relic::update  ~/.config/relics/<name>     # dispatches by RUNTIME
+relic::cover   ~/.config/relics/<name>     # rust only — coverage + the ratchet
+relic::mutants ~/.config/relics/<name>     # rust only — mutation testing
 ```
+
+**Fast loop, slow gate.** `test` is the loop and must stay fast, because agents route
+around slow commands: format, then lint, then the suite. `cover` and `mutants` are
+separate, deliberate invocations run at wave boundaries. The bash branch of `test`
+runs `check-shell-lint` first for the same reason the rust branch runs `fmt` first —
+cheapest station reports first, and bash has nothing else that can be verified
+statically.
 
 For `rust` the defaults are the whole story, so no Rust relic carries a
 `scripts/publish.sh` or `scripts/test.sh`: publish builds then installs from the
@@ -297,7 +306,8 @@ Stage-2 relic, self-hosted at `~/.config/relics/relic/`:
 relic list                       # all relics: stage, runtime, published-state
 relic status [<name>]            # one relic's detail (deps, PATH wiring, git dirty)
 relic publish [<name>]           # in-house relic → PATH (wraps relic::publish)
-relic test    [<name>]           # wraps relic::test
+relic test    [<name>] [--cover] # wraps relic::test; --cover adds the coverage gate
+relic mutants [<name>]           # mutation testing — the assertion-quality gate
 relic update  [<name>]           # wraps relic::update
 relic scaffold <name> [-r <rt>]  # Stage 1 → 2: promote a bin/ util or fresh idea
 relic registry [--migrate|--prune]  # show / fold / prune the shared registry

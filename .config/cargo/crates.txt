@@ -2,21 +2,27 @@
 # Restored at bootstrap by ~/.config/yadm/snippets/shared/13-cargo-bins.sh
 # (via cargo-binstall) and kept current by `up` (cargo install-update -a).
 # One crate per line; `#` comments and blank lines ignored.
+#
+# Every entry carries the caller that invokes it. An installed tool nobody
+# invokes is an unratcheted dependency: upgraded forever, audited by nobody,
+# and its absence would never be noticed. Same convention as brew/undeclared.
+#
+# This lane is `publish = false` throughout, so crates.io release tooling has
+# no caller here by construction and is deliberately absent.
 
-cargo-binstall
-cargo-expand
-cargo-feature-combinations
-cargo-generate
-cargo-msrv
-cargo-nextest
-cargo-public-api
-cargo-release
-cargo-semver-checks
-cargo-smart-release
-cargo-sweep
-cargo-tarpaulin
-cargo-udeps
-cargo-update
-grcov
-release-plz
-sqlx-cli
+# Fast loop — every `relic test`.
+cargo-nextest         # the test runner relic::_test_compiled prefers
+
+# Slow gate — run at wave and milestone boundaries, not in the loop.
+cargo-llvm-cov        # coverage: `relic test --cover`, and the committed baselines
+cargo-mutants         # assertion quality: `relic mutants`. Coverage alone is gameable
+cargo-deny            # licences, advisories, duplicate versions, against relics/deny.toml
+cargo-machete         # unused dependencies — the one hygiene gate cargo-deny does not cover
+
+# Machinery.
+cargo-binstall        # how 13-cargo-bins.sh installs this list without compiling it
+cargo-update          # `up`'s `cargo install-update -a`
+cargo-sweep           # `up`'s build-cache step, and what holds target/ under its ceiling
+
+# Occasional, by hand.
+cargo-expand          # read what a derive actually generated; this lane is derive-heavy

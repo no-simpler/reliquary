@@ -28,7 +28,11 @@ check "prefix st→status" "$(resolve_cmd st)" "status"
 check "prefix pub→publish" "$(resolve_cmd pub)" "publish"
 check "single l→list" "$(resolve_cmd l)" "list"
 check "single r→registry" "$(resolve_cmd r)" "registry"
-check "single m→migrate" "$(resolve_cmd m)" "migrate"
+# `mutants` and `migrate` share a first letter, so bare m is now ambiguous
+# and must be rejected rather than silently picking one.
+if resolve_cmd m >/dev/null 2>&1; then check "single m ambiguous" "resolved" "rejected"; else check "single m ambiguous" "rejected" "rejected"; fi
+check "prefix mi→migrate" "$(resolve_cmd mi)" "migrate"
+check "prefix mu→mutants" "$(resolve_cmd mu)" "mutants"
 check "single u→update" "$(resolve_cmd u)" "update"
 check "single h→help" "$(resolve_cmd h)" "help"
 if resolve_cmd zz >/dev/null 2>&1; then check "unknown rejected" "ok" "rejected"; else check "unknown rejected" "rejected" "rejected"; fi

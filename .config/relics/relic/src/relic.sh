@@ -11,7 +11,9 @@
 #   list                  all relics with stage, runtime, published-state
 #   status [<name>]       one relic's detail (deps, PATH wiring, git dirty)
 #   publish [<name>]      publish an in-house relic's entrypoints onto PATH
-#   test    [<name>]      run an in-house relic's tests
+#   test    [<name>] [--cover]
+#                         run the tests; --cover adds coverage and the ratchet
+#   mutants [<name>]      mutation testing — the assertion-quality gate
 #   update  [<name>]      update/rebuild an in-house relic
 #   scaffold <name> [-r <rt>] [-e <why>]
 #                         promote a Stage-1 bin/ util (or a fresh idea) into a
@@ -37,7 +39,7 @@ GRADUATION="$HOME/.config/reliquary/GRADUATION.md"
 LOCAL_BIN="$HOME/.local/bin"
 REGISTRY="$LOCAL_BIN/.reliquary-managed"
 
-COMMANDS="list status publish test update scaffold registry migrate doctor help"
+COMMANDS="list status publish test mutants update scaffold registry migrate doctor help"
 
 # ── output ──────────────────────────────────────────────────────────────────
 
@@ -606,8 +608,22 @@ _status_external() {
 }
 
 cmd_publish() { _run_op publish "$@"; }
-cmd_test() { _run_op test "$@"; }
 cmd_update() { _run_op update "$@"; }
+cmd_mutants() { _run_op mutants "$@"; }
+
+# `test` is the fast loop and must stay fast — agents route around slow
+# commands. `--cover` is the deliberate slow-gate variant, never a default.
+cmd_test() {
+    local op=test a
+    local args=()
+    for a in "$@"; do
+        case "$a" in
+            --cover) op=cover ;;
+            *) args+=("$a") ;;
+        esac
+    done
+    _run_op "$op" ${args+"${args[@]}"}
+}
 
 _run_op() {
     local op="$1" name="${2:-}" dir path
@@ -833,7 +849,12 @@ commands:
   list                  all relics with stage, runtime, published-state
   status [<name>]       one relic's detail (deps, PATH wiring, git dirty)
   publish [<name>]      publish an in-house relic's entrypoints onto PATH
-  test    [<name>]      run an in-house relic's tests
+  test    [<name>] [--cover]
+                        run the tests; --cover adds coverage and checks it
+                        against the committed baseline
+  mutants [<name>]      mutate the code and check that the tests fail — the
+                        gate coverage cannot be, since a test that asserts
+                        nothing kills no mutants
   update  [<name>]      update/rebuild an in-house relic
   scaffold <name> [-r <rt>] [-e <why>]
                         promote a Stage-1 ~/.config/bin util (or fresh idea)
@@ -888,6 +909,7 @@ main() {
         status) cmd_status "$@" ;;
         publish) cmd_publish "$@" ;;
         test) cmd_test "$@" ;;
+        mutants) cmd_mutants "$@" ;;
         update) cmd_update "$@" ;;
         scaffold) cmd_scaffold "$@" ;;
         registry) cmd_registry "$@" ;;

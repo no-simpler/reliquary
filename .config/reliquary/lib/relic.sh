@@ -443,6 +443,105 @@ relic::_test_compiled() {
     )
 }
 
+# Coverage, the slow gate. `relic test` must stay fast because agents route
+# around slow commands, so this is a separate, deliberate invocation.
+#
+# Coverage alone is gameable by exactly the behaviour it guards against — a test
+# that executes a line and asserts nothing scores the same as a real one — so it
+# is one of two gates, `relic mutants` being the other and the real one.
+relic::cover() {
+    local dir="${1:-}"
+    [[ -n "$dir" ]] || {
+        relic::_die "cover: missing dir"
+        return $?
+    }
+    relic::load_manifest "$dir" || return $?
+    [[ "$RUNTIME" == "rust" ]] || {
+        relic::_die "cover: only rust relics ($NAME is $RUNTIME)"
+        return $?
+    }
+    command -v cargo-llvm-cov >/dev/null 2>&1 || {
+        relic::_die "cover: cargo-llvm-cov not installed (see ~/.config/cargo/crates.txt)"
+        return $?
+    }
+
+    local root c
+    root="$(relic::_cargo_workspace_root "$dir")" || {
+        relic::_die "no cargo workspace above $dir"
+        return $?
+    }
+
+    # Every shared crate too: code that moved into crates/ is covered from each
+    # of its dependents rather than by nobody, the same reason relic::test
+    # passes them.
+    local pkgs=(-p "$NAME")
+    while IFS= read -r c; do
+        [[ -n "$c" ]] && pkgs=("${pkgs[@]}" -p "$c")
+    done < <(relic::_shared_crates "$root")
+
+    (
+        cd "$dir" || exit $?
+        if command -v cargo-nextest >/dev/null 2>&1; then
+            cargo llvm-cov nextest "${pkgs[@]}" --summary-only
+        else
+            cargo llvm-cov "${pkgs[@]}" --summary-only
+        fi
+    ) || return $?
+
+    relic::_coverage_ratchet "$root"
+}
+
+# The coverage ratchet. Inert until the baselines are committed — a baseline
+# computed on the fly is not a ratchet, it is a moving target.
+#
+# The comparison is cargo-llvm-cov's own `--fail-under-regions`, reading the
+# profile data the run above already collected. Never a percentage scraped out
+# of the summary table: an exit code is the machine-readable interface, and a
+# table is human-facing output.
+#
+# Regions, not lines. llvm-cov counts regions, so every `?` and match arm shows
+# the partial coverage that line counting hides.
+relic::_coverage_ratchet() {
+    local root="${1:-}" baseline="${1:-}/ratchets/coverage.toml"
+    if [[ ! -f "$baseline" ]]; then
+        printf 'coverage ratchet: no baseline at %s — reported, not gated\n' "$baseline"
+        return 0
+    fi
+
+    local fail=0 line pkg want
+    while IFS= read -r line; do
+        pkg="$(printf '%s' "${line%%=*}" | tr -d ' "')"
+        want="$(printf '%s' "${line#*=}" | tr -cd '0-9.')"
+        [[ -n "$pkg" && -n "$want" ]] || continue
+        if ! (cd "$root" && cargo llvm-cov report -p "$pkg" \
+            --summary-only --fail-under-regions "$want" >/dev/null 2>&1); then
+            printf 'coverage ratchet: %s is under its baseline of %s%% regions\n' "$pkg" "$want" >&2
+            fail=1
+        fi
+    done < <(grep -E '^[^#[:space:]].*=' "$baseline")
+    return "$fail"
+}
+
+# Mutation testing: the real assertion-quality gate. It mutates the code and
+# checks whether tests *fail* — an assertion-free test kills no mutants.
+relic::mutants() {
+    local dir="${1:-}"
+    [[ -n "$dir" ]] || {
+        relic::_die "mutants: missing dir"
+        return $?
+    }
+    relic::load_manifest "$dir" || return $?
+    [[ "$RUNTIME" == "rust" ]] || {
+        relic::_die "mutants: only rust relics ($NAME is $RUNTIME)"
+        return $?
+    }
+    command -v cargo-mutants >/dev/null 2>&1 || {
+        relic::_die "mutants: cargo-mutants not installed (see ~/.config/cargo/crates.txt)"
+        return $?
+    }
+    (cd "$dir" && cargo mutants --package "$NAME" "${@:2}")
+}
+
 relic::update() {
     local dir="${1:-}"
     [[ -n "$dir" ]] || {

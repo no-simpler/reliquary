@@ -1,0 +1,86 @@
+# Latency budgets for the paths a person or a session actually waits on.
+#
+# See "Performance budgets" in ~/.config/reliquary/HARDENING.md. Every headline
+# win the Rustification programme claims is a win nothing otherwise prevents
+# from eroding; this is what prevents it. A station times these and reports when
+# one exceeds `budget_ms * tolerance`, graded **degraded, not broken**.
+#
+# Deliberately loose. Timings are machine-dependent and a laptop under thermal
+# load must not trip a gate people then switch off. A smoke alarm, not a
+# benchmark suite — no hyperfine, no criterion harness.
+#
+# `budget_ms` is what the path costs **today**, not what it should cost. A
+# migration that makes one faster lowers its number in the same commit; that is
+# the ratchet, and it is why the numbers are captured before the migrations
+# start moving them.
+#
+# Measured on this machine, wall clock, otherwise idle, best of three.
+
+tolerance = 3
+
+# ── every commit, in front of a Touch ID prompt ──────────────────────────────
+[[path]]
+name = "pre-commit-guard"
+command = "yadm/hooks/pre_commit"
+budget_ms = 3000
+measured = "2026-08-28"
+note = """Not directly runnable — it needs a staged commit. 2-4s, of which 1.64s is
+`file` probes alone: ~600 forks over every tracked file, because it scans the whole
+tree rather than the staged set."""
+
+# ── every session start ──────────────────────────────────────────────────────
+[[path]]
+name = "nexus-verify-hook"
+command = "nexus verify --hook"
+budget_ms = 1830
+measured = "2026-08-27"
+
+[[path]]
+name = "docket-announce-hook"
+command = "docket announce --hook"
+budget_ms = 30
+measured = "2026-08-27"
+note = "The Rust reference point: what a session-start hook costs when it is a binary."
+
+# ── every interactive shell, prompt, or prompt render ────────────────────────
+[[path]]
+name = "yadm-check"
+command = "yadm check"
+budget_ms = 190
+measured = "2026-08-28"
+note = "The SHA-256 it exists to compute is 11ms of that."
+
+[[path]]
+name = "modes-expander"
+command = ".claude/hooks/modes.py"
+budget_ms = 26
+measured = "2026-08-27"
+note = "rglob per token, so the cost is O(tree) — the scaling is the argument, not the 26ms."
+
+[[path]]
+name = "ske-prompt"
+command = "ske-prompt"
+budget_ms = 10
+measured = "2026-08-27"
+
+# ── every `yadm update` and every dream pre-pass ─────────────────────────────
+[[path]]
+name = "yadm-doctor-quiet"
+command = "yadm doctor --quiet"
+budget_ms = 30410
+measured = "2026-08-28"
+note = "98% CPU-bound. The station that times this cannot be one of its own sections."
+
+[[path]]
+name = "ske-doctor"
+command = "ske doctor"
+budget_ms = 20300
+measured = "2026-08-27"
+note = "Two thirds of yadm doctor's total, and the single largest item in it."
+
+[[path]]
+name = "check-shell-lint"
+command = "check-shell-lint"
+budget_ms = 4160
+measured = "2026-08-28"
+note = "Two linter startups over the whole tracked bash population."
