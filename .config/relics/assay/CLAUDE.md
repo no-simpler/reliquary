@@ -324,8 +324,8 @@ live machine the day it lands.
 | `path` | **built** — and `bin/pb` is retired with it |
 | `git-identity` | **built** |
 | `manifest-drift` | **built** |
+| `hook-wiring` | **built** |
 | harness permission rules | to build — and it retires `halo`'s `settings_lint.py` one dream cycle later |
-| harness hook wiring | to build |
 | `~/.claude` skill and plugin health | to build |
 
 ## The `path` station
@@ -445,6 +445,41 @@ Exemptions are per-lane and do not leak across, which is its own test.
 
 **npm's exit status is not its answer**: `npm ls` exits non-zero on an unmet peer
 dependency while still printing the tree it was asked for.
+
+## The `hook-wiring` station
+
+A hook is the one kind of configuration that is invisible when it is wrong. Nothing
+invokes it directly, nothing reports its absence, and both surfaces here swallow their
+own failures deliberately: Claude Code's session-start hooks end in `|| true` so a
+broken one cannot block a session, and a yadm hook without its execute bit is a file
+git simply does not run. In both cases the machine behaves exactly as if the hook had
+been deleted — which is why everything here is `Broken`.
+
+| checked | why it matters |
+| --- | --- |
+| Every `command` hook's program resolves and is executable | a hook that cannot start is indistinguishable from one never configured, and `\|\| true` means it cannot even fail |
+| When the program is an interpreter, the script it is handed exists | `python3 /gone/hook.py` resolves perfectly and runs nothing |
+| A hook of any other `type` | it names no program, so nothing was configured |
+| A settings file that is not valid JSON | every hook in it is lost at once |
+| Every file in `~/.config/yadm/hooks/` is executable | git skips one without the bit and says nothing; a commit guard that does not run is a guard that is not there |
+
+**The event-name table is deliberately not transcribed.** Asserting that
+`SessionStart` is a real event would mean carrying Claude Code's list of them, and a
+stale copy fails every hook on the next harness release — reporting a broken machine
+because the checker is old. The rule for a table read out of a third-party binary is
+that it must fail loudly when the binary moves, which needs the runner-level staleness
+facility the permission-rule station brings with it. Until then this station checks
+only what the filesystem can answer, which never goes stale.
+
+**The word splitter is not a shell parser and does not need to be.** What is wanted is
+the program and at most its first argument. Quotes are honoured, because a
+`$HOME`-bearing path is always quoted; everything from the first operator onwards is
+dropped, so `|| true` is never read as an argument; and a leading `-` means the next
+word is a flag rather than a script. Three tests pin exactly that much.
+
+**Two files in the hook directory are data, not hooks.** yadm runs a hook named after
+one of its commands; the identity guard's definition and its reader sit beside them and
+are read by `warden`. An execute bit on either would be wrong rather than missing.
 
 ## Retired, not ported: `bin/pb`
 
