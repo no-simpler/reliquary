@@ -34,14 +34,19 @@ setopt hist_save_no_dups        # don't save duplicates to HISTFILE but allow th
 setopt hist_expire_dups_first   # delete duplicates first when HISTFILE size exceeds HISTSIZE
 setopt hist_verify              # show command with history expansion to user before running it
 
-# Load completions
+# Load completions.
+#
+# -i: skip insecure directories silently instead of asking. Any account that did
+# not install Homebrew finds /opt/homebrew/share/zsh/site-functions owned by the
+# account that did, and stock compinit then stops every login shell with a y/n
+# question — asked behind this file's own `stty -echo`, so the answer does not
+# echo. The owner-installed case trips nothing, so this is inert on a
+# single-account machine.
 FPATH="$HOME/.config/zsh/completion:$FPATH"
-autoload -Uz compinit && compinit
+autoload -Uz compinit && compinit -i
 
 # Replace tab completion with fzf
 zstyle ':completion:*' menu no
 zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls --color $realpath'
 zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls --color $realpath'
 
-# Skip verification of insecure directories
-ZSH_DISABLE_COMPFIX=true
