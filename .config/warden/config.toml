@@ -1,0 +1,16 @@
+# What the commit guard is told to leave alone.
+#
+# Public, unlike the definition it tests against: this names paths already
+# visible in the tree, and each entry's reason is worth reading.
+#
+# Absence of this file guards everything, which is the safe direction to
+# default in. An entry here is a decision, not a convenience.
+
+[warden]
+# Content the guard cannot read as text is refused, because nothing can vouch
+# for what is in it. These are the exceptions.
+binary-allowed = [
+    # Ciphertext by construction, and the output of the very lane the guard
+    # exists to keep content inside. Scanning it would test the encryption.
+    ".local/share/yadm/archive",
+]

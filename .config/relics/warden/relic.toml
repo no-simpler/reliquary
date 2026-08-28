@@ -1,0 +1,12 @@
+# Manifest for the `warden` CLI — Stage-2 in-house relic.
+# See ~/.config/reliquary/GRADUATION.md for the full schema.
+
+[relic]
+name = "warden"
+description = "The commit guard: refuses staged content that must never reach a public tree."
+runtime = "rust"
+min-runtime-version = "1.89" # floor, never a pin — the workspace's rust-version
+brew-deps = []               # rustup owns the toolchain
+external-deps = [
+    "git (the staged set; the hook's own repository, so its ambient environment is inherited rather than stripped)",
+]

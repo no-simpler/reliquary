@@ -23,6 +23,7 @@ members = [
     "docket",
     "ernest",
     "midden",
+    "warden",
 ]
 
 [workspace.package]

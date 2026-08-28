@@ -215,6 +215,28 @@ relic's `scripts/update.sh`, which `up` already invokes.
 `midden help`, doctrine in `midden guide`. Do not restate either here or anywhere else; the relic's
 `CLAUDE.md` records why.
 
+### Commit guard (`warden`)
+
+Refuses staged content that must never reach a public tree. Public relic
+(`~/.config/relics/warden/`, Rust), invoked by `~/.config/yadm/hooks/pre_commit`.
+
+The hook is three lines and a break-glass; everything it decides is in the relic, so the
+guard survives the hook changing. It reads the encrypted definition (see "The identity guard"
+above) as data, and `~/.config/warden/config.toml` — public — for what this machine has
+decided to leave alone. An absent config guards everything.
+
+It gates the **staged set**, not the whole tree. The whole-tree sweep is a standing audit and
+belongs to one.
+
+**Fail-closed, with one escape.** yadm runs its *own* `pre_commit`, and `git commit
+--no-verify` does not skip it — so a missing binary would leave you unable to commit the fix
+for it. `YADM_HOOK_BREAK_GLASS=1` commits anyway, prints that it did, and appends to
+`~/.local/state/warden/break-glass.log`. Loud and traced; not a flag to reach for twice.
+
+**The binary is the single source of truth for its own surface** — `warden --help`. Its
+`CLAUDE.md` carries the deviations from the shell hook it replaced, each naming the test that
+pins it.
+
 ### Touch ID window (`ske`)
 
 `ske` ("skeleton key") opens a **time-boxed window** in which 1Password Touch ID prompts are
