@@ -101,6 +101,17 @@ mod tests {
         assert_eq!(age(days_ago(now, -5), now), "today");
     }
 
+    proptest::proptest! {
+        /// An age never falls as the instant recedes. A comparison written the
+        /// other way round reads the same and is wrong at exactly one boundary.
+        #[test]
+        fn age_never_falls_as_an_instant_recedes(near in 0i64..4000, far in 0i64..4000) {
+            let (near, far) = (near.min(far), near.max(far));
+            let now = Timestamp::from_second(1_700_000_000).expect("a fixed instant");
+            proptest::prop_assert!(age_days(days_ago(now, far), now) >= age_days(days_ago(now, near), now));
+        }
+    }
+
     #[test]
     fn plural_agrees_with_its_count() {
         assert_eq!(plural(1, "note", "notes"), "1 note");

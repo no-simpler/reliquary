@@ -228,6 +228,26 @@ repair is to lower the baseline in the same commit. An inequality lets slack acc
 suppressions removed and never accounted for is five that can be added back unseen. The
 ergonomics are `insta`'s — a changed measurement fails until it is accepted.
 
+### The test harness is not written here
+
+A CLI suite hand-rolls the same four things every time: a unique temporary tree with a `Drop`
+that cleans it, a process invocation, a status assertion, and a stream assertion. The
+ecosystem owns all four — **`tempfile`, `assert_cmd`, `predicates`** — and the reason to take
+them is not the line count. A bespoke fixture prints what its author thought to print; a
+failing `assert_cmd` assertion prints the invocation, both streams and the exit code, every
+time. And the next reader recognises the idiom instead of learning one.
+
+**Two rules the crates do not enforce.** A fixture holds its `TempDir` in a field, or the tree
+is deleted before the first command runs. And a suite's *domain* helpers — the ones that name
+what a test is about — stay hand-written: they are the readable part, and replacing them buys
+nothing.
+
+**`proptest` for properties an example can only sample** — idempotence, monotonicity, the
+invariants of a normal form, a round trip that must not lose bytes. Not a replacement for
+example tests, which is what says the behaviour is the *intended* one. **`insta`** where the
+assertion is a whole output, replacing hand-managed `*.expected.*` fixtures; a suite whose
+assertions are structural gains nothing from it and should not adopt it for symmetry.
+
 ### Coverage, and what it is worth
 
 `cargo-llvm-cov`, **70% floor, 85% for platform crates**, plus a committed per-crate baseline

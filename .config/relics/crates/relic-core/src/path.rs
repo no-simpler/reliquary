@@ -200,6 +200,39 @@ mod tests {
         assert!(resolve("~someone/else").ends_with("~someone/else"));
     }
 
+    proptest::proptest! {
+        /// Resolution is a normal form, so applying it again adds nothing. The
+        /// example tests can only sample the `.`/`..` interleavings that make
+        /// this hard; the generator covers them.
+        #[test]
+        fn resolution_is_a_fixed_point(
+            parts in proptest::collection::vec("[a-z.]{1,4}", 1..6),
+        ) {
+            let raw = format!("/tmp/relic-core-absent-xyz/{}", parts.join("/"));
+            let once = resolve_lenient(Utf8Path::new(&raw)).expect("an absolute path resolves");
+            let twice = resolve_lenient(&once).expect("a resolved path resolves");
+            proptest::prop_assert_eq!(twice, once);
+        }
+
+        /// What the normal form leaves behind: no `.`, no `..`, and no trailing
+        /// separator — each of which would key one directory two ways.
+        #[test]
+        fn resolution_leaves_nothing_that_could_key_twice(
+            parts in proptest::collection::vec("[a-z.]{1,4}", 1..6),
+        ) {
+            let raw = format!("/tmp/relic-core-absent-xyz/{}", parts.join("/"));
+            let resolved = resolve_lenient(Utf8Path::new(&raw)).expect("an absolute path resolves");
+            for component in resolved.components() {
+                proptest::prop_assert!(!matches!(
+                    component,
+                    Utf8Component::CurDir | Utf8Component::ParentDir
+                ));
+            }
+            let text = resolved.as_str();
+            proptest::prop_assert!(text == "/" || !text.ends_with('/'));
+        }
+    }
+
     #[test]
     fn a_path_that_cannot_be_spelled_is_refused_at_the_edge() {
         use std::os::unix::ffi::OsStringExt;

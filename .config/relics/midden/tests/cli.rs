@@ -1,32 +1,38 @@
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::{env, fs};
+
+use assert_cmd::Command;
+use assert_cmd::assert::{Assert, OutputAssertExt};
+use predicates::str::contains;
+use tempfile::TempDir;
 
 /// A temporary corpus and the binary that acts on it. Every invocation is
 /// pinned to `MIDDEN_ROOT` and to agent-shaped output, so no test can reach the
 /// real corpus or depend on a terminal.
 struct Midden {
+    /// Held for its `Drop`: the tree lives exactly as long as the fixture.
+    _dir: TempDir,
     base: PathBuf,
     root: PathBuf,
 }
 
 impl Midden {
     fn new() -> Midden {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let unique = format!(
-            "midden-tests-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        );
-        let base = env::temp_dir().join(unique);
-        fs::create_dir_all(&base).expect("creating the test directory");
+        let dir = tempfile::Builder::new()
+            .prefix("midden-tests-")
+            .tempdir()
+            .expect("creating the test directory");
         // Canonical, because the CLI resolves every path it is handed, and the
-        // paths it prints have to match the ones a test builds by hand.
-        let base = fs::canonicalize(&base).expect("canonicalising the test directory");
+        // paths it prints have to match the ones a test builds by hand — and on
+        // macOS the temporary root is itself a symlink.
+        let base = fs::canonicalize(dir.path()).expect("canonicalising the test directory");
         let root = base.join("corpus");
         fs::create_dir_all(&root).expect("creating the corpus root");
-        Midden { base, root }
+        Midden {
+            _dir: dir,
+            base,
+            root,
+        }
     }
 
     fn run(&self, args: &[&str]) -> Run {
@@ -159,12 +165,6 @@ impl Midden {
     }
 }
 
-impl Drop for Midden {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.base);
-    }
-}
-
 fn names_in(dir: &Path) -> Vec<String> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
@@ -188,27 +188,25 @@ fn jiff_ago(days: i64) -> String {
 }
 
 struct Run {
-    output: Output,
+    output: std::process::Output,
 }
 
 impl Run {
+    /// Asserts success and hands the run back, so an invocation and what it
+    /// said stay one expression. A failure prints the invocation, both streams
+    /// and the code.
     fn ok(self) -> Run {
-        assert!(
-            self.output.status.success(),
-            "expected success\nstdout: {}\nstderr: {}",
-            self.stdout(),
-            self.stderr()
-        );
+        self.assert().success();
         self
     }
 
     fn fails(self) -> Run {
-        assert!(
-            !self.output.status.success(),
-            "expected failure\nstdout: {}",
-            self.stdout()
-        );
+        self.assert().failure();
         self
+    }
+
+    fn assert(&self) -> Assert {
+        self.output.clone().assert()
     }
 
     fn stdout(&self) -> String {
@@ -263,7 +261,7 @@ fn the_same_cause_folds_instead_of_multiplying() {
     let again = again.ok();
 
     assert_eq!(again.stdout().trim(), first);
-    assert!(again.stderr().contains("folded into"), "{}", again.stderr());
+    again.assert().stderr(contains("folded into"));
     assert_eq!(m.live().len(), 1);
     assert!(m.read(&first).contains("occurrences: 2"));
 }
@@ -310,14 +308,14 @@ fn field_caps_refuse_with_the_flag_that_needs_retyping() {
     let m = Midden::new();
     let long = "x".repeat(73);
     let run = m.run(&["file", "--kind", "gap", "--title", &long]).fails();
-    assert!(run.stderr().contains("--title"), "{}", run.stderr());
-    assert!(run.stderr().contains("73 characters"), "{}", run.stderr());
+    run.assert().stderr(contains("--title"));
+    run.assert().stderr(contains("73 characters"));
 
     let body = "y".repeat(1201);
     let run = m
         .run(&["file", "--kind", "gap", "--title", "fine", "--body", &body])
         .fails();
-    assert!(run.stderr().contains("1201 bytes"), "{}", run.stderr());
+    run.assert().stderr(contains("1201 bytes"));
     assert!(m.live().is_empty());
 }
 
@@ -370,7 +368,7 @@ fn re_filing_a_claim_onto_an_existing_one_is_refused() {
     let first = m.file("gap", "claim one", &[]);
     let second = m.file("gap", "claim two", &[]);
     let run = m.run(&["set", &second, "--title", "claim one"]).fails();
-    assert!(run.stderr().contains(&first), "{}", run.stderr());
+    run.assert().stderr(contains(first));
 }
 
 #[test]
@@ -381,11 +379,11 @@ fn an_invalid_note_stays_listed_and_fails_doctor() {
     fs::write(&path, "---\nkind: gap\ntitle: readable\n---\nbody\n").expect("corrupting the note");
 
     let listing = m.run(&["list"]).ok();
-    assert!(listing.stdout().contains(&id), "{}", listing.stdout());
-    assert!(listing.stdout().contains("INVALID"), "{}", listing.stdout());
+    listing.assert().stdout(contains(id));
+    listing.assert().stdout(contains("INVALID"));
 
     let doctor = m.run(&["doctor"]).fails();
-    assert!(doctor.stdout().contains("invalid"), "{}", doctor.stdout());
+    doctor.assert().stdout(contains("invalid"));
 }
 
 #[test]
@@ -404,8 +402,8 @@ fn doctor_reports_a_target_that_is_no_longer_there() {
     );
 
     let doctor = m.run(&["doctor"]).fails();
-    assert!(doctor.stdout().contains("moved"), "{}", doctor.stdout());
-    assert!(doctor.stdout().contains("absent.md"), "{}", doctor.stdout());
+    doctor.assert().stdout(contains("moved"));
+    doctor.assert().stdout(contains("absent.md"));
     assert!(
         !doctor.stdout().contains("present.md"),
         "{}",
@@ -453,7 +451,7 @@ fn gc_holds_the_retention_boundaries() {
     let before = m.live().len();
     let dry = m.run(&["gc", "--dry-run"]).ok();
     assert_eq!(m.live().len(), before, "a dry run must change nothing");
-    assert!(dry.stdout().contains(&old_dismissed), "{}", dry.stdout());
+    dry.assert().stdout(contains(old_dismissed.clone()));
 
     m.run(&["gc"]).ok();
 

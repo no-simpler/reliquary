@@ -483,6 +483,18 @@ mod tests {
         assert!(split("---\nid: b71c\n").is_err());
     }
 
+    proptest::proptest! {
+        /// The body comes back byte for byte, which is what every rewrite of an
+        /// item relies on: only the metadata is ever rendered again.
+        #[test]
+        fn splitting_preserves_the_body(body in "(?s).*") {
+            let text = format!("---\nid: b71c\n---\n{body}");
+            let (front, found) = split(&text).expect("the document opens with metadata");
+            proptest::prop_assert_eq!(front, "id: b71c\n");
+            proptest::prop_assert_eq!(found, body.as_str());
+        }
+    }
+
     #[test]
     fn digests_differ_per_path() {
         assert_ne!(digest(Utf8Path::new("/a/b")), digest(Utf8Path::new("/a/c")));

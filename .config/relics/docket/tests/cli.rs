@@ -1,33 +1,39 @@
 use std::ffi::OsStr;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::{env, fs};
+
+use assert_cmd::Command;
+use assert_cmd::assert::{Assert, OutputAssertExt};
+use predicates::str::contains;
+use tempfile::TempDir;
 
 /// A temporary depot and the binary that acts on it. Every invocation is pinned
 /// to `DOCKET_ROOT` and to agent-shaped output, so no test can reach the real
 /// depot or depend on a terminal.
 struct Docket {
+    /// Held for its `Drop`: the tree lives exactly as long as the fixture.
+    _dir: TempDir,
     base: PathBuf,
     root: PathBuf,
 }
 
 impl Docket {
     fn new() -> Docket {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let unique = format!(
-            "docket-tests-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        );
-        let base = env::temp_dir().join(unique);
-        fs::create_dir_all(&base).expect("creating the test directory");
+        let dir = tempfile::Builder::new()
+            .prefix("docket-tests-")
+            .tempdir()
+            .expect("creating the test directory");
         // Canonical, because the CLI resolves every path it is handed, and the
-        // paths it prints have to match the ones a test builds by hand.
-        let base = fs::canonicalize(&base).expect("canonicalising the test directory");
+        // paths it prints have to match the ones a test builds by hand — and on
+        // macOS the temporary root is itself a symlink.
+        let base = fs::canonicalize(dir.path()).expect("canonicalising the test directory");
         let root = base.join("depot");
         fs::create_dir_all(&root).expect("creating the depot root");
-        Docket { base, root }
+        Docket {
+            _dir: dir,
+            base,
+            root,
+        }
     }
 
     /// A project directory that deliberately does not exist: items are written
@@ -58,7 +64,7 @@ impl Docket {
 
     /// Drives git against a tree the test built, never against the depot.
     fn git(&self, cwd: &Path, args: &[&str]) {
-        let output = Command::new("git")
+        Command::new("git")
             .arg("-C")
             .arg(cwd)
             .args(args)
@@ -68,13 +74,8 @@ impl Docket {
             .env("GIT_AUTHOR_EMAIL", "tests@localhost")
             .env("GIT_COMMITTER_NAME", "docket tests")
             .env("GIT_COMMITTER_EMAIL", "tests@localhost")
-            .output()
-            .expect("running git");
-        assert!(
-            output.status.success(),
-            "git {args:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+            .assert()
+            .success();
     }
 
     fn invoke(&self, cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Run {
@@ -93,8 +94,9 @@ impl Docket {
         for (key, value) in env {
             command.env(key, value);
         }
-        let output = command.output().expect("running the docket binary");
-        Run { output }
+        Run {
+            output: command.output().expect("running the docket binary"),
+        }
     }
 
     /// The depot's commit subjects, newest first.
@@ -145,7 +147,7 @@ impl Docket {
             "--allow-missing",
             "-q",
         ]);
-        assert!(run.ok(), "create failed: {}", run.stderr());
+        run.assert().success();
         id_and_path(&run.stdout())
     }
 
@@ -173,24 +175,18 @@ impl Docket {
             "--allow-missing",
             "-q",
         ]);
-        assert!(run.ok(), "create failed: {}", run.stderr());
+        run.assert().success();
         id_and_path(&run.stdout())
     }
 
     fn tag(&self, id: &str, tags: &str) {
         let run = self.run(&["set", id, "--tags", tags, "-q"]);
-        assert!(run.ok(), "set failed: {}", run.stderr());
-    }
-}
-
-impl Drop for Docket {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.base);
+        run.assert().success();
     }
 }
 
 struct Run {
-    output: Output,
+    output: std::process::Output,
 }
 
 impl Run {
@@ -202,12 +198,10 @@ impl Run {
         String::from_utf8_lossy(&self.output.stderr).into_owned()
     }
 
-    fn code(&self) -> i32 {
-        self.output.status.code().unwrap_or(-1)
-    }
-
-    fn ok(&self) -> bool {
-        self.output.status.success()
+    /// The status assertion. A failure prints the invocation, both streams and
+    /// the code, so no call site has to carry a message of its own.
+    fn assert(&self) -> Assert {
+        self.output.clone().assert()
     }
 }
 
@@ -402,13 +396,8 @@ fn creating_for_a_missing_target_demands_allow_missing() {
         "-q",
     ]);
 
-    assert!(!run.ok());
-    assert_ne!(run.code(), 0);
-    assert!(
-        run.stderr().contains("--allow-missing"),
-        "stderr should name the flag: {}",
-        run.stderr()
-    );
+    run.assert().failure();
+    run.assert().failure().stderr(contains("--allow-missing"));
 }
 
 /// Longer than any limit, so one value serves every over-length assertion.
@@ -445,10 +434,9 @@ fn creating_rejects_a_malformed_name_or_an_overlong_tagline() {
         ("A_NAME", TOO_LONG, "--tagline is 156 characters"),
     ] {
         let run = create(name, tagline);
-        assert!(!run.ok(), "expected a refusal: {}", run.stdout());
-        assert!(run.stderr().contains(expected), "{}", run.stderr());
+        run.assert().failure().stderr(contains(expected));
     }
-    assert!(create("A_NAME", "A tagline.").ok());
+    create("A_NAME", "A tagline.").assert().success();
 }
 
 #[test]
@@ -469,7 +457,7 @@ fn a_name_is_stored_in_one_spelling_however_it_was_typed() {
             "--allow-missing",
             "-q",
         ]);
-        assert!(run.ok(), "create failed: {}", run.stderr());
+        run.assert().success();
         let (id, path) = id_and_path(&run.stdout());
         assert!(
             front(&path).contains("name: DREAM_RESIDUE\n"),
@@ -480,11 +468,7 @@ fn a_name_is_stored_in_one_spelling_however_it_was_typed() {
         // Only the first is closed, so the rest exercise the duplicate report.
         if typed == "DREAM_RESIDUE" {
             let doctor = docket.run(&["doctor"]);
-            assert!(
-                doctor.stdout().contains("repeated DREAM_RESIDUE"),
-                "{}",
-                doctor.stdout()
-            );
+            doctor.assert().stdout(contains("repeated DREAM_RESIDUE"));
         }
     }
 }
@@ -504,8 +488,7 @@ fn set_and_relay_hold_the_same_limits_as_create() {
         ("--blocked", TOO_LONG, "--blocked is 156 characters"),
     ] {
         let run = docket.run(&["set", &handoff, flag, value, "-q"]);
-        assert!(!run.ok(), "expected `set {flag}` to refuse {value:?}");
-        assert!(run.stderr().contains(expected), "{}", run.stderr());
+        run.assert().failure().stderr(contains(expected));
     }
 
     let run = docket.run(&[
@@ -517,12 +500,9 @@ fn set_and_relay_hold_the_same_limits_as_create() {
         TOO_LONG,
         "-q",
     ]);
-    assert!(!run.ok(), "expected `relay` to refuse an overlong tagline");
-    assert!(
-        run.stderr().contains("--tagline is 156 characters"),
-        "{}",
-        run.stderr()
-    );
+    run.assert()
+        .failure()
+        .stderr(contains("--tagline is 156 characters"));
     // The refusal happened before anything was written: the relay is intact.
     let listed = docket.run(&["list", "--project", &project, "-q"]);
     assert_eq!(listed_ids(&listed.stdout()), vec![handoff, relay]);
@@ -544,7 +524,7 @@ fn a_wrapped_tagline_is_stored_as_one_line() {
         "--allow-missing",
         "-q",
     ]);
-    assert!(run.ok(), "create failed: {}", run.stderr());
+    run.assert().success();
     let (_, path) = id_and_path(&run.stdout());
     assert!(
         front(&path).contains("tagline: Two lines of it.\n"),
@@ -562,20 +542,14 @@ fn an_overlong_value_on_disk_loads_and_is_reported() {
 
     // Lenient on the way in: length never keeps an item off a listing.
     let listed = docket.run(&["list", "--project", &project, "-q"]);
-    assert!(listed.ok());
-    assert!(listed.stdout().contains(TOO_LONG), "{}", listed.stdout());
+    listed.assert().success().stdout(contains(TOO_LONG));
 
     // Reported on the way past, with the command that fixes it.
     let doctor = docket.run(&["doctor"]);
-    assert!(!doctor.ok(), "doctor should fail: {}", doctor.stdout());
-    assert!(
-        doctor.stdout().contains("overlong") && doctor.stdout().contains("--tagline"),
-        "{}",
-        doctor.stdout()
-    );
+    doctor.assert().failure().stdout(contains("overlong"));
 
     let set = docket.run(&["set", &id, "--tagline", "Short enough now.", "-q"]);
-    assert!(set.ok(), "set failed: {}", set.stderr());
+    set.assert().success();
     assert!(
         front(&path).contains("tagline: Short enough now.\n"),
         "{}",
@@ -608,7 +582,7 @@ fn a_superseded_key_is_not_read() {
 
         // Still listed — parsing is total — but as invalid, naming the key.
         let listed = docket.run(&["list", "--project", &project, "-q"]);
-        assert!(listed.ok(), "list failed: {}", listed.stderr());
+        listed.assert().success();
         let stdout = listed.stdout();
         assert!(stdout.contains("INVALID"), "{stdout}");
         assert!(
@@ -617,8 +591,7 @@ fn a_superseded_key_is_not_read() {
         );
 
         let doctor = docket.run(&["doctor"]);
-        assert!(!doctor.ok(), "doctor should fail: {}", doctor.stdout());
-        assert!(doctor.stdout().contains("invalid"), "{}", doctor.stdout());
+        doctor.assert().failure().stdout(contains("invalid"));
 
         let set = docket.run(&[
             "set",
@@ -629,7 +602,7 @@ fn a_superseded_key_is_not_read() {
             "Rebuilt under the current keys.",
             "-q",
         ]);
-        assert!(set.ok(), "set failed: {}", set.stderr());
+        set.assert().success();
         let front = front(&path);
         assert!(front.contains("name: REBUILT\n"), "{front}");
         assert!(
@@ -651,30 +624,26 @@ fn a_name_resolves_an_item_wherever_an_id_does() {
     // Normalised on the way in, so a name resolves however it was typed.
     for typed in ["ROSETTA", "rosetta", "Rosetta"] {
         let located = docket.run(&["path", typed]);
-        assert!(located.ok(), "path {typed} failed: {}", located.stderr());
+        located.assert().success();
         assert_eq!(located.stdout().trim_end(), path.to_str().unwrap());
     }
 
     let missing = docket.run(&["show", "NOT_OPEN"]);
-    assert!(!missing.ok());
-    assert!(
-        missing.stderr().contains("no open item named NOT_OPEN"),
-        "{}",
-        missing.stderr()
-    );
+    missing
+        .assert()
+        .failure()
+        .stderr(contains("no open item named NOT_OPEN"));
 
     let nonsense = docket.run(&["show", "not an id or a name"]);
-    assert!(!nonsense.ok());
-    assert!(
-        nonsense.stderr().contains("neither an id nor a name"),
-        "{}",
-        nonsense.stderr()
-    );
+    nonsense
+        .assert()
+        .failure()
+        .stderr(contains("neither an id nor a name"));
 
     // A name is not unique, so a second one is a refusal rather than a guess.
     let (twin, _) = docket.create(&beta, "spec", "ROSETTA");
     let ambiguous = docket.run(&["close", "ROSETTA", "-q"]);
-    assert!(!ambiguous.ok(), "an ambiguous name should refuse");
+    ambiguous.assert().failure();
     let stderr = ambiguous.stderr();
     for named in [&id, &twin] {
         assert!(stderr.contains(named.as_str()), "{stderr}");
@@ -683,9 +652,9 @@ fn a_name_resolves_an_item_wherever_an_id_does() {
 
     // The id still discriminates, and the name resolves again once it is free.
     let closed = docket.run(&["close", &twin, "-q"]);
-    assert!(closed.ok(), "close failed: {}", closed.stderr());
+    closed.assert().success();
     let closed = docket.run(&["close", "ROSETTA", "-q"]);
-    assert!(closed.ok(), "close failed: {}", closed.stderr());
+    closed.assert().success();
     assert!(footprint_gone(&path));
 }
 
@@ -702,7 +671,7 @@ fn every_guide_topic_prints_and_an_unknown_one_lists_them() {
     let docket = Docket::new();
 
     let root = docket.run(&["guide"]);
-    assert!(root.ok(), "guide failed: {}", root.stderr());
+    root.assert().success();
     let root = root.stdout();
     assert!(root.contains("DOCKET"), "{root}");
     assert!(
@@ -715,7 +684,7 @@ fn every_guide_topic_prints_and_an_unknown_one_lists_them() {
 
     for (topic, anchor) in [("handoff", "HANDOFF"), ("relay", "RELAY"), ("spec", "SPEC")] {
         let run = docket.run(&["guide", topic]);
-        assert!(run.ok(), "guide {topic} failed: {}", run.stderr());
+        run.assert().success();
         let out = run.stdout();
         assert!(
             out.contains("DOCKET"),
@@ -731,7 +700,7 @@ fn every_guide_topic_prints_and_an_unknown_one_lists_them() {
     // Several topics render in canonical order, whatever order they were asked
     // for, so one guide always reads the same way.
     let many = docket.run(&["guide", "spec", "handoff"]);
-    assert!(many.ok(), "guide failed: {}", many.stderr());
+    many.assert().success();
     let many = many.stdout();
     assert!(
         many.find("HANDOFF") < many.find("SPEC"),
@@ -739,11 +708,7 @@ fn every_guide_topic_prints_and_an_unknown_one_lists_them() {
     );
 
     let unknown = docket.run(&["guide", "nonsense"]);
-    assert!(
-        !unknown.ok(),
-        "unknown topic succeeded: {}",
-        unknown.stdout()
-    );
+    unknown.assert().failure();
     let stderr = unknown.stderr();
     for topic in ["handoff", "relay", "spec"] {
         assert!(stderr.contains(topic), "{stderr}");
@@ -755,7 +720,7 @@ fn doctrine_lives_only_in_the_guide() {
     let docket = Docket::new();
 
     let agent = docket.run(&["help", "agent"]);
-    assert!(!agent.ok(), "help agent still resolves: {}", agent.stdout());
+    agent.assert().failure();
 
     let ladder = docket.run(&["help", "ladder"]).stdout();
     assert!(!ladder.contains("Reach for"), "{ladder}");
@@ -777,11 +742,11 @@ fn ids_resolve_from_any_project() {
         (&second, &second_path, "BETA_WORK"),
     ] {
         let shown = docket.run(&["show", id]);
-        assert!(shown.ok(), "show failed: {}", shown.stderr());
+        shown.assert().success();
         assert_eq!(shown.stdout(), format!("Body of {name}.\n"));
 
         let located = docket.run(&["path", id]);
-        assert!(located.ok(), "path failed: {}", located.stderr());
+        located.assert().success();
         assert_eq!(located.stdout().trim_end(), path.to_str().unwrap());
     }
 }
@@ -793,14 +758,14 @@ fn promotion_climbs_the_ladder_and_stops_at_the_top() {
     let (id, handoff_path) = docket.create(&project, "handoff", "CLIMB_LADDER");
 
     let to_relay = docket.run(&["promote", &id, "-q"]);
-    assert!(to_relay.ok(), "promote failed: {}", to_relay.stderr());
+    to_relay.assert().success();
     let relay_path = promoted_path(&to_relay.stdout());
     assert_eq!(tail(&relay_path, 2), format!("relays/{id}-CLIMB_LADDER.md"));
     assert!(relay_path.is_file());
     assert!(!handoff_path.exists(), "the handoff file should have moved");
 
     let to_spec = docket.run(&["promote", &id, "-q"]);
-    assert!(to_spec.ok(), "promote failed: {}", to_spec.stderr());
+    to_spec.assert().success();
     let spec_path = promoted_path(&to_spec.stdout());
     assert_eq!(
         tail(&spec_path, 3),
@@ -810,21 +775,15 @@ fn promotion_climbs_the_ladder_and_stops_at_the_top() {
     assert!(!relay_path.exists(), "the relay file should have moved");
 
     let to_implementation = docket.run(&["promote", &id, "-q"]);
-    assert!(
-        to_implementation.ok(),
-        "promote failed: {}",
-        to_implementation.stderr()
-    );
+    to_implementation.assert().success();
     assert_eq!(promoted_path(&to_implementation.stdout()), spec_path);
     assert!(front(&spec_path).contains("stage: implementation"));
 
     let past_the_top = docket.run(&["promote", &id, "-q"]);
-    assert!(!past_the_top.ok());
-    assert!(
-        past_the_top.stderr().contains("docket close"),
-        "stderr should point at close: {}",
-        past_the_top.stderr()
-    );
+    past_the_top
+        .assert()
+        .failure()
+        .stderr(contains("docket close"));
 }
 
 #[test]
@@ -834,7 +793,7 @@ fn promoting_a_handoff_straight_to_spec_carries_no_chain() {
     let (id, _) = docket.create(&project, "handoff", "SKIP_RELAY_RUNG");
 
     let run = docket.run(&["promote", &id, "--to", "spec", "-q"]);
-    assert!(run.ok(), "promote failed: {}", run.stderr());
+    run.assert().success();
     let spec_path = promoted_path(&run.stdout());
     assert_eq!(
         tail(&spec_path, 3),
@@ -859,9 +818,9 @@ fn promotion_is_additive() {
     let (id, _) = docket.create(&project, "handoff", "ADDITIVE_CLIMB");
 
     let to_relay = docket.run(&["promote", &id, "-q"]);
-    assert!(to_relay.ok(), "promote failed: {}", to_relay.stderr());
+    to_relay.assert().success();
     let to_spec = docket.run(&["promote", &id, "-q"]);
-    assert!(to_spec.ok(), "promote failed: {}", to_spec.stderr());
+    to_spec.assert().success();
 
     let front = front(&promoted_path(&to_spec.stdout()));
     assert!(front.contains("kind: spec"));
@@ -888,7 +847,7 @@ fn relaying_mints_a_successor_and_closes_the_predecessor() {
         "Wave one landed green.",
         "-q",
     ]);
-    assert!(second_run.ok(), "relay failed: {}", second_run.stderr());
+    second_run.assert().success();
     let (second, second_path) = id_and_path(&second_run.stdout());
     let second_front = front(&second_path);
     assert!(holds(&second_front, "chain", &first));
@@ -905,7 +864,7 @@ fn relaying_mints_a_successor_and_closes_the_predecessor() {
         "Wave two landed green.",
         "-q",
     ]);
-    assert!(third_run.ok(), "relay failed: {}", third_run.stderr());
+    third_run.assert().success();
     let (third, third_path) = id_and_path(&third_run.stdout());
     let third_front = front(&third_path);
     assert!(
@@ -942,12 +901,7 @@ fn relaying_a_handoff_points_at_promote() {
         "-q",
     ]);
 
-    assert!(!run.ok());
-    assert!(
-        run.stderr().contains("docket promote"),
-        "stderr should point at promote: {}",
-        run.stderr()
-    );
+    run.assert().failure().stderr(contains("docket promote"));
 }
 
 #[test]
@@ -970,14 +924,14 @@ fn body_bytes_survive_a_metadata_rewrite() {
         "--allow-missing",
         "-q",
     ]);
-    assert!(created.ok(), "create failed: {}", created.stderr());
+    created.assert().success();
     let (id, _) = id_and_path(&created.stdout());
 
     let renamed = docket.run(&["set", &id, "--name", "BODY_FIDELITY_TWO", "-q"]);
-    assert!(renamed.ok(), "set failed: {}", renamed.stderr());
+    renamed.assert().success();
 
     let shown = docket.run(&["show", &id, "-q"]);
-    assert!(shown.ok(), "show failed: {}", shown.stderr());
+    shown.assert().success();
     assert_eq!(shown.stdout(), body);
 }
 
@@ -989,7 +943,7 @@ fn an_invalid_item_stays_listed_and_fails_doctor() {
     drop_key(&path, "stage:");
 
     let listed = docket.run(&["list", "--project", &project]);
-    assert!(listed.ok(), "list failed: {}", listed.stderr());
+    listed.assert().success();
     assert!(
         listed
             .stdout()
@@ -1000,9 +954,8 @@ fn an_invalid_item_stays_listed_and_fails_doctor() {
     );
 
     let doctor = docket.run(&["doctor"]);
-    assert_ne!(doctor.code(), 0);
-    assert!(doctor.stdout().contains("invalid"));
-    assert!(doctor.stdout().contains(&id));
+    doctor.assert().failure().stdout(contains("invalid"));
+    doctor.assert().stdout(contains(id));
 }
 
 #[test]
@@ -1013,7 +966,7 @@ fn set_repairs_invalid_frontmatter() {
     drop_key(&path, "stage:");
 
     let healed = docket.run(&["set", &id, "-q"]);
-    assert!(healed.ok(), "set failed: {}", healed.stderr());
+    healed.assert().success();
 
     let listed = docket.run(&["list", "--project", &project]);
     assert!(!listed.stdout().contains("INVALID"), "{}", listed.stdout());
@@ -1039,7 +992,7 @@ fn reorder_sequence_moves_named_ids_to_the_front() {
         &project,
         "-q",
     ]);
-    assert!(run.ok(), "reorder failed: {}", run.stderr());
+    run.assert().success();
 
     let listed = docket.run(&["list", "--project", &project]);
     assert_eq!(
@@ -1063,13 +1016,13 @@ fn reorder_places_one_item_top_bottom_or_at_a_position() {
         .collect();
     let listing = || {
         let listed = docket.run(&["list", "--project", &project]);
-        assert!(listed.ok(), "list failed: {}", listed.stderr());
+        listed.assert().success();
         listed_ids(&listed.stdout())
     };
     assert_eq!(listing(), ids);
 
     let moved = docket.run(&["reorder", &ids[3], "--top", "--project", &project, "-q"]);
-    assert!(moved.ok(), "reorder failed: {}", moved.stderr());
+    moved.assert().success();
     assert_eq!(
         listing(),
         vec![
@@ -1081,7 +1034,7 @@ fn reorder_places_one_item_top_bottom_or_at_a_position() {
     );
 
     let moved = docket.run(&["reorder", &ids[3], "--bottom", "--project", &project, "-q"]);
-    assert!(moved.ok(), "reorder failed: {}", moved.stderr());
+    moved.assert().success();
     assert_eq!(listing(), ids);
 
     let moved = docket.run(&[
@@ -1093,7 +1046,7 @@ fn reorder_places_one_item_top_bottom_or_at_a_position() {
         &project,
         "-q",
     ]);
-    assert!(moved.ok(), "reorder failed: {}", moved.stderr());
+    moved.assert().success();
     assert_eq!(
         listing(),
         vec![
@@ -1114,7 +1067,7 @@ fn moving_re_targets_an_item_and_keeps_its_identity() {
     let created = value(&front(&path), "created");
 
     let run = docket.run(&["move", &id, "--to", &to, "--allow-missing", "-q"]);
-    assert!(run.ok(), "move failed: {}", run.stderr());
+    run.assert().success();
     let (moved_id, moved) = id_and_path(&run.stdout());
 
     assert_eq!(moved_id, id, "an id survives a move");
@@ -1156,7 +1109,7 @@ fn moving_a_spec_carries_its_supporting_files() {
     fs::write(directory.join("schema.md"), "The shape.\n").expect("writing a supporting file");
 
     let run = docket.run(&["move", &id, "--to", &to, "--allow-missing", "-q"]);
-    assert!(run.ok(), "move failed: {}", run.stderr());
+    run.assert().success();
     let (_, moved) = id_and_path(&run.stdout());
     let landed = moved.parent().expect("a spec sits in a directory");
 
@@ -1188,11 +1141,11 @@ fn a_moved_relay_carries_its_chain() {
         "Hop one landed green.",
         "-q",
     ]);
-    assert!(successor.ok(), "relay failed: {}", successor.stderr());
+    successor.assert().success();
     let (second, _) = id_and_path(&successor.stdout());
 
     let run = docket.run(&["move", &second, "--to", &to, "--allow-missing", "-q"]);
-    assert!(run.ok(), "move failed: {}", run.stderr());
+    run.assert().success();
     let front = front(&id_and_path(&run.stdout()).1);
 
     assert!(
@@ -1215,7 +1168,7 @@ fn a_moved_item_lands_at_the_bottom_of_its_new_docket() {
     let (arriving, _) = docket.create(&from, "handoff", "ARRIVING");
 
     let run = docket.run(&["move", &arriving, "--to", &to, "--allow-missing", "-q"]);
-    assert!(run.ok(), "move failed: {}", run.stderr());
+    run.assert().success();
     assert_eq!(
         listed_ids(&docket.run(&["list", "--project", &to, "-q"]).stdout()),
         vec![resident, arriving],
@@ -1238,7 +1191,7 @@ fn moving_records_where_an_item_was_written() {
     );
 
     let out = docket.run(&["move", &id, "--to", &away, "--allow-missing", "-q"]);
-    assert!(out.ok(), "move failed: {}", out.stderr());
+    out.assert().success();
     let front_away = front(&id_and_path(&out.stdout()).1);
     assert!(
         holds(&front_away, "origin", &home),
@@ -1246,7 +1199,7 @@ fn moving_records_where_an_item_was_written() {
     );
 
     let on = docket.run(&["move", &id, "--to", &third, "--allow-missing", "-q"]);
-    assert!(on.ok(), "move failed: {}", on.stderr());
+    on.assert().success();
     let front_third = front(&id_and_path(&on.stdout()).1);
     assert!(
         holds(&front_third, "origin", &home),
@@ -1254,7 +1207,7 @@ fn moving_records_where_an_item_was_written() {
     );
 
     let back = docket.run(&["move", &id, "--to", &home, "--allow-missing", "-q"]);
-    assert!(back.ok(), "move failed: {}", back.stderr());
+    back.assert().success();
     let front_home = front(&id_and_path(&back.stdout()).1);
     assert!(
         !front_home.contains("origin:"),
@@ -1270,29 +1223,20 @@ fn moving_refuses_a_target_it_cannot_stand_behind() {
     let (id, path) = docket.create(&project, "spec", "STAYS_PUT");
 
     let same = docket.run(&["move", &id, "--to", &project, "-q"]);
-    assert!(!same.ok(), "a move to where it already sits is a refusal");
-    assert!(
-        same.stderr().contains("already"),
-        "the refusal says so: {}",
-        same.stderr()
-    );
+    same.assert().failure().stderr(contains("already"));
 
     let missing = docket.run(&["move", &id, "--to", &elsewhere, "-q"]);
-    assert!(!missing.ok(), "an absent target has to be said out loud");
-    assert!(
-        missing.stderr().contains("--allow-missing"),
-        "the refusal names the flag that would have worked: {}",
-        missing.stderr()
-    );
+    missing
+        .assert()
+        .failure()
+        .stderr(contains("--allow-missing"));
 
     drop_key(&path, "stage:");
     let damaged = docket.run(&["move", &id, "--to", &elsewhere, "--allow-missing", "-q"]);
-    assert!(!damaged.ok(), "unparseable metadata cannot be re-targeted");
-    assert!(
-        damaged.stderr().contains(&format!("docket set {id}")),
-        "the refusal names the repair: {}",
-        damaged.stderr()
-    );
+    damaged
+        .assert()
+        .failure()
+        .stderr(contains(format!("docket set {id}")));
 }
 
 #[test]
@@ -1302,7 +1246,7 @@ fn closing_removes_an_item_and_history_keeps_it() {
     let (id, path) = docket.create(&project, "handoff", "FINISHED_WORK");
 
     let closed = docket.run(&["close", &id, "-q"]);
-    assert!(closed.ok(), "close failed: {}", closed.stderr());
+    closed.assert().success();
     assert!(footprint_gone(&path));
 
     let open = docket.run(&["list", "--project", &project]);
@@ -1329,12 +1273,7 @@ fn closing_is_refused_without_git() {
     let (id, path) = docket.create(&project, "handoff", "UNRECORDED_WORK");
 
     let run = docket.run_with(&["close", &id, "-q"], &[("RELIC_GIT", "")]);
-    assert!(!run.ok(), "close should refuse without git");
-    assert!(
-        run.stderr().contains("git"),
-        "the refusal names what is missing: {}",
-        run.stderr()
-    );
+    run.assert().failure().stderr(contains("git"));
     assert!(path.is_file(), "the item survives a refused close");
 }
 
@@ -1350,7 +1289,7 @@ fn a_closed_id_is_never_minted_again() {
         assert!(!seen.contains(&id), "{id} was minted twice");
         seen.push(id.clone());
         let closed = docket.run(&["close", &id, "-q"]);
-        assert!(closed.ok(), "close failed: {}", closed.stderr());
+        closed.assert().success();
     }
 }
 
@@ -1367,7 +1306,7 @@ fn outside_edits_are_recorded_before_the_next_change() {
     fs::write(&path, format!("{text}\nAn agent wrote this.\n")).expect("editing the body");
 
     let run = docket.run(&["set", &second, "--tagline", "Retagged.", "-q"]);
-    assert!(run.ok(), "set failed: {}", run.stderr());
+    run.assert().success();
 
     let subjects = docket.history();
     assert_eq!(
@@ -1394,7 +1333,7 @@ fn announce_records_drift_and_stays_quiet_about_it() {
     fs::write(&path, format!("{text}\nEdited between sessions.\n")).expect("editing the body");
 
     let run = docket.run(&["announce", "--project", &project]);
-    assert!(run.ok(), "announce failed: {}", run.stderr());
+    run.assert().success();
     assert!(
         !run.stdout().contains("edit:") && !run.stderr().contains("edit:"),
         "announce says nothing about history"
@@ -1413,7 +1352,7 @@ fn announce_does_not_create_a_depot() {
     fs::remove_dir_all(&docket.root).expect("clearing the depot");
 
     let run = docket.run(&["announce"]);
-    assert!(run.ok(), "announce failed: {}", run.stderr());
+    run.assert().success();
     assert!(!docket.root.exists(), "announce created {:?}", docket.root);
 }
 
@@ -1423,15 +1362,14 @@ fn announce_is_silent_when_empty_and_emits_hook_json_when_not() {
     let project = docket.project("proj");
 
     let silent = docket.run(&["announce", "--project", &project]);
-    assert!(silent.ok());
+    silent.assert().success();
     assert_eq!(silent.stdout(), "");
 
     let (id, _) = docket.create(&project, "handoff", "OUTSTANDING_WORK");
 
     let roster = docket.run(&["announce", "--project", &project]);
-    assert!(roster.ok(), "announce failed: {}", roster.stderr());
-    assert!(roster.stdout().contains(&id));
-    assert!(roster.stdout().contains("OUTSTANDING_WORK"));
+    roster.assert().success().stdout(contains(id));
+    roster.assert().stdout(contains("OUTSTANDING_WORK"));
     // A name says which item; only the tagline says what it is, so the banner
     // carries both on the row itself.
     let row = roster
@@ -1446,7 +1384,7 @@ fn announce_is_silent_when_empty_and_emits_hook_json_when_not() {
     );
 
     let hook = docket.run(&["announce", "--hook", "--project", &project]);
-    assert!(hook.ok(), "announce failed: {}", hook.stderr());
+    hook.assert().success();
     let emitted = hook.stdout();
     assert!(
         emitted.contains(r#""hookEventName":"SessionStart""#),
@@ -1466,12 +1404,14 @@ fn json_format_and_json_flag_agree() {
     let (id, _) = docket.create(&project, "handoff", "MACHINE_READABLE");
 
     let formatted = docket.run(&["list", "--format", "json", "--project", &project]);
-    assert!(formatted.ok(), "list failed: {}", formatted.stderr());
+    formatted.assert().success();
     assert!(formatted.stdout().starts_with('{'));
-    assert!(formatted.stdout().contains(&format!("\"id\": \"{id}\"")));
+    formatted
+        .assert()
+        .stdout(contains(format!("\"id\": \"{id}\"")));
 
     let flagged = docket.run(&["list", "--json", "--project", &project]);
-    assert!(flagged.ok(), "list failed: {}", flagged.stderr());
+    flagged.assert().success();
     assert_eq!(flagged.stdout(), formatted.stdout());
 }
 
@@ -1482,7 +1422,7 @@ fn agent_and_uncoloured_human_output_carry_no_escapes() {
     docket.create(&project, "handoff", "PLAIN_TEXT_ONLY");
 
     let agent = docket.run(&["--project", &project]);
-    assert!(agent.ok(), "the bare listing failed: {}", agent.stderr());
+    agent.assert().success();
     assert!(!agent.stdout().contains('\x1b'), "{}", agent.stdout());
 
     let human = docket.run(&[
@@ -1494,7 +1434,7 @@ fn agent_and_uncoloured_human_output_carry_no_escapes() {
         "--project",
         &project,
     ]);
-    assert!(human.ok(), "list failed: {}", human.stderr());
+    human.assert().success();
     assert!(!human.stdout().contains('\x1b'), "{}", human.stdout());
 }
 
@@ -1504,23 +1444,23 @@ fn help_serves_topics_and_commands_and_rejects_neither() {
 
     for topic in ["ladder", "metadata"] {
         let run = docket.run(&["help", topic]);
-        assert!(run.ok(), "help {topic} failed: {}", run.stderr());
+        run.assert().success();
         assert!(!run.stdout().trim().is_empty(), "help {topic} said nothing");
     }
 
     // A name that is not a topic falls through to the subcommand of that name.
     let command = docket.run(&["help", "create"]);
-    assert!(command.ok(), "help create failed: {}", command.stderr());
-    assert!(command.stdout().contains("--allow-missing"));
+    command
+        .assert()
+        .success()
+        .stdout(contains("--allow-missing"));
 
     let unknown = docket.run(&["help", "nonsense"]);
-    assert!(!unknown.ok());
-    assert_ne!(unknown.code(), 0);
-    assert!(
-        unknown.stderr().contains("ladder, metadata"),
-        "stderr should list the topics: {}",
-        unknown.stderr()
-    );
+    unknown.assert().failure();
+    unknown
+        .assert()
+        .failure()
+        .stderr(contains("ladder, metadata"));
 }
 
 /// Kind is taken from the directory an item sits in, not from metadata that may
@@ -1538,7 +1478,7 @@ fn closing_an_invalid_spec_removes_its_directory() {
         .to_owned();
 
     let run = docket.run(&["close", &id, "--project", &project, "-q"]);
-    assert!(run.ok(), "close failed: {}", run.stderr());
+    run.assert().success();
     assert!(!spec_dir.exists(), "the spec directory was left behind");
 
     let removed = docket.removed_paths();
@@ -1554,15 +1494,10 @@ fn a_closed_id_points_at_history() {
     let docket = Docket::new();
     let project = docket.project("proj");
     let (id, _) = docket.create(&project, "handoff", "DONE_AND_GONE");
-    assert!(docket.run(&["close", &id, "-q"]).ok());
+    docket.run(&["close", &id, "-q"]).assert().success();
 
     let located = docket.run(&["path", &id]);
-    assert!(!located.ok(), "a closed item should not resolve");
-    assert!(
-        located.stderr().contains("diff-filter=D"),
-        "the error points at history: {}",
-        located.stderr()
-    );
+    located.assert().failure().stderr(contains("diff-filter=D"));
 }
 
 /// Every keying entry point answers the same: a linked worktree folds into the
@@ -1610,7 +1545,7 @@ fn a_linked_worktree_keys_to_its_main_checkout() {
             "-q",
         ],
     );
-    assert!(created.ok(), "create failed: {}", created.stderr());
+    created.assert().success();
     let (id, path) = id_and_path(&created.stdout());
     assert!(
         path.starts_with(&docket.root),
@@ -1663,7 +1598,7 @@ fn search_matches_a_name_a_tagline_and_a_body() {
         ("demotic", &bodied),
     ] {
         let run = docket.run(&["list", "--search", needle, "--project", &project]);
-        assert!(run.ok(), "list failed: {}", run.stderr());
+        run.assert().success();
         assert_eq!(listed_ids(&run.stdout()), vec![wanted.clone()], "{needle}");
     }
 }
@@ -1684,7 +1619,7 @@ fn search_does_not_reach_metadata() {
     // would answer with all of them.
     for needle in ["handoff", "tagline", "created"] {
         let run = docket.run(&["list", "--search", needle, "--project", &project]);
-        assert!(run.ok(), "list failed: {}", run.stderr());
+        run.assert().success();
         assert!(listed_ids(&run.stdout()).is_empty(), "{needle}");
     }
 }
@@ -1724,9 +1659,9 @@ fn search_reaches_an_item_whose_metadata_will_not_parse() {
     // metadata, so both still answer.
     for needle in ["damaged", "demotic"] {
         let run = docket.run(&["list", "--search", needle, "--project", &project]);
-        assert!(run.ok(), "list failed: {}", run.stderr());
+        run.assert().success();
         assert_eq!(listed_ids(&run.stdout()), vec![id.clone()], "{needle}");
-        assert!(run.stdout().contains("INVALID"), "{}", run.stdout());
+        run.assert().stdout(contains("INVALID"));
     }
 }
 
@@ -1743,7 +1678,7 @@ fn search_quotes_the_body_line_it_matched_and_nothing_else() {
     );
 
     let hit = docket.run(&["list", "--search", "demotic", "--project", &project]);
-    assert!(hit.ok(), "list failed: {}", hit.stderr());
+    hit.assert().success();
     assert_eq!(
         notes(&hit.stdout()),
         vec!["match: The demotic register is the one that mattered."]
@@ -1770,7 +1705,7 @@ fn tag_filters_demand_every_tag_named() {
         all.extend_from_slice(args);
         all.extend_from_slice(&["--project", &project]);
         let run = docket.run(&all);
-        assert!(run.ok(), "list failed: {}", run.stderr());
+        run.assert().success();
         listed_ids(&run.stdout())
     };
 
@@ -1803,7 +1738,7 @@ fn kind_answers_from_the_shelf_when_metadata_will_not_parse() {
 
     let specs = docket.run(&["list", "--kind", "spec", "--project", &project]);
     assert_eq!(listed_ids(&specs.stdout()), vec![spec]);
-    assert!(specs.stdout().contains("INVALID"), "{}", specs.stdout());
+    specs.assert().stdout(contains("INVALID"));
 
     let handoffs = docket.run(&["list", "--kind", "handoff", "--project", &project]);
     assert_eq!(listed_ids(&handoffs.stdout()), vec![handoff]);
@@ -1826,7 +1761,7 @@ fn invalid_selects_only_what_will_not_parse() {
     // Nothing that will not parse can answer a block, so the two together are
     // empty rather than a refusal.
     let none = docket.run(&["list", "--invalid", "--blocked", "--project", &project]);
-    assert!(none.ok(), "list failed: {}", none.stderr());
+    none.assert().success();
     assert!(listed_ids(&none.stdout()).is_empty());
 }
 
@@ -1843,7 +1778,7 @@ fn every_filter_narrows_the_same_listing() {
     );
     docket.tag(&wanted, "ci");
     let held = docket.run(&["set", &wanted, "--blocked", "the schema review", "-q"]);
-    assert!(held.ok(), "set failed: {}", held.stderr());
+    held.assert().success();
     docket.write(
         &project,
         "handoff",
@@ -1864,7 +1799,7 @@ fn every_filter_narrows_the_same_listing() {
         "--project",
         &project,
     ]);
-    assert!(all.ok(), "list failed: {}", all.stderr());
+    all.assert().success();
     assert_eq!(listed_ids(&all.stdout()), vec![wanted.clone()]);
 
     // Dropping the one flag that only this item answers widens the result.
@@ -1878,16 +1813,11 @@ fn an_empty_result_says_whether_it_was_narrowed() {
     let project = docket.project("proj");
 
     let bare = docket.run(&["list", "--project", &project]);
-    assert!(bare.stdout().contains("(empty)"), "{}", bare.stdout());
+    bare.assert().stdout(contains("(empty)"));
 
     docket.create(&project, "handoff", "SOUND_HANDOFF");
     let filtered = docket.run(&["list", "--kind", "spec", "--project", &project]);
-    assert!(filtered.ok(), "list failed: {}", filtered.stderr());
-    assert!(
-        filtered.stdout().contains("(no match)"),
-        "{}",
-        filtered.stdout()
-    );
+    filtered.assert().success().stdout(contains("(no match)"));
 }
 
 #[test]
@@ -1899,7 +1829,7 @@ fn a_listing_across_projects_names_each_row_s_project() {
     let (second, _) = docket.create(&beta, "handoff", "BETA_WORK");
 
     let run = docket.run(&["list", "--all"]);
-    assert!(run.ok(), "list failed: {}", run.stderr());
+    run.assert().success();
     let ids = listed_ids(&run.stdout());
     assert!(ids.contains(&first) && ids.contains(&second), "{ids:?}");
     assert_eq!(run.stdout().matches("~/alpha").count(), 1);
@@ -1944,7 +1874,7 @@ fn a_listing_across_projects_keeps_each_project_in_its_own_order() {
     swap_key(&other_path, "created", "created: 2024-01-01T00:00:00Z");
 
     let moved = docket.run(&["reorder", &second, "--top", "--project", &alpha, "-q"]);
-    assert!(moved.ok(), "reorder failed: {}", moved.stderr());
+    moved.assert().success();
 
     let run = docket.run(&["list", "--all"]);
     assert_eq!(listed_ids(&run.stdout()), vec![second, first, other]);
@@ -1985,7 +1915,7 @@ fn a_printed_position_addresses_reorder_under_a_filter() {
 
     // So a position read off it means the same thing to reorder.
     let held = docket.run(&["reorder", "--position", "4", "--project", &project, "-q"]);
-    assert!(!held.ok(), "an id is required alongside a position");
+    held.assert().failure();
     let moved = docket.run(&[
         "reorder",
         &fourth,
@@ -1995,7 +1925,7 @@ fn a_printed_position_addresses_reorder_under_a_filter() {
         &project,
         "-q",
     ]);
-    assert!(moved.ok(), "reorder failed: {}", moved.stderr());
+    moved.assert().success();
     let after = docket.run(&["list", "--project", &project]);
     assert_eq!(listed_ids(&after.stdout())[0], fourth);
 }
@@ -2007,15 +1937,12 @@ fn announce_carries_the_block_and_not_the_tags() {
     let (id, _) = docket.create(&project, "handoff", "BANNER_ITEM");
     docket.tag(&id, "ci");
     let held = docket.run(&["set", &id, "--blocked", "the schema review", "-q"]);
-    assert!(held.ok(), "set failed: {}", held.stderr());
+    held.assert().success();
 
     let run = docket.run(&["announce", "--project", &project]);
-    assert!(run.ok(), "announce failed: {}", run.stderr());
-    assert!(
-        run.stdout().contains("blocked: the schema review"),
-        "{}",
-        run.stdout()
-    );
+    run.assert()
+        .success()
+        .stdout(contains("blocked: the schema review"));
     assert!(!run.stdout().contains("tags:"), "{}", run.stdout());
 }
 
@@ -2039,7 +1966,7 @@ fn json_is_one_shape_whichever_scope_produced_it() {
         vec!["list", "--json", "--all"],
     ] {
         let run = docket.run(&args);
-        assert!(run.ok(), "list failed: {}", run.stderr());
+        run.assert().success();
         let out = run.stdout();
         assert_eq!(out.matches("\"items\"").count(), 1, "{out}");
         assert!(out.starts_with("{\n  \"items\": ["), "{out}");
@@ -2050,18 +1977,14 @@ fn json_is_one_shape_whichever_scope_produced_it() {
     }
 
     let searched = docket.run(&["list", "--json", "--search", "demotic", "--project", &alpha]);
-    assert!(
-        searched.stdout().contains("\"excerpt\""),
-        "{}",
-        searched.stdout()
-    );
+    searched.assert().stdout(contains("\"excerpt\""));
 }
 
 #[test]
 fn list_help_states_how_the_filters_compose() {
     let docket = Docket::new();
     let run = docket.run(&["help", "list"]);
-    assert!(run.ok(), "help failed: {}", run.stderr());
+    run.assert().success();
     let out = run.stdout();
     for phrase in ["narrow", "--invalid", "--tag", "--search"] {
         assert!(out.contains(phrase), "{phrase} is missing from {out}");
@@ -2076,10 +1999,8 @@ fn an_empty_search_and_a_malformed_tag_are_refused() {
     docket.create(&project, "handoff", "SOUND_HANDOFF");
 
     let blank = docket.run(&["list", "--search", "   ", "--project", &project]);
-    assert!(!blank.ok(), "{}", blank.stdout());
-    assert!(blank.stderr().contains("--search"), "{}", blank.stderr());
+    blank.assert().failure().stderr(contains("--search"));
 
     let spaced = docket.run(&["list", "--tag", "two words", "--project", &project]);
-    assert!(!spaced.ok(), "{}", spaced.stdout());
-    assert!(spaced.stderr().contains("tag"), "{}", spaced.stderr());
+    spaced.assert().failure().stderr(contains("tag"));
 }
