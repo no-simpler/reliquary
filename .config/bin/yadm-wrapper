@@ -185,8 +185,11 @@ _doctor_skip() { printf '  \033[2m–\033[0m %s\n' "$1"; }
 _doctor_head() { printf '\n\033[1m==>\033[0m \033[1m%s\033[0m\n' "$1"; }
 
 # Function: dotfiles/Reliquary health self-check (the actual check sequence).
-# Detect-only and Touch-ID-free by default; --full adds the archive verify.
-# Wrapped by doctor() below, which adds --quiet on top.
+# The machine's checks belong to `assay`, which owns every station and grades
+# them; what stays here is what is genuinely yadm's — the encrypted archive —
+# plus the one check `assay` cannot collect yet. Detect-only and Touch-ID-free
+# by default; --full adds the archive verify. Wrapped by doctor() below, which
+# adds --quiet on top.
 _doctor_run() {
     local full=false
     case "${1:-}" in
@@ -200,235 +203,24 @@ _doctor_run() {
 
     DOCTOR_FAILS=0
     DOCTOR_WARNS=0
-    local shells="bash zsh fish"
 
-    # Probe each shell ONCE (interactive, so env.d + interactive.d run), tagging
-    # each datum so startup noise can't be mistaken for our output.
-    local sh probe
-    # shellcheck disable=SC2034  # assigned indirectly below via eval "p_$sh=..."
-    local p_bash p_zsh p_fish
-    for sh in $shells; do
-        if ! command -v "$sh" >/dev/null 2>&1; then
-            eval "p_$sh=__skip__"
-            continue
-        fi
-        if [ "$sh" = fish ]; then
-            probe=$("$sh" -ic 'command -v yadm | sed "s/^/__D_YADM__/"; echo __D_OK__; printf "__D_PATH__%s\n" (string join : -- $PATH)' 2>/dev/null)
-        else
-            probe=$("$sh" -ic 'command -v yadm | sed "s/^/__D_YADM__/"; echo __D_OK__; printf "__D_PATH__%s\n" "$PATH"' 2>/dev/null)
-        fi
-        eval "p_$sh=\$probe"
-    done
-
-    _doctor_get() { # $1=shell var contents, $2=tag -> strips tag prefix, first hit
-        printf '%s\n' "$1" | grep "^$2" | head -n1 | sed "s/^$2//"
-    }
-
-    # 1. yadm resolves to the wrapper in every shell
-    _doctor_head "yadm resolves to the wrapper (not brew)"
-    for sh in $shells; do
-        eval "probe=\$p_$sh"
-        if [ "$probe" = __skip__ ]; then
-            _doctor_skip "$sh not installed"
-            continue
-        fi
-        local resolved
-        resolved=$(_doctor_get "$probe" __D_YADM__)
-        if [ "$resolved" = "$HOME/.config/bin/yadm" ]; then
-            _doctor_ok "$sh → ~/.config/bin/yadm"
-        else
-            _doctor_fail "$sh → ${resolved:-(unresolved)} — expected ~/.config/bin/yadm"
-        fi
-    done
-
-    # 2. Interactive startup smoke test
-    _doctor_head "interactive shell startup is clean"
-    for sh in $shells; do
-        eval "probe=\$p_$sh"
-        if [ "$probe" = __skip__ ]; then
-            _doctor_skip "$sh not installed"
-            continue
-        fi
-        if printf '%s' "$probe" | grep -q __D_OK__; then
-            _doctor_ok "$sh -ic starts without error"
-        else
-            _doctor_fail "$sh -ic did not complete startup"
-        fi
-    done
-
-    # 3. $PATH free of duplicate entries
-    _doctor_head "\$PATH has no duplicate entries"
-    for sh in $shells; do
-        eval "probe=\$p_$sh"
-        if [ "$probe" = __skip__ ]; then
-            _doctor_skip "$sh not installed"
-            continue
-        fi
-        local path dups
-        path=$(_doctor_get "$probe" __D_PATH__)
-        dups=$(printf '%s' "$path" | tr ':' '\n' | grep -v '^$' | sort | uniq -d | tr '\n' ' ')
-        if [ -z "${dups// /}" ]; then
-            _doctor_ok "$sh PATH clean"
-        else
-            _doctor_warn "$sh PATH duplicates: $dups"
-        fi
-    done
-
-    unset -f _doctor_get
-
-    # 4. Shell alias/abbr/function parity
-    _doctor_head "shell alias/function parity"
-    local parity="$HOME/.config/bin/check-shell-parity"
-    if [ -x "$parity" ]; then
-        local pout prc
-        pout=$("$parity" 2>&1)
-        prc=$?
-        if [ "$prc" -eq 0 ]; then
-            _doctor_ok "in sync across paired configs"
-        else
-            _doctor_fail "drift detected:"
-            printf '%s\n' "$pout" | sed 's/^/      /'
-        fi
+    # 1. The machine's checks are `assay`'s. Its grade *is* its exit status —
+    #    0 clean, 1 degraded, 2 no longer reproducible from the repo — so
+    #    nothing here reads its report. A caller that greps output is a second
+    #    parser of a format nobody promised to keep.
+    if command -v assay >/dev/null 2>&1; then
+        assay --format human
+        case $? in
+            0) ;;
+            1) DOCTOR_WARNS=$((DOCTOR_WARNS + 1)) ;;
+            *) DOCTOR_FAILS=$((DOCTOR_FAILS + 1)) ;;
+        esac
     else
-        _doctor_warn "check-shell-parity not found — skipped"
+        _doctor_head "machine health"
+        _doctor_warn "assay is not published — bootstrap publishes relics"
     fi
 
-    # 4a. Shell lint and format. Bash has no type system, so a refactor here is
-    #     unverified by construction; static analysis is the whole budget. The
-    #     third gate is the suppression ratchet, without which silencing a
-    #     finding is invisible to the first two.
-    _doctor_head "shell lint and format"
-    local shlint="$HOME/.config/bin/check-shell-lint"
-    if [ -x "$shlint" ]; then
-        local lout lrc
-        lout=$("$shlint" 2>&1)
-        lrc=$?
-        if [ "$lrc" -eq 0 ]; then
-            _doctor_ok "$(printf '%s\n' "$lout" | head -1)"
-        elif [ "$lrc" -eq 1 ]; then
-            _doctor_warn "checked with gaps:"
-            printf '%s\n' "$lout" | sed 's/^/      /'
-        else
-            _doctor_fail "findings:"
-            printf '%s\n' "$lout" | sed 's/^/      /'
-        fi
-    else
-        _doctor_warn "check-shell-lint not found — skipped"
-    fi
-
-    # 4b. Claude Code ! blocks. A ```! fence executes when its skill or slash
-    #     command loads, with no prompt path: it is statically analysed against
-    #     the file's allowed-tools and throws if the verdict is not `allow`,
-    #     taking the whole invocation with it. Nothing surfaces that until the
-    #     command is typed, so it is checked here instead.
-    _doctor_head "Claude Code ! blocks"
-    local mdblocks="$HOME/.config/bin/check-md-shell-blocks"
-    if [ -x "$mdblocks" ]; then
-        local mout mrc
-        mout=$("$mdblocks" 2>&1)
-        mrc=$?
-        if [ "$mrc" -eq 0 ]; then
-            _doctor_ok "every block would run"
-        elif [ "$mrc" -eq 1 ]; then
-            _doctor_warn "soft issues:"
-            printf '%s\n' "$mout" | sed 's/^/      /'
-        else
-            _doctor_fail "block(s) would be denied at load time:"
-            printf '%s\n' "$mout" | sed 's/^/      /'
-        fi
-    else
-        _doctor_warn "check-md-shell-blocks not found — skipped"
-    fi
-
-    # 5. Bedrock dependencies (present, configured, PATH-accessible)
-    _doctor_head "bedrock dependencies"
-    local bedrock="$HOME/.config/bin/check-bedrock"
-    if [ -x "$bedrock" ]; then
-        local bout brc
-        bout=$("$bedrock" 2>&1)
-        brc=$?
-        if [ "$brc" -eq 0 ]; then
-            _doctor_ok "all members present, configured, PATH-accessible"
-        elif [ "$brc" -eq 1 ]; then
-            _doctor_warn "satisfied with soft issues:"
-            printf '%s\n' "$bout" | sed 's/^/      /'
-        else
-            _doctor_fail "incomplete:"
-            printf '%s\n' "$bout" | sed 's/^/      /'
-        fi
-    else
-        _doctor_warn "check-bedrock not found — skipped"
-    fi
-
-    # 6. Homebrew package health (deprecations, orphaned kegs, rotted Brewfiles)
-    _doctor_head "Homebrew package health"
-    local brewhealth="$HOME/.config/bin/check-brew-health"
-    if [ -x "$brewhealth" ]; then
-        local hout hrc
-        hout=$("$brewhealth" 2>&1)
-        hrc=$?
-        if [ "$hrc" -eq 0 ]; then
-            _doctor_ok "nothing deprecated, orphaned or unresolvable"
-        elif [ "$hrc" -eq 1 ]; then
-            _doctor_warn "packages on a clock:"
-            printf '%s\n' "$hout" | sed 's/^/      /'
-        else
-            # An unresolvable Brewfile entry or an orphaned keg means the machine
-            # is no longer reproducible from the repo — a failure, not a nag.
-            _doctor_fail "packages no longer reproducible:"
-            printf '%s\n' "$hout" | sed 's/^/      /'
-        fi
-    else
-        _doctor_warn "check-brew-health not found — skipped"
-    fi
-
-    # 6b. Relic build cache. cargo never reclaims artifacts for dependency
-    #     versions it no longer resolves, so the lane's target/ only grows. `up`
-    #     sweeps it, but a machine that has not run `up` in a while, or that lacks
-    #     cargo-sweep, would balloon silently — so it is reported here. Never a
-    #     failure: the whole tree is regenerable by a rebuild.
-    #     Both lanes: each relic lane is its own cargo workspace with its own
-    #     target/, and a cache reported for one says nothing about the other.
-    _doctor_head "relic build cache"
-    local lane relic_target tkb tmib any=0
-    for lane in "$HOME/.config/relics" "$HOME/.config/attic"; do
-        relic_target="$lane/target"
-        [ -d "$relic_target" ] || continue
-        any=1
-        tkb=$(du -sk "$relic_target" 2>/dev/null | awk '{print $1}')
-        tmib=$((${tkb:-0} / 1024))
-        if [ "${tkb:-0}" -lt 4194304 ]; then
-            _doctor_ok "${tmib} MiB in ${lane/#$HOME/~}"
-        else
-            _doctor_warn "${tmib} MiB in ${lane/#$HOME/~} — run 'up', or 'cargo sweep --time 30' there"
-        fi
-    done
-    [ "$any" -eq 0 ] && _doctor_skip "nothing built yet"
-
-    # 6c. Tracking coverage. yadm's whitelist plus the encrypt lane means a file
-    #     that nobody has decided about is indistinguishable from one nobody has
-    #     looked at. This reports the difference; the judgment stays human, but it
-    #     is made once and recorded in yadm/unmanaged rather than re-derived.
-    _doctor_head "tracking coverage"
-    local coverage="$HOME/.config/bin/check-yadm-coverage"
-    if [ -x "$coverage" ]; then
-        local cvout cvrc
-        cvout=$("$coverage" 2>&1)
-        cvrc=$?
-        if [ "$cvrc" -eq 0 ]; then
-            _doctor_ok "every path accounted for"
-        elif [ "$cvrc" -eq 1 ]; then
-            _doctor_warn "undecided paths:"
-            printf '%s\n' "$cvout" | sed 's/^/      /'
-        else
-            _doctor_fail "a lane is wrong:"
-            printf '%s\n' "$cvout" | sed 's/^/      /'
-        fi
-    else
-        _doctor_warn "check-yadm-coverage not found — skipped"
-    fi
-
-    # 7. Encrypted-archive drift (SHA compare; no Touch ID)
+    # 2. Encrypted-archive drift (SHA compare; no Touch ID)
     _doctor_head "encrypted archive drift"
     local drift
     drift=$(check_yadm_encrypted_files 2>&1)
@@ -439,7 +231,7 @@ _doctor_run() {
         printf '%s\n' "$drift" | sed 's/^/      /'
     fi
 
-    # 8. Archive vs disk verification (Touch ID) — opt-in
+    # 3. Archive vs disk verification (Touch ID) — opt-in
     _doctor_head "archive vs disk verification"
     if $full; then
         local vout vrc
@@ -455,9 +247,14 @@ _doctor_run() {
         _doctor_skip "skipped — run 'yadm doctor --full' for the Touch-ID deep check"
     fi
 
-    # 9. ske wiring (Touch-ID suppression). Detect-only and Touch-ID-free: `ske
+    # 4. ske wiring (Touch-ID suppression). Detect-only and Touch-ID-free: `ske
     #    doctor` is read-only and never opens a window. Skips cleanly when the
     #    attic is not decrypted, so a fresh machine does not fail here.
+    #    This is the one check `assay` cannot collect yet: its registry adapter
+    #    asks each published binary for `doctor --format json`, and `ske` does
+    #    not answer that until it is rewritten. Until then the call stays here,
+    #    because losing it would lose the check that a broken `gpg.ssh.program`
+    #    shim breaks every commit.
     _doctor_head "ske wiring (Touch-ID window)"
     if ! command -v ske >/dev/null 2>&1; then
         _doctor_skip "ske not published (attic decrypted? bootstrap publishes relics)"
@@ -511,15 +308,20 @@ doctor() {
         return $?
     fi
 
-    # Quiet: capture the report, emit it only when something needs attention.
-    # _doctor_run exits non-zero on failures; warnings keep exit 0, so also gate
-    # on the "healthy" summary marker (the only summary that means all-clear).
-    local out rc
-    out=$(_doctor_run $full 2>&1)
+    # Quiet: hold the report, emit it only when something needs attention.
+    # Redirected to a file rather than captured in a command substitution,
+    # because a substitution runs in a subshell and the counters would not
+    # survive it — and reading them is what replaces grepping the report for
+    # its own summary line. A failure is the exit status; a warning keeps
+    # exit 0 and is DOCTOR_WARNS.
+    local held rc
+    held=$(mktemp) || return 2
+    _doctor_run $full >"$held" 2>&1
     rc=$?
-    if [ "$rc" -ne 0 ] || ! printf '%s' "$out" | grep -q '==> healthy'; then
-        printf '%s\n' "$out"
+    if [ "$rc" -ne 0 ] || [ "$DOCTOR_WARNS" -gt 0 ]; then
+        cat "$held"
     fi
+    rm -f "$held"
     return $rc
 }
 

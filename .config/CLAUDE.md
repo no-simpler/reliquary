@@ -357,7 +357,7 @@ Reachable as `yadm` in **every** shell — `~/.config/bin/yadm` is a symlink to 
 - `yadm check` - compares archive SHA256 to detect drift
 - `yadm verify` - decrypts archive to tmpdir and diffs against disk
 - `yadm ls-all` - complete tracked set: `yadm ls-files` (plaintext) + archive listing (`decrypt -l`, Touch ID)
-- `yadm doctor` - dotfiles health self-check (shell resolution, startup smoke tests, `$PATH`-dup sanity, parity, Claude Code `!` blocks, bedrock, Homebrew package health, relic build-cache size, tracking coverage, archive drift, ske wiring); detect-only, Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
+- `yadm doctor` - dotfiles health self-check. The machine's checks are `assay`'s and reached by running it; what stays here is what is genuinely yadm's — encrypted-archive drift, and the `--full` archive verify — plus one `ske doctor` call, the only check `assay` cannot collect until `ske` answers `doctor --format json`. Detect-only and Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
 - `yadm update` - `pull --ff-only`, then `doctor --quiet` (silent when healthy; surfaces drift/regressions the pull introduced — the quiet doctor already covers the encrypted-archive check)
 - All other commands pass through to real yadm, followed by an encrypted-files check
 
