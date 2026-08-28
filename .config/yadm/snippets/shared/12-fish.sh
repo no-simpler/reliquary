@@ -10,12 +10,14 @@ else
     print_info -ad "fish shell already installed"
 fi
 
-# Register fish as a valid login shell
-if ! grep -qF "$FISH_PATH" /etc/shells 2>/dev/null; then
-    print_bold -ad "Registering fish in /etc/shells..."
-    echo "$FISH_PATH" | sudo tee -a /etc/shells >/dev/null
-else
+# Register fish as a valid login shell. Whole-line match and a checked write,
+# for the reasons macos/02-bash.sh records beside the same pair of lines.
+if grep -qxF "$FISH_PATH" /etc/shells 2>/dev/null; then
     print_info -ad "fish already registered in /etc/shells"
+elif echo "$FISH_PATH" | sudo tee -a /etc/shells >/dev/null; then
+    print_success -ad "Registered $FISH_PATH in /etc/shells"
+else
+    print_error -ad "Could not register $FISH_PATH in /etc/shells (needs admin rights); it cannot serve as a login shell until it is"
 fi
 
 # Install Fisher plugin manager

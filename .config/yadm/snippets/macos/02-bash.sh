@@ -21,11 +21,16 @@ else
 fi
 
 # Register it as a valid login shell (mirrors shared/12-fish.sh)
+# Whole-line match: a substring test would accept the path inside a comment.
+# The write is checked — an unchecked `sudo tee` here announced "Registering…"
+# and then said nothing when the sudo failed, which is how this machine ran for
+# two months with the registration silently absent.
 if [ ! -x "$BASH_PATH" ]; then
     print_warning -ad "modern bash not found at $BASH_PATH; skipping /etc/shells registration"
-elif grep -qF "$BASH_PATH" /etc/shells 2>/dev/null; then
+elif grep -qxF "$BASH_PATH" /etc/shells 2>/dev/null; then
     print_info -ad "modern bash already registered in /etc/shells"
+elif echo "$BASH_PATH" | sudo tee -a /etc/shells >/dev/null; then
+    print_success -ad "Registered $BASH_PATH in /etc/shells"
 else
-    print_bold -ad "Registering $BASH_PATH in /etc/shells..."
-    echo "$BASH_PATH" | sudo tee -a /etc/shells >/dev/null
+    print_error -ad "Could not register $BASH_PATH in /etc/shells (needs admin rights); it cannot serve as a login shell until it is"
 fi
