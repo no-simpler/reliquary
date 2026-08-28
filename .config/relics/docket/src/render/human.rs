@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use anyhow::Result;
 // Horizontal rules only: a narrow terminal wraps the detail cell over several
 // lines, and without a rule between rows one item's detail reads as the next
@@ -18,9 +20,22 @@ fn age_color(days: i64) -> Color {
     }
 }
 
+/// A column bound that no field can exceed: the stored caps are far below
+/// `u16::MAX`, and saturating says so without an unreachable error arm.
+fn column_width(cap: usize) -> u16 {
+    u16::try_from(cap).unwrap_or(u16::MAX)
+}
+
+/// One long function on purpose: it is a table definition, and every line of it
+/// is one column or one cell. Splitting it would move the layout somewhere the
+/// reader has to assemble it from.
+#[expect(
+    clippy::too_many_lines,
+    reason = "a table definition reads as one piece"
+)]
 pub fn list(view: &View<'_>) -> Result<()> {
     match view.project {
-        Some(project) => println!("{}", project),
+        Some(project) => println!("{project}"),
         None => println!("{}", plural(view.projects(), "project", "projects")),
     }
     if view.hits.is_empty() {
@@ -59,8 +74,8 @@ pub fn list(view: &View<'_>) -> Result<()> {
     // The display bound is the stored bound: a name and a tagline that pass
     // validation each occupy one row, and only a narrow terminal wraps them.
     for (column, cap) in [
-        (offset + 4, crate::field::NAME_MAX as u16),
-        (offset + 5, crate::field::TAGLINE_MAX as u16),
+        (offset + 4, column_width(crate::field::NAME_MAX)),
+        (offset + 5, column_width(crate::field::TAGLINE_MAX)),
     ] {
         if let Some(column) = table.column_mut(column) {
             column.set_constraint(ColumnConstraint::UpperBoundary(Width::Fixed(cap)));
@@ -81,10 +96,10 @@ pub fn list(view: &View<'_>) -> Result<()> {
                     detail = format!("BLOCKED: {}\n{detail}", reason.trim());
                 }
                 if let Some(tags) = tag_line(item) {
-                    detail.push_str(&format!("\nTAGS: {tags}"));
+                    let _ = write!(detail, "\nTAGS: {tags}");
                 }
                 if let Some(excerpt) = &hit.excerpt {
-                    detail.push_str(&format!("\nMATCH: {excerpt}"));
+                    let _ = write!(detail, "\nMATCH: {excerpt}");
                 }
                 let kind = paint(
                     Cell::new(kind_badge(item)),

@@ -36,7 +36,7 @@ pub struct Global {
     #[arg(long, global = true, conflicts_with = "format")]
     pub json: bool,
 
-    /// Honours NO_COLOR and CLICOLOR_FORCE.
+    /// Honours `NO_COLOR` and `CLICOLOR_FORCE`.
     #[arg(long, global = true, value_enum, default_value = "auto")]
     pub color: ColorChoice,
 
@@ -175,7 +175,7 @@ pub struct CreateArgs {
 
     /// Up to three words of A-Z, 0-9 and underscore, at most 20 characters.
     /// Case and separators are normalised, so rosetta-messenger stores as
-    /// ROSETTA_MESSENGER.
+    /// `ROSETTA_MESSENGER`.
     #[arg(long)]
     pub name: String,
 
@@ -311,7 +311,7 @@ pub struct RelayArgs {
 
 #[derive(Args)]
 pub struct AnnounceArgs {
-    /// Emit Claude Code SessionStart hook JSON.
+    /// Emit Claude Code `SessionStart` hook JSON.
     #[arg(long)]
     pub hook: bool,
 }

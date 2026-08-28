@@ -18,7 +18,7 @@
 #
 # Every surviving attribute carries a reason comment.
 
-docket = 0
+docket = 5
 ernest = 10
 midden = 4
 relic-core = 0

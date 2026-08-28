@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use fs_err as fs;
 
@@ -33,14 +35,13 @@ pub fn slug_for_path(path: &Utf8Path) -> String {
 }
 
 fn digest(path: &Utf8Path) -> String {
-    const ALPHABET: &[u8] = b"0123456789abcdefghjkmnpqrstvwxyz";
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in path.as_str().bytes() {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     (0..4)
-        .map(|i| ALPHABET[((hash >> (i * 5)) as usize) % ALPHABET.len()] as char)
+        .map(|i| char::from(crate::id::symbol(crate::id::five_bits(hash, i))))
         .collect()
 }
 
@@ -60,7 +61,7 @@ pub struct Record {
 
 impl Record {
     pub fn order(&self) -> i64 {
-        self.item.as_ref().map(|i| i.order).unwrap_or(i64::MAX)
+        self.item.as_ref().map_or(i64::MAX, |i| i.order)
     }
 }
 
@@ -184,10 +185,11 @@ impl Depot {
         let mut message =
             format!("no item with id {id}. Run docket list --all to see every open item");
         if git::Repo::open(&self.root).is_some() {
-            message.push_str(&format!(
+            let _ = write!(
+                message,
                 ". If it was closed, history holds it: git -C {} log --diff-filter=D --name-only",
                 self.root
-            ));
+            );
         }
         bail!(message)
     }
@@ -222,7 +224,7 @@ impl Depot {
         let dir = self.project_dir(&item.project).join(item.kind().dir());
         match item.kind() {
             Kind::Spec => dir.join(format!("{}-{}", item.id, slug)).join(SPEC_FILE),
-            _ => dir.join(format!("{}-{}.md", item.id, slug)),
+            Kind::Handoff | Kind::Relay => dir.join(format!("{}-{}.md", item.id, slug)),
         }
     }
 
@@ -257,9 +259,9 @@ impl Depot {
         // directory carries supporting files that a file-by-file write would
         // orphan. The ladder runs forward, so a spec is a source only when a
         // move re-targets it, and a directory always lands as a directory.
-        let from = self.footprint_at(record.kind, &record.path)?;
+        let from = Self::footprint_at(record.kind, &record.path)?;
         if from.is_dir() {
-            let to = self.footprint_at(item.kind(), &target)?;
+            let to = Self::footprint_at(item.kind(), &target)?;
             if let Some(parent) = to.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -277,17 +279,17 @@ impl Depot {
 
     /// Everything one item occupies: the file, or a spec's whole directory.
     /// Closing removes this and history is what keeps it; a move relocates it.
-    pub fn footprint(&self, record: &Record) -> Result<Utf8PathBuf> {
-        self.footprint_at(record.kind, &record.path)
+    pub fn footprint(record: &Record) -> Result<Utf8PathBuf> {
+        Self::footprint_at(record.kind, &record.path)
     }
 
-    fn footprint_at(&self, kind: Kind, path: &Utf8Path) -> Result<Utf8PathBuf> {
+    fn footprint_at(kind: Kind, path: &Utf8Path) -> Result<Utf8PathBuf> {
         match kind {
             Kind::Spec => path
                 .parent()
                 .map(Utf8Path::to_owned)
                 .ok_or_else(|| anyhow!("{path} has no directory")),
-            _ => Ok(path.to_owned()),
+            Kind::Handoff | Kind::Relay => Ok(path.to_owned()),
         }
     }
 
@@ -312,7 +314,7 @@ impl Depot {
                 continue;
             };
             let Ok(item) = &record.item else { continue };
-            let wanted = (position as i64 + 1) * ORDER_STEP;
+            let wanted = (i64::try_from(position).unwrap_or(i64::MAX) + 1) * ORDER_STEP;
             if item.order != wanted {
                 let mut updated = item.clone();
                 updated.order = wanted;
@@ -356,7 +358,7 @@ fn filenames(dir: &Utf8Path, kind: Kind) -> Vec<(Id, Utf8PathBuf)> {
         };
         let path = match kind {
             Kind::Spec => dir.join(&name).join(SPEC_FILE),
-            _ => dir.join(&name),
+            Kind::Handoff | Kind::Relay => dir.join(&name),
         };
         if !path.is_file() {
             continue;

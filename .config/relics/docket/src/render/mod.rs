@@ -2,6 +2,8 @@ pub mod agent;
 pub mod human;
 pub mod json;
 
+use std::fmt::Write;
+
 use camino::Utf8Path;
 
 use anyhow::Result;
@@ -94,7 +96,7 @@ pub fn row(position: usize, record: &Record, now: jiff::Timestamp) -> Row {
                 String::new(),
                 String::new(),
             ],
-            tagline: error.to_string(),
+            tagline: error.clone(),
             notes: vec![record.path.to_string()],
         },
     }
@@ -106,8 +108,8 @@ pub fn row(position: usize, record: &Record, now: jiff::Timestamp) -> Row {
 pub fn aligned(rows: &[Row], indent: &str) -> (Vec<String>, usize) {
     let mut widths = vec![0usize; rows.iter().map(|r| r.cells.len()).max().unwrap_or(0)];
     for row in rows {
-        for (index, cell) in row.cells.iter().enumerate() {
-            widths[index] = widths[index].max(cell.chars().count());
+        for (width, cell) in widths.iter_mut().zip(&row.cells) {
+            *width = (*width).max(cell.chars().count());
         }
     }
     let head = indent.chars().count() + widths.iter().map(|w| w + 2).sum::<usize>();
@@ -116,8 +118,8 @@ pub fn aligned(rows: &[Row], indent: &str) -> (Vec<String>, usize) {
         .iter()
         .map(|row| {
             let mut line = String::from(indent);
-            for (index, cell) in row.cells.iter().enumerate() {
-                line.push_str(&format!("{cell:<width$}  ", width = widths[index]));
+            for (width, cell) in widths.iter().zip(&row.cells) {
+                let _ = write!(line, "{cell:<width$}  ");
             }
             line.push_str(&row.tagline);
             line.truncate(line.trim_end().len());
@@ -184,10 +186,10 @@ fn shorten(project: &Utf8Path, home: Option<&Utf8Path>) -> String {
     let from = width - keep;
     let tail: String = text.chars().skip(from).collect();
     let cut = match tail.find('/') {
-        Some(at) if tail[..at].chars().count() * 2 <= keep => at,
+        Some(at) if tail.get(..at).unwrap_or(&tail).chars().count() * 2 <= keep => at,
         _ => 0,
     };
-    format!("…{}", &tail[cut..])
+    format!("…{}", tail.get(cut..).unwrap_or(&tail))
 }
 
 /// The tags an item carries as one line, separated by the space a tag may not

@@ -22,7 +22,9 @@ fn hit_json(hit: &Hit) -> Value {
     let mut value = match &record.item {
         Ok(item) => {
             let mut value = item_json(item);
-            value["valid"] = json!(true);
+            if let Some(map) = value.as_object_mut() {
+                map.insert("valid".into(), json!(true));
+            }
             value
         }
         // The keys the shelf can answer for are still answered, so the shape
@@ -35,10 +37,14 @@ fn hit_json(hit: &Hit) -> Value {
             "error": error,
         }),
     };
-    value["position"] = json!(hit.position);
-    value["path"] = json!(record.path);
-    if let Some(excerpt) = &hit.excerpt {
-        value["excerpt"] = json!(excerpt);
+    // Indexing a `Value` panics when it is not an object; asking for the map says
+    // the same thing and cannot.
+    if let Some(map) = value.as_object_mut() {
+        map.insert("position".into(), json!(hit.position));
+        map.insert("path".into(), json!(record.path));
+        if let Some(excerpt) = &hit.excerpt {
+            map.insert("excerpt".into(), json!(excerpt));
+        }
     }
     value
 }
@@ -50,7 +56,7 @@ pub fn item_json(item: &Item) -> Value {
         "kind": item.kind().to_string(),
         "stage": match &item.rung {
             Rung::Spec { stage, .. } => Some(stage.to_string()),
-            _ => None,
+            Rung::Handoff | Rung::Relay(_) => None,
         },
         "name": item.name,
         "tagline": item.tagline,
@@ -61,7 +67,7 @@ pub fn item_json(item: &Item) -> Value {
         "blocked": item.blocked,
         "origin": item.origin,
         "tags": item.tags,
-        "chain": chain.map(|c| c.chain.to_string()),
+        "chain": chain.map(|c| c.id.to_string()),
         "hop": chain.map(|c| c.hop),
         "supersedes": chain.and_then(|c| c.supersedes).map(|s| s.to_string()),
     })

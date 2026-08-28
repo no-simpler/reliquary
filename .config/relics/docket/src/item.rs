@@ -67,7 +67,8 @@ impl fmt::Display for Stage {
 /// carried unchanged through every later hop and promotion.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Chain {
-    pub chain: Id,
+    /// The id of the handoff the chain started from.
+    pub id: Id,
     pub hop: u32,
     pub supersedes: Option<Id>,
 }
@@ -175,7 +176,7 @@ impl Item {
 
         self.rung = match (step, std::mem::replace(&mut self.rung, Rung::Handoff)) {
             (Step::ToRelay, Rung::Handoff) => Rung::Relay(Chain {
-                chain: self.id,
+                id: self.id,
                 hop: 1,
                 supersedes: None,
             }),
@@ -217,7 +218,7 @@ impl Item {
             updated: now,
             order: self.order,
             rung: Rung::Relay(Chain {
-                chain: chain.chain,
+                id: chain.id,
                 hop: chain.hop + 1,
                 supersedes: Some(self.id),
             }),
@@ -288,7 +289,7 @@ impl TryFrom<Wire> for Item {
     fn try_from(w: Wire) -> Result<Item> {
         let chain = match (w.chain, w.hop) {
             (Some(chain), Some(hop)) => Some(Chain {
-                chain,
+                id: chain,
                 hop,
                 supersedes: w.supersedes,
             }),
@@ -351,12 +352,12 @@ impl From<&Item> for Wire {
             created: item.created,
             updated: item.updated,
             order: item.order,
-            chain: chain.map(|c| c.chain),
+            chain: chain.map(|c| c.id),
             hop: chain.map(|c| c.hop),
             supersedes: chain.and_then(|c| c.supersedes),
             stage: match &item.rung {
                 Rung::Spec { stage, .. } => Some(*stage),
-                _ => None,
+                Rung::Handoff | Rung::Relay(_) => None,
             },
             blocked: item.blocked.clone(),
             origin: item.origin.clone(),

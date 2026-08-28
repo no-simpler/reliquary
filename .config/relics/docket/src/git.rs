@@ -134,7 +134,7 @@ impl Repo {
         if let Some(parent) = exclude.parent() {
             fs_err::create_dir_all(parent)?;
         }
-        fs_err::write(&exclude, EXCLUDE).with_context(|| format!("writing {}", exclude))?;
+        fs_err::write(&exclude, EXCLUDE).with_context(|| format!("writing {exclude}"))?;
 
         self.snapshot("init depot")?;
         self.retire_archive_shelves()?;
@@ -149,9 +149,9 @@ impl Repo {
             return Ok(());
         };
         for entry in entries.flatten() {
-            let shelf = entry.path().join("archive");
-            if shelf.is_dir() {
-                shelves.push(shelf);
+            let candidate = entry.path().join("archive");
+            if candidate.is_dir() {
+                shelves.push(candidate);
             }
         }
         if shelves.is_empty() {
@@ -203,7 +203,7 @@ impl Repo {
         let mut ids = Vec::new();
         for entry in porcelain.split('\0').filter(|e| e.len() > 3) {
             // "XY <path>", and a rename's second path follows in its own field.
-            for id in ids_in(&entry[3..]) {
+            for id in ids_in(entry.get(3..).unwrap_or("")) {
                 if !ids.contains(&id) {
                     ids.push(id);
                 }
@@ -244,7 +244,7 @@ impl Repo {
     pub fn remove(&self, path: &Utf8Path, message: &str) -> Result<String> {
         let relative = path
             .strip_prefix(&self.root)
-            .map_err(|_| anyhow!("{} is not inside the depot", path))?;
+            .map_err(|_| anyhow!("{path} is not inside the depot"))?;
         self.run(&["add", "-A"])?;
         self.run(&[
             OsStr::new("rm"),
@@ -254,7 +254,7 @@ impl Repo {
             relative.as_os_str(),
         ])?;
         self.commit(message)?
-            .ok_or_else(|| anyhow!("git recorded no removal for {}", path))
+            .ok_or_else(|| anyhow!("git recorded no removal for {path}"))
     }
 
     /// Every id any commit ever added, so a closed item's id is never minted a

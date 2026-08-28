@@ -1,3 +1,9 @@
+// Clippy's in-test carve-outs (see `clippy.toml`) reach `#[test]` functions and
+// `#[cfg(test)]` modules — not the helpers beside them. An integration test crate
+// is test code end to end, so the carve-out belongs at its root, where its scope
+// is still exactly the tests.
+#![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -244,7 +250,7 @@ fn front(path: &Path) -> String {
         .strip_prefix("---\n")
         .expect("the file opens with a `---` line");
     let end = rest.find("\n---\n").expect("the metadata is terminated");
-    rest[..=end].to_owned()
+    rest.get(..=end).unwrap_or(rest).to_owned()
 }
 
 /// Ids in listing order, taken from the numbered lines of an agent-shaped
@@ -315,7 +321,7 @@ fn value(front: &str, key: &str) -> String {
 /// directory with it.
 fn footprint_gone(path: &Path) -> bool {
     if path.file_name() == Some(OsStr::new("spec.md")) {
-        return path.parent().map(|dir| !dir.exists()).unwrap_or(true);
+        return path.parent().is_none_or(|dir| !dir.exists());
     }
     !path.exists()
 }

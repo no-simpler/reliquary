@@ -8,7 +8,7 @@ use relic_core::fmt::plural;
 /// line, and the trailing tagline column is never padded.
 pub fn list(view: &View<'_>) -> Result<()> {
     match view.project {
-        Some(project) => println!("docket {}", project),
+        Some(project) => println!("docket {project}"),
         None => println!("docket {}", plural(view.projects(), "project", "projects")),
     }
     if view.hits.is_empty() {

@@ -133,14 +133,13 @@ pub fn clamp(raw: &str, max: usize) -> String {
     let end = value
         .char_indices()
         .nth(keep)
-        .map(|(at, _)| at)
-        .unwrap_or(value.len());
-    let head = &value[..end];
+        .map_or(value.len(), |(at, _)| at);
+    let head = value.get(..end).unwrap_or(&value);
     let cut = match head.rfind(' ') {
-        Some(space) if width(&head[..space]) * 2 >= keep => space,
+        Some(space) if width(head.get(..space).unwrap_or(head)) * 2 >= keep => space,
         _ => end,
     };
-    format!("{}…", head[..cut].trim_end())
+    format!("{}…", head.get(..cut).unwrap_or(head).trim_end())
 }
 
 /// The stretch of a line around a match, for quoting what a search found. The
@@ -162,7 +161,12 @@ pub fn excerpt(raw: &str, needle: &str, max: usize) -> String {
     let Some(byte) = lowered.find(needle) else {
         return clamp(&line, max);
     };
-    let at = lowered[..byte].chars().count().min(total);
+    let at = lowered
+        .get(..byte)
+        .unwrap_or(&lowered)
+        .chars()
+        .count()
+        .min(total);
 
     // A quarter of the room goes to what led up to the match, so the match sits
     // where the eye lands rather than against the left edge.

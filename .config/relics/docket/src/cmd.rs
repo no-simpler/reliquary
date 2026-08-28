@@ -1,9 +1,14 @@
+use std::fmt::Write;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use std::io::Read;
 
 use anyhow::{Result, anyhow, bail};
 
-use crate::cli::*;
+use crate::cli::{
+    AnnounceArgs, CompletionArgs, CreateArgs, Global, GuideArgs, HelpArgs, IdArgs, ListArgs,
+    MoveArgs, PromoteArgs, RelayArgs, ReorderArgs, SetArgs,
+};
 use crate::field;
 use crate::git;
 use crate::guide;
@@ -81,15 +86,13 @@ impl<'a> Mutation<'a> {
         let Some(repo) = &self.repo else {
             bail!(
                 "closing needs git, because the depot's history is what keeps a closed item. \
-                 Put git on PATH, or remove {} by hand",
-                footprint
+                 Put git on PATH, or remove {footprint} by hand"
             );
         };
         if !repo.is_recorded(footprint)? {
             bail!(
-                "history does not hold {} yet, so closing it would lose it. \
-                 Run docket doctor",
-                footprint
+                "history does not hold {footprint} yet, so closing it would lose it. \
+                 Run docket doctor"
             );
         }
         repo.remove(footprint, message)
@@ -214,7 +217,7 @@ pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
         rung: match args.kind {
             Kind::Handoff => Rung::Handoff,
             Kind::Relay => Rung::Relay(Chain {
-                chain: id,
+                id,
                 hop: 1,
                 supersedes: None,
             }),
@@ -237,7 +240,9 @@ pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
 fn report_created(ctx: &Ctx, item: &Item, path: &Utf8Path, empty: bool) {
     if ctx.format == Format::Json {
         let mut value = render::json::item_json(item);
-        value["path"] = serde_json::json!(path);
+        if let Some(map) = value.as_object_mut() {
+            map.insert("path".into(), serde_json::json!(path));
+        }
         println!(
             "{}",
             serde_json::to_string_pretty(&value).unwrap_or_default()
@@ -317,7 +322,9 @@ pub fn set(ctx: &Ctx, args: &SetArgs) -> Result<()> {
     ctx.note(&format!("{} updated", item.id));
     if ctx.format == Format::Json {
         let mut value = render::json::item_json(&item);
-        value["path"] = serde_json::json!(path);
+        if let Some(map) = value.as_object_mut() {
+            map.insert("path".into(), serde_json::json!(path));
+        }
         println!("{}", serde_json::to_string_pretty(&value)?);
     }
     Ok(())
@@ -363,9 +370,10 @@ fn recover(record: &Record) -> Result<Item> {
     Ok(Item {
         id: record.id,
         name: field::recovered_name(get("name").as_deref(), record.id.as_str()),
-        tagline: get("tagline")
-            .map(|t| field::clamp(&t, field::TAGLINE_MAX))
-            .unwrap_or_else(|| "Recovered from damaged metadata.".to_owned()),
+        tagline: get("tagline").map_or_else(
+            || "Recovered from damaged metadata.".to_owned(),
+            |t| field::clamp(&t, field::TAGLINE_MAX),
+        ),
         project: record.project.clone(),
         created: stamp("created"),
         updated: now,
@@ -373,7 +381,7 @@ fn recover(record: &Record) -> Result<Item> {
         rung: match kind {
             Kind::Handoff => Rung::Handoff,
             Kind::Relay => Rung::Relay(Chain {
-                chain: get("chain")
+                id: get("chain")
                     .and_then(|c| c.parse().ok())
                     .unwrap_or(record.id),
                 hop: get("hop").and_then(|h| h.parse().ok()).unwrap_or(1),
@@ -563,7 +571,7 @@ pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
     // unrecoverable.
     let successor = item.successor(ctx.depot.mint_id(), name, tagline)?;
     let path = ctx.depot.create(&successor, &body)?;
-    let footprint = ctx.depot.footprint(&record)?;
+    let footprint = Depot::footprint(&record)?;
     let commit = mutation.close(
         &footprint,
         &format!("relay {} to {}", record.id, successor.id),
@@ -588,9 +596,8 @@ pub fn close(ctx: &Ctx, args: &IdArgs) -> Result<()> {
     let name = record
         .item
         .as_ref()
-        .map(|item| item.name.clone())
-        .unwrap_or_else(|_| "invalid metadata".to_owned());
-    let footprint = ctx.depot.footprint(&record)?;
+        .map_or_else(|_| "invalid metadata".to_owned(), |item| item.name.clone());
+    let footprint = Depot::footprint(&record)?;
     let commit = mutation.close(&footprint, &format!("close {}: {name}", record.id))?;
 
     ctx.note(&format!("{} closed at {commit}", record.id));
@@ -630,10 +637,7 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
                         ));
                     }
                     let body = fs_err::read_to_string(&record.path).unwrap_or_default();
-                    if crate::store::split(&body)
-                        .map(|(_, b)| b.trim().is_empty())
-                        .unwrap_or(false)
-                    {
+                    if crate::store::split(&body).is_ok_and(|(_, b)| b.trim().is_empty()) {
                         report(format!(
                             "empty    {} has no body — {}",
                             record.id, record.path
@@ -752,9 +756,8 @@ fn history_problems(ctx: &Ctx) -> Vec<String> {
 
     for nested in repo.nested_repositories() {
         found.push(format!(
-            "nested   {} is a repository of its own\n         \
-             git records it as a link rather than as content, so nothing under it has history",
-            nested
+            "nested   {nested} is a repository of its own\n         \
+             git records it as a link rather than as content, so nothing under it has history"
         ));
     }
 
@@ -764,9 +767,8 @@ fn history_problems(ctx: &Ctx) -> Vec<String> {
         let shelf = ctx.depot.project_dir(&project).join("archive");
         if shelf.is_dir() {
             found.push(format!(
-                "legacy   {} is a retired archive shelf\n         \
-                 nothing lists it: move what it holds back, or delete it",
-                shelf
+                "legacy   {shelf} is a retired archive shelf\n         \
+                 nothing lists it: move what it holds back, or delete it"
             ));
         }
     }
@@ -787,8 +789,7 @@ fn hook_is_wired() -> bool {
     };
     value
         .pointer("/hooks/SessionStart")
-        .map(|hooks| hooks.to_string().contains("docket"))
-        .unwrap_or(false)
+        .is_some_and(|hooks| hooks.to_string().contains("docket"))
 }
 
 pub fn announce(ctx: &Ctx, args: &AnnounceArgs) -> Result<()> {
@@ -829,15 +830,16 @@ pub fn announce(ctx: &Ctx, args: &AnnounceArgs) -> Result<()> {
         out.push_str(line);
         out.push('\n');
         for note in &row.notes {
-            out.push_str(&format!("{pad}{note}\n"));
+            let _ = writeln!(out, "{pad}{note}");
         }
     }
     out.push_str("Items ordered, top normally first.\n");
     if invalid > 0 {
-        out.push_str(&format!(
-            "{} (see: docket doctor)\n",
+        let _ = writeln!(
+            out,
+            "{} (see: docket doctor)",
             plural(invalid, "invalid item", "invalid items")
-        ));
+        );
     }
     out.push_str("See: docket guide handoff|relay|spec\n");
 

@@ -108,7 +108,7 @@ impl Filter {
             }
         }
         match &self.needle {
-            Some(needle) => self.find(needle, record),
+            Some(needle) => Self::find(needle, record),
             None => Some(Answer { excerpt: None }),
         }
     }
@@ -117,7 +117,7 @@ impl Filter {
     /// never searched for an item that parses — every one states its kind and
     /// its keys there, so a search for handoff would answer with every handoff
     /// on the machine.
-    fn find(&self, needle: &str, record: &Record) -> Option<Answer> {
+    fn find(needle: &str, record: &Record) -> Option<Answer> {
         let named = match &record.item {
             Ok(item) => holds(&item.name, needle) || holds(&item.tagline, needle),
             // Nothing parsed, so the name is the one in the filename.
@@ -159,8 +159,10 @@ pub fn roster(depot: &Depot, filter: &Filter) -> Vec<Hit> {
         .map(|hits| (rank(&hits), hits))
         .collect();
     groups.sort_by(|a, b| {
-        a.0.cmp(&b.0)
-            .then_with(|| a.1[0].record.project.cmp(&b.1[0].record.project))
+        a.0.cmp(&b.0).then_with(|| {
+            let project = |hits: &[Hit]| hits.first().map(|hit| hit.record.project.clone());
+            project(&a.1).cmp(&project(&b.1))
+        })
     });
     groups.into_iter().flat_map(|(_, hits)| hits).collect()
 }
@@ -184,7 +186,7 @@ fn narrow(records: Vec<Record>, filter: &Filter) -> Vec<Hit> {
 
 /// Where a project sits in a listing across the machine: when the item at the
 /// head of what it shows was opened. A head whose metadata will not parse
-/// cannot answer, and ranks last — the convention Record::order already takes.
+/// cannot answer, and ranks last — the convention `Record::order` already takes.
 ///
 /// The head of what is *shown*, not of the whole docket, so the order a listing
 /// is in is explicable from the listing itself.
@@ -210,8 +212,8 @@ mod tests {
     use crate::id::Id;
     use crate::item::{Item, Rung};
 
-    fn filter(args: ListArgs) -> Filter {
-        Filter::new(&args).expect("the flags are well formed")
+    fn filter(args: &ListArgs) -> Filter {
+        Filter::new(args).expect("the flags are well formed")
     }
 
     fn item(name: &str, tags: &[&str], blocked: Option<&str>, created: i64) -> Item {
@@ -231,7 +233,7 @@ mod tests {
     }
 
     fn record(kind: Kind, item: Result<Item, String>) -> Record {
-        let id = item.as_ref().map(|i| i.id).unwrap_or_else(|_| Id::mint());
+        let id = item.as_ref().map_or_else(|_| Id::mint(), |i| i.id);
         Record {
             id,
             kind,
@@ -251,7 +253,7 @@ mod tests {
 
     #[test]
     fn a_filter_with_no_flags_admits_everything() {
-        let filter = filter(ListArgs::default());
+        let filter = filter(&ListArgs::default());
         assert!(!filter.is_narrowing());
         let hits = narrow(vec![sound("ALPHA"), damaged(Kind::Spec)], &filter);
         assert_eq!(hits.len(), 2);
@@ -259,7 +261,7 @@ mod tests {
 
     #[test]
     fn invalid_selects_only_what_will_not_parse() {
-        let filter = filter(ListArgs {
+        let filter = filter(&ListArgs {
             invalid: true,
             ..ListArgs::default()
         });
@@ -273,7 +275,7 @@ mod tests {
         let records = || vec![sound("ALPHA"), damaged(Kind::Spec)];
         let specs = narrow(
             records(),
-            &filter(ListArgs {
+            &filter(&ListArgs {
                 kind: Some(Kind::Spec),
                 ..ListArgs::default()
             }),
@@ -283,7 +285,7 @@ mod tests {
 
         let handoffs = narrow(
             records(),
-            &filter(ListArgs {
+            &filter(&ListArgs {
                 kind: Some(Kind::Handoff),
                 ..ListArgs::default()
             }),
@@ -304,7 +306,7 @@ mod tests {
         let by = |tags: &[&str]| {
             narrow(
                 records(),
-                &filter(ListArgs {
+                &filter(&ListArgs {
                     tag: tags.iter().map(|t| (*t).to_owned()).collect(),
                     ..ListArgs::default()
                 }),
@@ -325,7 +327,7 @@ mod tests {
                 sound("FREE"),
                 damaged(Kind::Handoff),
             ],
-            &filter(ListArgs {
+            &filter(&ListArgs {
                 blocked: true,
                 ..ListArgs::default()
             }),
@@ -345,7 +347,7 @@ mod tests {
         ];
         let hits = narrow(
             records,
-            &filter(ListArgs {
+            &filter(&ListArgs {
                 kind: Some(Kind::Spec),
                 ..ListArgs::default()
             }),
@@ -360,13 +362,13 @@ mod tests {
     fn a_project_ranks_by_the_head_it_shows() {
         let older = narrow(
             vec![record(Kind::Handoff, Ok(item("OLD", &[], None, 1_000)))],
-            &filter(ListArgs::default()),
+            &filter(&ListArgs::default()),
         );
         let newer = narrow(
             vec![record(Kind::Handoff, Ok(item("NEW", &[], None, 9_000)))],
-            &filter(ListArgs::default()),
+            &filter(&ListArgs::default()),
         );
-        let unknown = narrow(vec![damaged(Kind::Handoff)], &filter(ListArgs::default()));
+        let unknown = narrow(vec![damaged(Kind::Handoff)], &filter(&ListArgs::default()));
 
         assert_eq!(rank(&older), 1_000);
         assert_eq!(rank(&newer), 9_000);
@@ -385,7 +387,7 @@ mod tests {
 
     #[test]
     fn a_search_finds_the_name_and_the_tagline_without_reading_a_body() {
-        let filter = filter(ListArgs {
+        let filter = filter(&ListArgs {
             search: Some("ALPHA".to_owned()),
             ..ListArgs::default()
         });
@@ -398,7 +400,7 @@ mod tests {
 
     #[test]
     fn an_unreadable_file_is_a_miss_rather_than_a_failure() {
-        let filter = filter(ListArgs {
+        let filter = filter(&ListArgs {
             search: Some("absent".to_owned()),
             ..ListArgs::default()
         });
