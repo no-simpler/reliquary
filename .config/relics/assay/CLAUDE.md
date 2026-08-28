@@ -81,3 +81,18 @@ across four search paths, including one that reproduces every warning class.
 | The search path is a `Context` field, not `$PATH` | the station's policy is testable against a directory a test built, with no process-environment mutation | every `bedrock` fixture test |
 | A duplicate is judged by `canonicalize`, not `readlink -f` | same rule, and it does not depend on GNU coreutils being the `readlink` that wins on PATH | `one_install_reached_twice_is_not_two_installs` |
 | An unknown argument exits 2; `assay` exits 3 for its own failures | 0/1/2 are graded verdicts. A tool that could not run has not verified anything, so none of the three is true | `an_unknown_station_is_refused_and_nothing_runs` |
+
+## Deviations from `bin/check-md-shell-blocks`
+
+Parity verified on a fixture home reproducing every rule, plus this machine's
+own tree: the same findings, and the same exit code at all four grades.
+
+| deviation | why | pinned by |
+| --- | --- | --- |
+| No root directory exists → `Outcome::Skipped`, where the script printed a note and exited 0 | a skip is a fact the run can see; a note is text nobody reads twice. Same grade | `a_machine_with_no_claude_markdown_is_skipped_not_passed` |
+| The patterns compile per run instead of at module scope | a `LazyLock<Regex>` needs an `unwrap`, and a construction that cannot fail is worth spelling as one that returns `Result` when the alternative is a suppression | the station's own tests, which build `Patterns` directly |
+| A grant is a `Grant::Exact` / `Grant::Prefix`, not a `(kind, text)` tuple | the two forms answer `covers` differently, and a tuple lets a caller read the wrong half | `a_grant_covers_what_its_form_says_and_no_more` |
+
+Carried over unchanged, and worth knowing: the **empty-block check is reachable
+only through a fence**. The inline pattern requires at least one character, so
+``!`` `` matches nothing in either implementation and is not a block at all.

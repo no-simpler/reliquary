@@ -13,7 +13,10 @@ use crate::station::Station;
 /// at the first problem hides how many there are — so there is nothing for
 /// fastest-first ordering to buy.
 pub fn roster() -> Vec<Box<dyn Station>> {
-    vec![Box::new(crate::stations::bedrock::Bedrock::default())]
+    vec![
+        Box::new(crate::stations::bedrock::Bedrock::default()),
+        Box::new(crate::stations::md_blocks::MdBlocks::default()),
+    ]
 }
 
 /// The stations named, or all of them.
