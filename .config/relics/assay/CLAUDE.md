@@ -322,10 +322,10 @@ live machine the day it lands.
 | --- | --- |
 | `perf-budgets` | **built** |
 | `path` | **built** — and `bin/pb` is retired with it |
+| `git-identity` | **built** |
 | harness permission rules | to build — and it retires `halo`'s `settings_lint.py` one dream cycle later |
 | harness hook wiring | to build |
 | `~/.claude` skill and plugin health | to build |
-| git-identity separation | to build — the three mechanisms that must all be right |
 | manifest ↔ installed drift | to build, for the cargo and npm lanes |
 
 ## The `path` station
@@ -366,6 +366,46 @@ once. Pinned by `a_lane_that_does_not_exist_is_broken_because_nothing_can_publis
 **Homebrew is resolved, not hardcoded** — the path entry that holds a `brew` — so the
 check works on Apple silicon, on Intel, and says nothing at all on a machine that has
 no Homebrew to order against.
+
+## The `git-identity` station
+
+Two GitHub accounts share `github.com`, and three independent mechanisms keep them
+apart: which SSH key is offered, which git identity signs, which `gh` token is used.
+All three must be right, and **any one can be right while another silently is not**
+— which is what makes it a station rather than a habit. Failure is silent by
+construction: the operation succeeds, as somebody else.
+
+**`ssh -G` is the oracle, not `~/.ssh/config`.** It is ssh's own resolution of its
+own configuration, one lowercase keyword and value per line, with every `Host`,
+`Match` and first-match-wins rule already applied. Parsing the file instead would be
+a second implementation of ssh's matching — which is how a checker comes to disagree
+with the thing it checks. Same for git: `config --list -z`, and `-z` because a value
+may hold a newline. Both contracts are pinned by their own tests against captured
+output, separately from the station's logic.
+
+**Structure, never values.** The station's source is publicly tracked, so it names
+only what `~/.config/CLAUDE.md` already names in public — the two host aliases and
+the shape of the wiring. It reads no identity out of any file and puts none in a
+finding. Every test it applies is "pinned", "different from each other", or "what it
+points at exists".
+
+Almost everything grades `Broken`, because the failure mode is an unnoticed identity
+swap rather than a degradation: no `IdentitiesOnly` (the agent's offer order picks
+the account, and no agent's order is declared policy), one key pinned to both
+aliases, a pin naming a key that is not here (with `IdentitiesOnly` that offers *no*
+key and every SSH git operation fails), the alias not dialling `github.com`, no
+directory-scoped git identity, a scoped identity repeating the default address or
+signing with the default key, and a missing or inert `gh` shim.
+
+The one `Soft`: the benefactor `gh` profile not yet created. That is the single
+interactive step on a new machine, and until it is done `gh` in that tree falls back
+to the account with no access there — fail-safe, and not yet working.
+
+**What it deliberately cannot prove.** `ssh -T` says which account a key
+authenticates as, and only a real repository operation proves organisation SSO
+access. Both want the network and one wants a credential, so neither belongs in a
+detect-only standing audit. This proves the wiring is present and separate; whether
+it is *correct* is the network's answer.
 
 ## Retired, not ported: `bin/pb`
 

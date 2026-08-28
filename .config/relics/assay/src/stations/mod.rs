@@ -6,6 +6,7 @@
 
 pub mod bedrock;
 pub mod brew_health;
+pub mod git_identity;
 pub mod md_blocks;
 pub mod path;
 pub mod perf_budgets;
