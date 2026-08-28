@@ -13,20 +13,21 @@
 #   relic::test    ~/.config/relics/<name>
 #   relic::update  ~/.config/relics/<name>
 #
-# Each operation reads <dir>/relic.sh (the per-relic manifest). If
-# <dir>/scripts/<op>.sh exists and is executable, it is run instead of the
-# default behavior — relics override only when they need to.
+# Each operation reads the per-relic manifest — <dir>/relic.toml, or the legacy
+# <dir>/relic.sh where one has not been converted yet. If <dir>/scripts/<op>.sh
+# exists and is executable, it is run instead of the default behavior — relics
+# override only when they need to.
 #
-# Manifest schema (<dir>/relic.sh):
-#   NAME                  — required; published-name and META_NAME
-#   DESCRIPTION           — optional; one-line summary
-#   RUNTIME               — required; rust by default, see the stance below
-#   RUNTIME_EXEMPTION     — required when RUNTIME is not rust; why not
-#   MIN_RUNTIME_VERSION   — optional; semver-ish, enforced at publish time
-#   ENTRYPOINTS           — optional; published names for a compiled relic
-#   BREW_DEPS             — optional; array of brew package names
-#   EXTERNAL_DEPS         — optional; free-form notes (not enforced)
-#   DOCKER                — optional; 1 if entrypoints are docker-run shims
+# Manifest schema, TOML keys and the bash names they carry:
+#   name                  NAME                  required; published name + META_NAME
+#   description           DESCRIPTION           optional; one-line summary
+#   runtime               RUNTIME               required; rust by default, see the stance
+#   runtime-exemption     RUNTIME_EXEMPTION     required when runtime is not rust; why not
+#   min-runtime-version   MIN_RUNTIME_VERSION   optional; semver-ish, enforced at publish
+#   entrypoints           ENTRYPOINTS           optional; published names, compiled relics
+#   brew-deps             BREW_DEPS             optional; brew package names
+#   external-deps         EXTERNAL_DEPS         optional; free-form notes (not enforced)
+#   docker                DOCKER                optional; true for docker-run shims
 #
 # Runtime stance: relics are Rust by default. Any other RUNTIME records why in
 # RUNTIME_EXEMPTION. Nothing here refuses to publish over it — `relic doctor`
@@ -58,6 +59,91 @@ relic::_version_ge() {
     [[ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" == "$need" ]]
 }
 
+# Where a relic's manifest is, and in which format. Prints the path; the caller
+# reads the extension. Nothing else in the tree may test for a manifest by name:
+# a second predicate is how one lane comes to disagree with another about which
+# directories are relics at all.
+relic::manifest_path() {
+    local dir="${1:-}"
+    if [[ -r "$dir/relic.toml" ]]; then
+        printf '%s' "$dir/relic.toml"
+    elif [[ -r "$dir/relic.sh" ]]; then
+        printf '%s' "$dir/relic.sh"
+    else
+        return 1
+    fi
+}
+
+relic::has_manifest() {
+    relic::manifest_path "${1:-}" >/dev/null
+}
+
+# One legacy manifest as a record, sourced in a subshell so a manifest can no
+# longer reach the caller's scope with anything but the schema.
+relic::_manifest_legacy() {
+    local dir="$1"
+    (
+        NAME=""
+        DESCRIPTION=""
+        RUNTIME=""
+        RUNTIME_EXEMPTION=""
+        MIN_RUNTIME_VERSION=""
+        ENTRYPOINTS=()
+        BREW_DEPS=()
+        EXTERNAL_DEPS=()
+        DOCKER=0
+
+        # shellcheck disable=SC1090
+        if ! source "$dir/relic.sh" 2>/dev/null; then
+            printf '__RELIC_DIR=%q\n__RELIC_ERROR=%q\n__RELIC_END=1\n' \
+                "$dir" "failed to source $dir/relic.sh"
+            exit 0
+        fi
+
+        printf '__RELIC_DIR=%q\n__RELIC_ERROR=%q\n' "$dir" ""
+        printf 'NAME=%q\nDESCRIPTION=%q\nRUNTIME=%q\nRUNTIME_EXEMPTION=%q\n' \
+            "$NAME" "$DESCRIPTION" "$RUNTIME" "$RUNTIME_EXEMPTION"
+        printf 'MIN_RUNTIME_VERSION=%q\nDOCKER=%q\n' "$MIN_RUNTIME_VERSION" "$DOCKER"
+        relic::_emit_array ENTRYPOINTS ${ENTRYPOINTS[@]+"${ENTRYPOINTS[@]}"}
+        relic::_emit_array BREW_DEPS ${BREW_DEPS[@]+"${BREW_DEPS[@]}"}
+        relic::_emit_array EXTERNAL_DEPS ${EXTERNAL_DEPS[@]+"${EXTERNAL_DEPS[@]}"}
+        printf '__RELIC_END=1\n'
+    )
+}
+
+relic::_emit_array() {
+    local name="$1" value
+    shift
+    printf '%s=(' "$name"
+    for value in "$@"; do
+        printf ' %q' "$value"
+    done
+    printf ' )\n'
+}
+
+# Manifests for many directories as one eval-able record stream, in no
+# particular order: it is a lookup table, and the orders callers want they
+# already have. Directories with no manifest yield nothing — whether that is an
+# error is the caller's to say.
+#
+# Batched because an interpreter start costs more than every read that follows
+# it, and `relic list` reads each manifest more than once.
+relic::_manifest_read() {
+    local dir toml=()
+    for dir in "$@"; do
+        if [[ -r "$dir/relic.toml" ]]; then
+            toml=(${toml[@]+"${toml[@]}"} "$dir")
+        elif [[ -r "$dir/relic.sh" ]]; then
+            relic::_manifest_legacy "$dir"
+        fi
+    done
+    [[ ${#toml[@]} -eq 0 ]] && return 0
+    python3 "$HOME/.config/reliquary/lib/manifest.py" "${toml[@]}"
+}
+
+# One manifest, into the caller's scope. Fields are always assigned, so a value
+# from a previous relic cannot survive into this one.
+#
 # shellcheck disable=SC2034  # the manifest fields are this function's output;
 # every one is read by callers after it returns.
 relic::load_manifest() {
@@ -66,35 +152,27 @@ relic::load_manifest() {
         relic::_die "load_manifest: missing dir"
         return $?
     }
-    local manifest="$dir/relic.sh"
-    [[ -f "$manifest" ]] || {
-        relic::_die "no manifest at $manifest"
+    local manifest
+    manifest="$(relic::manifest_path "$dir")" || {
+        relic::_die "no manifest at $dir/relic.toml or $dir/relic.sh"
         return $?
     }
 
-    # Reset known fields so prior-load values don't leak when iterating relics.
-    NAME=""
-    DESCRIPTION=""
-    RUNTIME=""
-    RUNTIME_EXEMPTION=""
-    MIN_RUNTIME_VERSION=""
-    ENTRYPOINTS=()
-    BREW_DEPS=()
-    EXTERNAL_DEPS=()
-    DOCKER=0
+    __RELIC_ERROR=""
+    local record
+    record="$(relic::_manifest_read "$dir")"
+    eval "$record"
 
-    # shellcheck disable=SC1090
-    source "$manifest" || {
-        relic::_die "failed to source $manifest"
+    [[ -z "$__RELIC_ERROR" ]] || {
+        relic::_die "$__RELIC_ERROR"
         return $?
     }
-
     [[ -n "$NAME" ]] || {
-        relic::_die "manifest missing NAME: $manifest"
+        relic::_die "manifest missing name: $manifest"
         return $?
     }
     [[ -n "$RUNTIME" ]] || {
-        relic::_die "manifest missing RUNTIME: $manifest"
+        relic::_die "manifest missing runtime: $manifest"
         return $?
     }
 }

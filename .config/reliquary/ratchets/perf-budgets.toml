@@ -63,6 +63,27 @@ command = "ske-prompt"
 budget_ms = 10
 measured = "2026-08-27"
 
+# ── every relic listing, and the lane's own health check ─────────────────────
+# Every one of these reads each manifest two or three times, so a per-read
+# interpreter start is what the batched reader exists to keep out of them.
+[[path]]
+name = "relic-list"
+command = "relic list"
+budget_ms = 290
+measured = "2026-08-28"
+
+[[path]]
+name = "relic-doctor"
+command = "relic doctor"
+budget_ms = 350
+measured = "2026-08-28"
+
+[[path]]
+name = "relic-status"
+command = "relic status"
+budget_ms = 210
+measured = "2026-08-28"
+
 # ── every `yadm update` and every dream pre-pass ─────────────────────────────
 [[path]]
 name = "yadm-doctor-quiet"
