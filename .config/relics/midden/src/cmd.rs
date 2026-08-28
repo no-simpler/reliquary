@@ -4,7 +4,10 @@ use std::io::Read;
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::cli::*;
+use crate::cli::{
+    CompletionArgs, DigestArgs, FileArgs, GcArgs, Global, GuideArgs, HelpArgs, IdArgs, ListArgs,
+    ResolveArgs, SetArgs,
+};
 use crate::field;
 use crate::guide;
 use crate::help;
@@ -152,6 +155,7 @@ pub fn file(ctx: &Ctx, args: &FileArgs) -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy)]
 enum Filed {
     New,
     Folded,
@@ -160,8 +164,13 @@ enum Filed {
 fn report(ctx: &Ctx, note: &Note, path: &Utf8Path, how: Filed) -> Result<()> {
     if ctx.format == Format::Json {
         let mut value = render::json::note_json(note);
-        value["path"] = serde_json::json!(path);
-        value["folded"] = serde_json::json!(matches!(how, Filed::Folded));
+        if let Some(map) = value.as_object_mut() {
+            map.insert("path".into(), serde_json::json!(path));
+            map.insert(
+                "folded".into(),
+                serde_json::json!(matches!(how, Filed::Folded)),
+            );
+        }
         println!("{}", serde_json::to_string_pretty(&value)?);
         return Ok(());
     }
@@ -289,7 +298,7 @@ pub fn archive(ctx: &Ctx, args: &IdArgs) -> Result<()> {
         bail!("{} is already archived", record.id);
     }
     let target = ctx.corpus.archive(&record)?;
-    println!("{}", target);
+    println!("{target}");
     ctx.say(&format!("midden: archived {}", record.id));
     Ok(())
 }

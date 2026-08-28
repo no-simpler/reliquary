@@ -1,4 +1,7 @@
-# The lint ratchet: `#[allow]` and `#![allow]` attributes, counted per package.
+# The lint ratchet: suppression attributes, counted per package — `#[allow]`,
+# `#![allow]`, and `#[expect]`, which is otherwise a suppression the count cannot
+# see. Prefer `#[expect]`: it fails once the lint it silences stops firing, so a
+# suppression that has outlived its cause announces itself.
 #
 # See "Track 3 — the verification ratchet" in ~/.config/reliquary/HARDENING.md.
 # A ratchet is not a ceiling. You can always move a number; you just cannot move
@@ -16,6 +19,6 @@
 # Every surviving attribute carries a reason comment.
 
 docket = 0
-ernest = 8
-midden = 0
+ernest = 10
+midden = 4
 relic-core = 0

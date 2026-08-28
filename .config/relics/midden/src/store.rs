@@ -53,7 +53,7 @@ pub struct Record {
 
 impl Record {
     pub fn occurrences(&self) -> u32 {
-        self.note.as_ref().map(|note| note.occurrences).unwrap_or(0)
+        self.note.as_ref().map_or(0, |note| note.occurrences)
     }
 }
 
@@ -165,11 +165,11 @@ impl Corpus {
     /// later housekeeping pass.
     pub fn save(&self, record: &Record, note: &Note) -> Result<Utf8PathBuf> {
         let _guard = self.lock()?;
-        self.save_locked(record, note)
+        Self::save_locked(record, note)
     }
 
     /// The same, for callers already holding the lock across a batch.
-    fn save_locked(&self, record: &Record, note: &Note) -> Result<Utf8PathBuf> {
+    fn save_locked(record: &Record, note: &Note) -> Result<Utf8PathBuf> {
         let body = read_body(&record.path)?;
         write_atomic(&record.path, &render(note, &body)?)?;
         Ok(record.path.clone())
@@ -219,7 +219,7 @@ impl Corpus {
                 Status::Open if note.occurrences == 1 && idle > SINGLETON_IDLE_DAYS => {
                     Action::Archived
                 }
-                _ => continue,
+                Status::Dismissed | Status::Actioned | Status::Open => continue,
             };
             if !dry_run {
                 match action {
@@ -250,7 +250,7 @@ impl Corpus {
             .clone()
             .map_err(|error| anyhow!("{} will not parse: {error}", record.id))?;
         note.saw(at);
-        self.save_locked(record, &note)?;
+        Self::save_locked(record, &note)?;
         Ok(note)
     }
 }
@@ -321,7 +321,7 @@ fn filenames(dir: &Utf8Path) -> Vec<(Id, Utf8PathBuf)> {
 /// Atomic replacement lives in `relic-core`: both stores wrote this by hand, and
 /// both copies replaced the destination's extension to name their temporary.
 fn write_atomic(path: &Utf8Path, contents: &str) -> Result<()> {
-    relic_core::fs::write_atomic(path, contents).with_context(|| format!("replacing {}", path))
+    relic_core::fs::write_atomic(path, contents).with_context(|| format!("replacing {path}"))
 }
 
 /// Splits a document into its metadata and its body. The body is returned
@@ -332,10 +332,16 @@ pub fn split(text: &str) -> Result<(&str, &str)> {
         .or_else(|| text.strip_prefix("---\r\n"))
         .ok_or_else(|| anyhow!("no metadata: the file must open with a --- line"))?;
 
+    // `get` rather than a slice: the offsets come from `split_inclusive`, so they
+    // are character boundaries, and saying so with a total operation costs one
+    // error arm that cannot fire.
+    let boundary = || anyhow!("the metadata does not end on a character boundary");
     let mut offset = 0;
     for line in rest.split_inclusive('\n') {
         if line.trim_end() == "---" {
-            return Ok((&rest[..offset], &rest[offset + line.len()..]));
+            let front = rest.get(..offset).ok_or_else(boundary)?;
+            let body = rest.get(offset + line.len()..).ok_or_else(boundary)?;
+            return Ok((front, body));
         }
         offset += line.len();
     }
@@ -367,7 +373,7 @@ pub fn load(path: &Utf8Path) -> Result<Note> {
 /// a reader can act on.
 fn without_location(message: &str) -> &str {
     match message.rfind(" at line ") {
-        Some(cut) => message[..cut].trim_end(),
+        Some(cut) => message.get(..cut).unwrap_or(message).trim_end(),
         None => message,
     }
 }

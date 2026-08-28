@@ -22,6 +22,9 @@
 // they exist. `lints.workspace = true` is exclusive of every other entry in a
 // package's [lints] table, so a deliberately per-crate lint has no table form.
 #![deny(missing_docs)]
+// Off workspace-wide, because it is noise on a binary whose `pub` only crosses
+// modules. Here `pub` is the API every relic writes against.
+#![warn(clippy::must_use_candidate)]
 
 pub mod fmt;
 pub mod fs;

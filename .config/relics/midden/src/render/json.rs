@@ -53,10 +53,14 @@ pub fn record_json(position: usize, record: &Record) -> Value {
     match &record.note {
         Ok(note) => {
             let mut value = note_json(note);
-            value["position"] = json!(position);
-            value["path"] = json!(record.path);
-            value["archived"] = json!(record.archived);
-            value["valid"] = json!(true);
+            // Indexing a `Value` panics when it is not an object; asking for the
+            // map says the same thing and cannot.
+            if let Some(map) = value.as_object_mut() {
+                map.insert("position".into(), json!(position));
+                map.insert("path".into(), json!(record.path));
+                map.insert("archived".into(), json!(record.archived));
+                map.insert("valid".into(), json!(true));
+            }
             value
         }
         Err(error) => json!({
@@ -85,7 +89,7 @@ pub fn note_json(note: &Note) -> Value {
         "session": note.session,
         "created": note.created.to_string(),
         "updated": note.updated.to_string(),
-        "seen": note.seen.iter().map(|at| at.to_string()).collect::<Vec<_>>(),
+        "seen": note.seen.iter().map(std::string::ToString::to_string).collect::<Vec<_>>(),
         "fingerprint": note.fingerprint,
     })
 }

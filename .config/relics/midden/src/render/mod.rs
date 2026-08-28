@@ -2,6 +2,8 @@ pub mod agent;
 pub mod human;
 pub mod json;
 
+use std::fmt::Write;
+
 use camino::Utf8Path;
 
 use anyhow::Result;
@@ -102,7 +104,7 @@ pub fn row(position: usize, record: &Record, now: jiff::Timestamp) -> Row {
                 String::new(),
                 String::new(),
             ],
-            title: error.to_string(),
+            title: error.clone(),
             detail: String::new(),
             notes: vec![record.path.to_string()],
         },
@@ -125,8 +127,8 @@ pub fn count(occurrences: u32) -> String {
 pub fn aligned(rows: &[Row], indent: &str) -> (Vec<String>, usize) {
     let mut widths = vec![0usize; rows.iter().map(|r| r.cells.len()).max().unwrap_or(0)];
     for row in rows {
-        for (index, cell) in row.cells.iter().enumerate() {
-            widths[index] = widths[index].max(cell.chars().count());
+        for (width, cell) in widths.iter_mut().zip(&row.cells) {
+            *width = (*width).max(cell.chars().count());
         }
     }
     let head = indent.chars().count() + widths.iter().map(|w| w + 2).sum::<usize>();
@@ -135,8 +137,8 @@ pub fn aligned(rows: &[Row], indent: &str) -> (Vec<String>, usize) {
         .iter()
         .map(|row| {
             let mut line = String::from(indent);
-            for (index, cell) in row.cells.iter().enumerate() {
-                line.push_str(&format!("{cell:<width$}  ", width = widths[index]));
+            for (width, cell) in widths.iter().zip(&row.cells) {
+                let _ = write!(line, "{cell:<width$}  ");
             }
             line.push_str(&row.title);
             line

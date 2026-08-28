@@ -33,6 +33,12 @@ fn kind_color(kind: Kind) -> Color {
     }
 }
 
+/// A column bound that no field can exceed: the stored caps are far below
+/// `u16::MAX`, and saturating says so without an unreachable error arm.
+fn column_width(cap: usize) -> u16 {
+    u16::try_from(cap).unwrap_or(u16::MAX)
+}
+
 pub fn list(view: &View<'_>) -> Result<()> {
     println!("{}", heading(view.scope, view.records.len()));
     if view.records.is_empty() {
@@ -91,8 +97,8 @@ fn table_refs(records: &[&Record], color: bool, now: jiff::Timestamp, with_targe
     // The display bound is the stored bound: a title and a detail that pass
     // validation each occupy one row, and only a narrow terminal wraps them.
     for (column, cap) in [
-        (5usize, crate::field::TITLE_MAX as u16),
-        (6, crate::field::DETAIL_MAX as u16),
+        (5usize, column_width(crate::field::TITLE_MAX)),
+        (6, column_width(crate::field::DETAIL_MAX)),
     ] {
         if let Some(column) = table.column_mut(column) {
             column.set_constraint(ColumnConstraint::UpperBoundary(Width::Fixed(cap)));

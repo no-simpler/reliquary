@@ -384,18 +384,18 @@ relic::_allow_ratchet() {
         [[ -n "$pkg" ]] || continue
 
         have="$(find "$pkgdir" -name '*.rs' -not -path '*/target/*' -not -path '*/fixtures/*' \
-            -exec grep -hoE '#!?\[allow\(' {} + 2>/dev/null | wc -l | tr -d ' ')"
+            -exec grep -hoE '#!?\[(allow|expect)\(' {} + 2>/dev/null | wc -l | tr -d ' ')"
         want="$(awk -v p="$pkg" -F' *= *' '$1 == p { gsub(/[^0-9]/, "", $2); print $2; exit }' "$baseline")"
 
         if [[ -z "$want" ]]; then
             printf 'lint ratchet: %s has no baseline in %s\n' "$pkg" "$baseline" >&2
             fail=1
         elif [[ "$have" -gt "$want" ]]; then
-            printf 'lint ratchet: %s has %s allow attributes, baseline %s\n' "$pkg" "$have" "$want" >&2
+            printf 'lint ratchet: %s has %s suppressions, baseline %s\n' "$pkg" "$have" "$want" >&2
             printf '  fix the lint, or raise the baseline in the same commit as the suppression\n' >&2
             fail=1
         elif [[ "$have" -lt "$want" ]]; then
-            printf 'lint ratchet: %s is down to %s allow attributes (baseline %s) — lower it in %s\n' \
+            printf 'lint ratchet: %s is down to %s suppressions (baseline %s) — lower it in %s\n' \
                 "$pkg" "$have" "$want" "$baseline" >&2
             fail=1
         fi

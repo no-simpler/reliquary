@@ -1,3 +1,9 @@
+// Clippy's in-test carve-outs (see `clippy.toml`) reach `#[test]` functions and
+// `#[cfg(test)]` modules — not the helpers beside them. An integration test crate
+// is test code end to end, so the carve-out belongs at its root, where its scope
+// is still exactly the tests.
+#![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

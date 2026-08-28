@@ -56,6 +56,7 @@ pub struct Git;
 /// is present but broken fails the first real invocation with its own message,
 /// which is more legible than this returning `None`. That also keeps a fork off
 /// the session-start hook path, where the whole budget is milliseconds.
+#[must_use]
 pub fn detect() -> Option<Git> {
     tool().map(|_| Git)
 }
@@ -71,6 +72,7 @@ impl Git {
     /// The single constructor. Strips the ambient repository so `-C` is the
     /// only thing that decides which tree is acted on, and forbids anything
     /// that could block on a prompt.
+    #[must_use]
     pub fn command(self) -> Command {
         let mut command = match tool() {
             Some(tool) => tool.command(),
@@ -90,6 +92,7 @@ impl Git {
     }
 
     /// [`Git::command`], aimed at one directory.
+    #[must_use]
     pub fn at(self, dir: &Utf8Path) -> Command {
         let mut command = self.command();
         command.arg("-C").arg(dir);
@@ -100,6 +103,7 @@ impl Git {
     /// worktrees fold into it, because `git worktree list` reports the main
     /// checkout first; a submodule reports its own root, which is what a
     /// per-aspect repository layout needs.
+    #[must_use]
     pub fn main_worktree(self, cwd: &Utf8Path) -> Option<Utf8PathBuf> {
         let output = self
             .at(cwd)
@@ -119,6 +123,7 @@ impl Git {
 
     /// The branch `cwd` is on, when there is one. A detached head names no
     /// branch, and neither does a directory outside a repository.
+    #[must_use]
     pub fn branch(self, cwd: &Utf8Path) -> Option<String> {
         let output = self
             .at(cwd)

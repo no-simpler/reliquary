@@ -36,7 +36,7 @@ pub struct Global {
     #[arg(long, global = true, conflicts_with = "format")]
     pub json: bool,
 
-    /// Honours NO_COLOR and CLICOLOR_FORCE.
+    /// Honours `NO_COLOR` and `CLICOLOR_FORCE`.
     #[arg(long, global = true, value_enum, default_value = "auto")]
     pub color: ColorChoice,
 

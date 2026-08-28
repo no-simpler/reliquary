@@ -105,6 +105,18 @@ str_to_string = "warn"
 wildcard_enum_match_arm = "warn"
 match_wildcard_for_single_variants = "warn"
 
+# Two pedantic lints turned off in the one place that is a record rather than a
+# scattering. A suppression per site would say the same thing twenty times, and
+# say it where nobody reads policy.
+#
+# A dispatch table wants one signature, and `Result<()>` is that signature even
+# on the arm that cannot fail.
+unnecessary_wraps = "allow"
+# Worth having on a library; noise on a binary whose `pub` only crosses modules.
+# It rides a crate-root `#![warn]` in the platform crate instead, the way
+# `missing_docs` does — `lints.workspace = true` admits no per-crate table entry.
+must_use_candidate = "allow"
+
 # Errors are values. Test carve-outs live in clippy.toml, never in a #![allow].
 unwrap_used = "warn"
 expect_used = "warn"

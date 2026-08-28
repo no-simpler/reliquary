@@ -14,7 +14,7 @@ use cli::{Cli, Command, ListArgs};
 
 fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
-    match run(cli) {
+    match run(&cli) {
         Ok(true) => std::process::ExitCode::SUCCESS,
         Ok(false) => std::process::ExitCode::FAILURE,
         Err(error) => {
@@ -24,7 +24,7 @@ fn main() -> std::process::ExitCode {
     }
 }
 
-fn run(cli: Cli) -> anyhow::Result<bool> {
+fn run(cli: &Cli) -> anyhow::Result<bool> {
     // Completions and help topics describe the tool rather than read the
     // corpus, so they must work before one exists.
     match &cli.command {

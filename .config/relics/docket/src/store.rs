@@ -407,10 +407,16 @@ pub fn split(text: &str) -> Result<(&str, &str)> {
         .or_else(|| text.strip_prefix("---\r\n"))
         .ok_or_else(|| anyhow!("no metadata: the file must open with a --- line"))?;
 
+    // `get` rather than a slice: the offsets come from `split_inclusive`, so they
+    // are character boundaries, and saying so with a total operation costs one
+    // error arm that cannot fire.
+    let boundary = || anyhow!("the metadata does not end on a character boundary");
     let mut offset = 0;
     for line in rest.split_inclusive('\n') {
         if line.trim_end() == "---" {
-            return Ok((&rest[..offset], &rest[offset + line.len()..]));
+            let front = rest.get(..offset).ok_or_else(boundary)?;
+            let body = rest.get(offset + line.len()..).ok_or_else(boundary)?;
+            return Ok((front, body));
         }
         offset += line.len();
     }
@@ -441,7 +447,7 @@ pub fn load(path: &Utf8Path) -> Result<Item> {
 /// be the one a reader can act on.
 fn without_location(message: &str) -> &str {
     match message.rfind(" at line ") {
-        Some(cut) => message[..cut].trim_end(),
+        Some(cut) => message.get(..cut).unwrap_or(message).trim_end(),
         None => message,
     }
 }

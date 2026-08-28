@@ -292,7 +292,7 @@ mod tests {
         for _ in 0..(SEEN_MAX + 5) {
             note.saw(now());
         }
-        assert_eq!(note.occurrences as usize, SEEN_MAX + 6);
+        assert_eq!(usize::try_from(note.occurrences).unwrap(), SEEN_MAX + 6);
         assert_eq!(note.seen.len(), SEEN_MAX);
     }
 

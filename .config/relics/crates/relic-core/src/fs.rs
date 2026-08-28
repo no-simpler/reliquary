@@ -113,7 +113,8 @@ fn create_scratch(path: &Utf8Path, dir: &Utf8Path) -> io::Result<(Scratch, File)
                     file,
                 ));
             }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            // Taken since the name was composed: the next one is free.
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
             Err(e) => last = Some(e),
         }
     }

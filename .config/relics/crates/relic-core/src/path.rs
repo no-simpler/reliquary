@@ -102,7 +102,7 @@ pub fn resolve_lenient(path: &Utf8Path) -> Result<Utf8PathBuf, Error> {
     let mut tail = Utf8PathBuf::new();
     for component in absolute.components() {
         match component {
-            Utf8Component::CurDir => continue,
+            Utf8Component::CurDir => {}
             Utf8Component::ParentDir => {
                 if tail.as_str().is_empty() {
                     real.pop();

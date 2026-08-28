@@ -158,6 +158,21 @@ file, and the cheapest repair an agent reaches for is a module-level `#![allow]`
 disarms the lint for the production code beside it. **A restriction lint that has to be
 suppressed to write a test is a lint that will be suppressed everywhere.**
 
+**The carve-out does not reach an integration test crate.** Clippy recognises a
+`#[test]` function and a `#[cfg(test)]` module; the helpers beside them in a
+`tests/*.rs` file are neither, so the lints fire on the fixture code. There the
+carve-out belongs at the crate root, because an integration test crate is test code
+end to end and the scope is still exactly the tests. That is the one place a
+crate-level `#![allow]` is right, and it is still counted by the ratchet.
+
+**Two pedantic lints are turned off in the table rather than at their sites.**
+`unnecessary_wraps` fights a dispatch table, where `Result<()>` is the signature
+even on the arm that cannot fail; `must_use_candidate` is worth having on a library
+and noise on a binary whose `pub` only crosses modules, so it rides a crate-root
+`#![warn]` in the platform crate the way `missing_docs` does. **A suppression
+repeated twenty times is a policy in the wrong file** — put it where policy is
+read, once, with the reason.
+
 **Ratchet a lint table in; never land it hot.** Turning a dozen lints to `deny` across existing
 code in one commit produces a wall of failures and a matching wall of `#[allow]`. Land at
 `warn`, flip to `deny` once the offending code has been rewritten for other reasons. Each
@@ -207,7 +222,7 @@ not a ceiling — which is what makes it survivable in a codebase under active c
 | ratchet | measurement | baseline | fails when |
 | --- | --- | --- | --- |
 | coverage | `cargo llvm-cov --json`, per crate | committed per-crate % | any crate drops, or falls under the floor |
-| lint | count of `#[allow(...)]`, per package | committed integer | the count *changes* |
+| lint | count of suppressions, per package | committed integer | the count *changes* |
 | shell | count of disable directives, per file | committed integer | the count *changes* |
 | perf | timing of the declared hot paths | committed budget | over budget by the stated multiple |
 
@@ -222,6 +237,11 @@ Two calibration rules, both load-bearing:
 **A baseline lives with what it measures**, so a subsystem that relocates carries its ratchets
 with it: the workspace's coverage and lint baselines under `relics/ratchets/`, the shell and
 whole-surface ones under `reliquary/ratchets/`.
+
+**A ratchet counts every form of the thing it measures.** The lint ratchet counts
+`#[expect]` as well as `#[allow]`: `#[expect]` is the better attribute — it fails
+once the lint it silences stops firing, so a suppression that outlived its cause
+announces itself — but a ratchet blind to it is a ratchet with a way around it.
 
 **The lint ratchet is an equality, not a ceiling** — a count that *falls* fails too, and the
 repair is to lower the baseline in the same commit. An inequality lets slack accumulate: five
