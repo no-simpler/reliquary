@@ -316,7 +316,7 @@ and diffing against the script's own `enumerate` — and both grade `ok`.
 
 Nothing here has a retired script behind it, so nothing here has a golden master.
 Each is a behaviour change, pinned by its own tests and by what it finds on the
-live machine the day it lands.
+live machine the day it lands. **All seven are built.**
 
 | station | state |
 | --- | --- |
@@ -326,7 +326,7 @@ live machine the day it lands.
 | `manifest-drift` | **built** |
 | `hook-wiring` | **built** |
 | `claude-plugins` | **built** |
-| harness permission rules | to build — and it retires `halo`'s `settings_lint.py` one dream cycle later |
+| `permission-rules` | **built** — and it brought the runner's staleness facility |
 
 ## The `path` station
 
@@ -509,6 +509,89 @@ and only one of them is this machine's fault.
 `attic/` is private under one encrypt pattern; a file in the wrong lane is
 `yadm-coverage`'s R1 and R4, which already run that test in both directions. One fact,
 one owner — the same rule that gave the missing lane to `path`'s lane check.
+
+## The `permission-rules` station
+
+A rule the harness cannot use does not fail loudly. It is accepted into a settings
+file, mentioned once in a warning above the first prompt, and then matches nothing for
+the rest of the session. What is left reads as protection that is not there.
+
+**The warning is addressed to a person, at session start, in whichever project
+happened to load the file** — so a rule authored in one tree surfaces days later in an
+unrelated one, and no agent ever sees it. That is the class this station closes, and it
+is why the scope is machine-wide rather than per-repository: it walks `~/.claude`,
+`~/.config` and `~/Developer` for every `settings*.json`, skipping vendored trees, in
+about 130 ms.
+
+**One gate per operation.** File permission checks consult `Edit(path)` for every
+file-writing tool and `Read(path)` for every file-reading tool. So `Write(~/x/**)`
+looks like write access and grants none. The harness warns about `Write`, `MultiEdit`,
+`NotebookEdit` and `Glob`; **`Grep(path)` it does not warn about at all**, which makes
+that one strictly worse — it looks live.
+
+| kind | grade | why |
+| --- | --- | --- |
+| `file` | `Broken` | JSON that will not parse takes every rule in the file down at once |
+| `invalid` | `Broken` | the harness's validator rejects **per file**, not per rule |
+| `ineffective` | `Broken` | protection that is not there, which is worse than none |
+| `overbroad` | `Broken` | it approves more than it says |
+| `duplicate` · `shadowed` | `Soft` | untidy: the rule set still means what it reads as |
+
+### Provenance, and the staleness facility it required
+
+The tables and the check ordering are transcribed from the Claude Code bundle — the
+settings validator itself, not documentation about it — and **verified against 2.1.251**,
+with the re-derivation recipe in the station's `derived_from`.
+
+The port took its shape from `halo/alfred/scripts/harness/settings_lint.py`, whose own
+transcription was read against 2.1.226. Re-deriving confirmed every table unchanged and
+found **two things that version predates**, both carried here: the warned-gate check is
+suppressed when the pattern holds `:*` (which `MultiEdit(a:*)` reaches, since MultiEdit
+is not a file-pattern tool), and **an allow rule for `Bash` whose wildcard sits before
+the rest of the command** — it also matches options inserted there and approves them
+with no prompt, and for `git` those options include `-c` and `--exec-path`, which run
+arbitrary commands. That last is the only finding here that *widens* authority rather
+than losing it.
+
+**`Station::derived_from` is the runner-level facility the design left open**, and this
+is its first and only caller. A station that transcribes a third-party table carries an
+obligation the others do not: when the binary moves, the table may stop describing it
+and the station goes on reporting confidently against rules that are no longer the
+rules. Declaring the derivation lets the runner say so — appended to the station that
+owns the transcription, so the reader knows which table to re-derive.
+
+It is a **`Note`, never a verdict**: a checker written against an older release is not
+a broken machine, and most upgrades change nothing the table describes. The installed
+version is read from `~/.local/share/claude/versions/` by number rather than by running
+`claude --version` — a detect-only station does not start the harness to ask it its
+own version, and a string sort would call 2.1.9 newer than 2.1.10.
+
+It is runner-level rather than per-station on purpose: a station that checked its own
+freshness would be the same twenty lines written once per station, and the twentieth
+would be the one that forgot.
+
+### Two shapes worth knowing
+
+**Every malformed rule degrades to "the whole string is the tool name"** rather than to
+an error. `Bash(git log:*) ` with a trailing space is therefore a live rule for a tool
+nothing is ever called, and it reads exactly like the rule it was meant to be. This
+station reports that shape ahead of the harness's own check, which rejects some of them
+further down for an incidental reason and names a different defect.
+
+**A remedy already in the file turns a rewrite into a deletion**, and that is the whole
+edit — so an ineffective rule whose working counterpart is already present says "delete
+this line" instead. Writing that test is what found the summary being truncated: a
+one-line summary is capped, so a remedy appended to it is cut off exactly when it is
+longest. Remedies live in the `fix` field now, across the station.
+
+### The doctrine gap this closes
+
+`AGENTIC-TOOLING.md`'s registration protocol gained a sixth step in W1: a path grant is
+`Edit(…)` or `Read(…)` only. This is the control that makes the directive checkable —
+the whole thesis of Track 3, applied to a rule this repo had already got wrong once.
+
+Retiring `halo`'s own `settings_lint.py` is a halo session's work, due once this has run
+through a dream cycle and its copy is provably redundant.
 
 ## Retired, not ported: `bin/pb`
 

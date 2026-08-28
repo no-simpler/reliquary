@@ -1,6 +1,6 @@
 //! Running the roster.
 
-use relic_core::finding::{Detail, Grade, Report, Summary};
+use relic_core::finding::{Detail, FixHint, Grade, Outcome, Report, Severity, Summary};
 
 use crate::station::{Context, Station};
 
@@ -17,7 +17,7 @@ pub fn run(stations: &[Box<dyn Station>], cx: &Context) -> Vec<Report> {
         .map(|station| match station.check(cx) {
             Ok(outcome) => Report {
                 station: station.id().clone(),
-                outcome,
+                outcome: stale(station.as_ref(), cx, outcome),
             },
             Err(error) => {
                 let summary = Summary::lossy(&format!(
@@ -37,6 +37,50 @@ pub fn run(stations: &[Box<dyn Station>], cx: &Context) -> Vec<Report> {
             }
         })
         .collect()
+}
+
+/// Add the derivation-drift note to a station's own outcome, when it has one.
+///
+/// Appended to the station that owns the transcription rather than raised as the
+/// runner's own finding: the reader's next move is to re-derive *that* table,
+/// and a finding attributed to the runner would make them go looking for which.
+///
+/// A `Note`, never a verdict. The machine is not degraded because a checker was
+/// written against an older release — most upgrades change nothing the table
+/// describes. What has degraded is the confidence in the check, which is exactly
+/// the "worth reading, does not grade" case.
+///
+/// A skipped station stays skipped: it did not consult its table, so whether the
+/// table is current says nothing.
+fn stale(station: &dyn Station, cx: &Context, outcome: Outcome) -> Outcome {
+    let Outcome::Ran(mut findings) = outcome else {
+        return outcome;
+    };
+    let Some(derivation) = station.derived_from() else {
+        return Outcome::Ran(findings);
+    };
+    let Some(installed) = (derivation.installed)(cx) else {
+        return Outcome::Ran(findings);
+    };
+    if installed == derivation.version {
+        return Outcome::Ran(findings);
+    }
+    findings.push(
+        station
+            .id()
+            .finds(
+                Severity::Note,
+                Summary::lossy(&format!(
+                    "these rules were read against {} {}; {installed} is installed",
+                    derivation.artefact, derivation.version
+                )),
+            )
+            .detailed_with(Detail::new(derivation.recipe))
+            .fixed_by(FixHint::lossy(
+                "re-derive the table, then record the version it was read against",
+            )),
+    );
+    Outcome::Ran(findings)
 }
 
 /// What the run amounts to.

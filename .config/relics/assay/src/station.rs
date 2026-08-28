@@ -33,6 +33,45 @@ pub trait Station {
     /// When the station itself could not complete. That is not how a problem
     /// with the machine is reported — see the note on the trait.
     fn check(&self, cx: &Context) -> Result<Outcome>;
+
+    /// What this station's rules were copied out of, when they were copied out
+    /// of something.
+    ///
+    /// Most stations read the machine and answer for it; nothing they know can
+    /// go stale. A station that instead **transcribes a table from a
+    /// third-party binary** carries an obligation the others do not: when that
+    /// binary moves, the table may no longer describe it, and the station goes
+    /// on reporting confidently against rules that are no longer the rules.
+    ///
+    /// Declaring the derivation is how the runner can say so. It is a
+    /// runner-level facility on purpose — a station that checked its own
+    /// freshness would be the same twenty lines written once per station, and
+    /// the twentieth would be the one that forgot.
+    fn derived_from(&self) -> Option<Derivation> {
+        None
+    }
+}
+
+/// Where a station's rules came from, and how to check they are still current.
+///
+/// Deliberately not a version *requirement*. A newer artefact does not make the
+/// transcription wrong — most upgrades change nothing the table describes — so
+/// drift is reported and never graded. What it buys is that the question gets
+/// asked at all, with the recipe to answer it sitting right there.
+#[derive(Clone, Copy)]
+pub struct Derivation {
+    /// What was read, in the words a person would use.
+    pub artefact: &'static str,
+    /// The version it was read against.
+    pub version: &'static str,
+    /// How to read it again.
+    pub recipe: &'static str,
+    /// What is installed now, or nothing when that cannot be determined.
+    ///
+    /// A function pointer rather than a closure: a station is a `dyn` trait
+    /// object, and the resolution has to be testable against a fixture home
+    /// without a process environment.
+    pub installed: fn(&Context) -> Option<String>,
 }
 
 /// Everything a station is allowed to know about the machine.

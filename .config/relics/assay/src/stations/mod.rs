@@ -13,6 +13,7 @@ pub mod manifest_drift;
 pub mod md_blocks;
 pub mod path;
 pub mod perf_budgets;
+pub mod permission_rules;
 pub mod registry;
 pub mod relic_cache;
 pub mod shell_lint;
