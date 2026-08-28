@@ -22,12 +22,17 @@ anyhow.workspace = true
 camino.workspace = true
 clap.workspace = true
 fs-err.workspace = true
+globset = "0.4.19"
 ignore = "0.4.25"
 regex = "1.13.1"
 toml = "1.1.4"
 serde.workspace = true
 serde_json.workspace = true
 relic-core = { path = "../crates/relic-core" }
+# The identity guard, as a library. `warden` owns the definition and the test;
+# a second implementation of either is how two consumers of one definition come
+# to disagree, which is the defect this station exists to catch elsewhere.
+warden = { path = "../warden" }
 
 [dev-dependencies]
 assert_cmd.workspace = true

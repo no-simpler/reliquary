@@ -99,6 +99,27 @@ impl Git {
         command
     }
 
+    /// Run a command built here and take what it said.
+    ///
+    /// The same capture [`Tool`] gives every other program, reached through the
+    /// constructor that strips the ambient repository. A caller that wants a
+    /// typed failure — which command, which status, what it printed — has one
+    /// without reassembling it from `Output` and `ExitStatus` by hand.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::tool::Error`]: the program could not start, it refused, or its
+    /// answer is not text.
+    pub fn capture(self, command: &mut Command) -> Result<crate::tool::Output, crate::tool::Error> {
+        match tool() {
+            Some(tool) => tool.capture(command),
+            // Unreachable through `detect`, and still not a place to panic: a
+            // `Git` built without asking produces the spawn failure naming the
+            // program, which is what any other caller would see.
+            None => Tool::at_path("git", PathBuf::from("git")).capture(command),
+        }
+    }
+
     /// The main checkout root of the repository containing `cwd`. Linked
     /// worktrees fold into it, because `git worktree list` reports the main
     /// checkout first; a submodule reports its own root, which is what a

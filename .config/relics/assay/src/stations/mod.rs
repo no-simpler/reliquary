@@ -8,3 +8,4 @@ pub mod bedrock;
 pub mod brew_health;
 pub mod md_blocks;
 pub mod shell_parity;
+pub mod yadm_coverage;

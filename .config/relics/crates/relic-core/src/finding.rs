@@ -455,6 +455,18 @@ impl Finding {
         self
     }
 
+    /// Attaches the evidence, when there is any.
+    ///
+    /// [`Detail::new`] already answers "was there anything to say?", and every
+    /// caller that builds evidence from text it did not write has to ask. This
+    /// is that answer applied, rather than the same `if let` written out at
+    /// each site.
+    #[must_use]
+    pub fn detailed_with(mut self, detail: Option<Detail>) -> Self {
+        self.detail = detail;
+        self
+    }
+
     /// Attaches what to do about it.
     #[must_use]
     pub fn fixed_by(mut self, fix: FixHint) -> Self {

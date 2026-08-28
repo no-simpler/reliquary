@@ -143,3 +143,42 @@ What the station does that the checker could not:
 - **An absent side is a skip**, not a hard failure. The checker's pair list named
   an encrypt-lane file, so it failed on any machine before the first
   `yadm decrypt`.
+
+## Deviations from `bin/check-yadm-coverage`
+
+Golden-master parity verified three ways: on the live machine, on a fixture
+machine reproducing every rule, and at all three grades — the same findings,
+item for item, and the same exit code (0, 1 and 2). 809 ms → 241 ms.
+
+| deviation | why | pinned by |
+| --- | --- | --- |
+| Archive membership is **asked of git** — `--glob-pathspecs ls-files --others --exclude=…`, yadm's own query against yadm's own repository — instead of reimplemented with Python `glob` plus a hand-written ancestor test | one matcher, and it is the one that decides what actually gets encrypted. The reimplementation was also over-eager: its exclusion test fell back to comparing **basenames**, so `!a/b/keep.txt` excluded every file called `keep.txt` anywhere. Latent today, and gone rather than fixed. Verified identical over this machine's lane (69 of 69 paths) before the swap | live and fixture parity |
+| Both-lanes (R1) is git's **second** query, not a set intersection | `--others` is untracked-only, so a path in both lanes is invisible to the first query. yadm asks twice for exactly this reason | `a_pattern_matching_only_a_tracked_file_is_live_not_dead` |
+| `yadm/unmanaged` globs get the semantics **the file documents** — `*` stops at a separator, `**` crosses one | it was matched with `fnmatch`, whose `*` crosses `/` and whose `**` means nothing in particular, so the documented contract and the enforced one had drifted. Verified no change on this machine: 511 paths, none decided differently | `a_declared_star_stops_at_a_separator_and_a_double_star_does_not` |
+| One finding **per path**, carrying a `Location`; the script printed one grouped warning per rule with a twelve-path sample and a `-v` to see the rest. The flag is gone | a partial list reads as a complete one, and `Location` is the field that already means "where". The count the summary line carried is what a grouped finding was for | live and fixture parity |
+| A credential finding names the **shape** — "a GitHub token" — and never the match | a report that quotes the secret has moved it somewhere new. The same rule governs the identity findings, which say *that* a term matched and never which | `a_credential_in_a_tracked_file_is_broken_and_the_secret_is_never_quoted` |
+| Paths arrive NUL-delimited | the script split `ls-files` on newlines, which is the same class as the unquoted expansion the commit guard carried | `Repo::ls_files` |
+| A clean machine prints nothing, where the script printed a tally of what it counted | inventory is not verification, and the roster line already says the station ran. Same as `bedrock` | `a_database_is_bloated_only_when_it_is_both_big_and_dead` and the fixture parity run |
+| An unreadable `yadm/encrypt` stops the station instead of being one finding among many | the lane is undefined, so every rule downstream would answer about a lane that does not exist. The runner turns it into a `Broken` finding naming the station, which is the same grade the script reached | `an_undefined_encrypt_lane_stops_the_station_rather_than_reporting_a_clean_machine` |
+
+**The identity rules are `warden`'s, and there are now three of them.** The hook
+guards the staged set. This station guards two whole sets: every **tracked** file
+— the standing full-tree sweep the commit guard shed when it narrowed, migrated
+here as the design scoped — and every **undecided** one, which is the same guard
+run backwards, where a hit is positive evidence of which lane a file belongs in.
+One definition, one matcher, three callers. `warden`'s binary-allowlist is
+honoured on the tracked sweep, because that sweep is the hook's test and the hook
+refuses what nothing can vouch for.
+
+**Found by porting: an empty pathspec list means *everything* to git.** An
+encrypt lane naming nothing would have swept in the entire work tree and reported
+every path as managed — a silent, total false clean bill, and the same shape as
+the empty regex that would have matched every line in the identity guard. It is a
+`Scope` enum rather than a pathspec list now, so the caller names what it wants
+and cannot assemble the empty list that means the opposite.
+
+**Its own fixtures caught it, correctly.** The first draft of the credential
+tests wrote literal `ghp_…` and `glpat-…` strings into this file, and both the
+retired script and the station reported the tracked source file as holding two
+credentials. They are assembled at runtime now: a scanner whose own fixtures trip
+it teaches the reader that its findings are noise.
