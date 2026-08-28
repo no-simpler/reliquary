@@ -26,7 +26,7 @@ a budget. What does not belong here is a dependency pulled in for one relic's
 convenience — a platform crate's cost is paid by every relic that wants a project
 key.
 
-## What is here, and why it is one crate and not two
+## What is here
 
 `git` — git as a zero-sized capability. `Git::command` is the *only* sanctioned
 constructor, because it is what strips the ambient `GIT_*` environment: `GIT_DIR`
@@ -41,9 +41,26 @@ ungit path.
 far as the path exists and lexical past that, so a directory keys the same however
 it was spelled and whether or not it exists yet.
 
-They are one crate because `project_key` is the composition of both, and it is the
-thing this crate exists for: `docket` and `midden` each assembled the halves
-themselves and drifted apart. Anything that can be assembled differently will be.
+`git` and `path` are one crate because `project_key` is the composition of both,
+and it is the thing this crate started as: `docket` and `midden` each assembled
+the halves themselves and drifted apart. Anything that can be assembled
+differently will be.
+
+`ui` — one answer to "who is reading this". `Format` (human / agent / json) and
+`ColorChoice`, resolved by the ladder `AGENTIC-TOOLING.md` states: an explicit flag,
+then the relic's own `<NAME>_UI`, then `CLAUDECODE`, then tty-ness. Colour
+detection is `anstream`'s, the same ladder clap walks, so no relic re-derives
+`NO_COLOR`/`CLICOLOR_FORCE`/`TERM=dumb`. `docket` and `midden` had this twice and
+it differed by 25 lines — the env var name and one helper. Ambient authority is
+injected: `Format::resolve` takes a `FormatInputs`, and `from_process` is the one
+place that reads the environment, so every branch of the rule is testable without
+mutating a process no two tests can safely share.
+
+`fmt` — one spelling for the quantities relics report. `age`/`age_days`/`plural`,
+with the **clock as a parameter**. A function that reaches for `Timestamp::now()`
+can only be tested at the resolution of the machine's clock, and a render loop
+that reaches for it per row can report two different "now"s in one table — which
+is why `View` carries one instant for the whole frame.
 
 `fs` — replacing a file's contents without ever exposing a partial one. Admitted on
 the same evidence: both stores had written the identical tmp-then-rename by hand,

@@ -9,7 +9,6 @@ mod item;
 mod query;
 mod render;
 mod store;
-mod ui;
 
 use clap::{CommandFactory, Parser};
 

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use crate::note::{Kind, Status};
-use crate::ui::{ColorChoice, Format};
+use relic_core::ui::{ColorChoice, Format};
 
 pub const ROOT_AFTER_LONG_HELP: &str = "\
 midden guide file|drain = doctrine

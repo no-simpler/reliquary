@@ -7,7 +7,6 @@ mod id;
 mod note;
 mod render;
 mod store;
-mod ui;
 
 use clap::{CommandFactory, Parser};
 

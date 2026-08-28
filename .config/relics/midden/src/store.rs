@@ -211,10 +211,11 @@ impl Corpus {
     /// being.
     pub fn sweep(&self, dry_run: bool) -> Result<Vec<Swept>> {
         let _guard = self.lock()?;
+        let now = jiff::Timestamp::now();
         let mut swept = Vec::new();
         for record in self.list(false) {
             let Ok(note) = &record.note else { continue };
-            let idle = crate::ui::age_days(note.updated);
+            let idle = relic_core::fmt::age_days(note.updated, now);
             let action = match note.status {
                 Status::Dismissed if idle > DISMISSED_TTL_DAYS => Action::Dropped,
                 Status::Actioned if idle > ACTIONED_TTL_DAYS => Action::Dropped,

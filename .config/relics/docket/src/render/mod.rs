@@ -9,7 +9,7 @@ use anyhow::Result;
 use crate::item::Item;
 use crate::query::Hit;
 use crate::store::Record;
-use crate::ui::Format;
+use relic_core::ui::Format;
 
 /// How wide the project column may get. A path is unbounded and the unbounded
 /// column is the tagline, so this one is cut to fit the way a name is.
@@ -21,6 +21,9 @@ pub struct View<'a> {
     pub project: Option<&'a Path>,
     pub hits: &'a [Hit],
     pub color: bool,
+    /// One instant for the whole frame. A render that reaches for the clock per
+    /// row can report two different "now"s in one table.
+    pub now: jiff::Timestamp,
     /// Whether a filter was in play, so an empty result can say whether there
     /// is nothing here or nothing that answered.
     pub narrowed: bool,
@@ -57,7 +60,7 @@ pub struct Row {
     pub notes: Vec<String>,
 }
 
-pub fn row(position: usize, record: &Record) -> Row {
+pub fn row(position: usize, record: &Record, now: jiff::Timestamp) -> Row {
     match &record.item {
         Ok(item) => {
             let mut notes = Vec::new();
@@ -74,7 +77,7 @@ pub fn row(position: usize, record: &Record) -> Row {
                     position.to_string(),
                     record.id.to_string(),
                     kind_badge(item),
-                    crate::ui::age(item.created),
+                    relic_core::fmt::age(item.created, now),
                     // Clamped, not trusted: an item written before the name was
                     // bounded would otherwise widen the column for every row.
                     crate::field::clamp(&item.name, crate::field::NAME_MAX),
@@ -139,8 +142,8 @@ pub fn kind_badge(item: &Item) -> String {
 /// ahead of them when the listing spans the machine, and the notes a query
 /// earned under them. `announce` takes `row` directly, so a banner stays the
 /// blocked line alone.
-pub fn hit_row(hit: &Hit, name_project: bool) -> Row {
-    let mut row = row(hit.position, &hit.record);
+pub fn hit_row(hit: &Hit, name_project: bool, now: jiff::Timestamp) -> Row {
+    let mut row = row(hit.position, &hit.record, now);
     if name_project {
         row.cells.insert(0, project_cell(&hit.record.project));
     }

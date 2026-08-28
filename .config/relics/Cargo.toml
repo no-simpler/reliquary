@@ -35,6 +35,7 @@ publish = false
 # in its own manifest — hoisting a single-consumer crate here would claim a
 # shared version policy that does not exist.
 [workspace.dependencies]
+anstream = "1.0.0"
 anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
 clap_complete = "4.6.9"
@@ -44,7 +45,6 @@ jiff = { version = "0.2.35", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 serde_yaml_ng = "0.10.0"
-supports-color = "3.0.2"
 
 # Profiles are workspace-wide by construction: cargo ignores a member's own
 # [profile] block. All three relics declared the same release profile anyway.

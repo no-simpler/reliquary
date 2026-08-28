@@ -6,7 +6,7 @@ use comfy_table::presets::UTF8_HORIZONTAL_ONLY;
 use comfy_table::{Attribute, Cell, Color, ColumnConstraint, ContentArrangement, Table, Width};
 
 use super::{View, kind_badge, project_cell, tag_line};
-use crate::ui::{age, age_days, plural};
+use relic_core::fmt::{age, age_days, plural};
 
 /// Warm while an item is fresh, hot once it has been sitting long enough to be
 /// worth a second look.
@@ -105,9 +105,9 @@ pub fn list(view: &View<'_>) -> Result<()> {
                     id_cell(record.id, view.color, Color::White),
                     kind,
                     paint(
-                        Cell::new(age(item.created)),
+                        Cell::new(age(item.created, view.now)),
                         view.color,
-                        age_color(age_days(item.created)),
+                        age_color(age_days(item.created, view.now)),
                     ),
                     Cell::new(&item.name),
                     detail_cell,

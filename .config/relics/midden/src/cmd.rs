@@ -12,7 +12,8 @@ use crate::id::Id;
 use crate::note::{Note, Status, fingerprint, now, tidy_target};
 use crate::render::{self, Digest, Group, NO_TARGET, View};
 use crate::store::{Corpus, OPEN_CEILING, Record};
-use crate::ui::{self, Format};
+use relic_core::fmt::age_days;
+use relic_core::ui::Format;
 
 pub struct Ctx {
     pub corpus: Corpus,
@@ -48,8 +49,8 @@ fn parse_id(raw: &str) -> Result<Id> {
     raw.parse()
 }
 
-fn within(days: Option<i64>, at: jiff::Timestamp) -> bool {
-    days.is_none_or(|limit| ui::age_days(at) <= limit)
+fn within(days: Option<i64>, at: jiff::Timestamp, now: jiff::Timestamp) -> bool {
+    days.is_none_or(|limit| age_days(at, now) <= limit)
 }
 
 pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
@@ -61,13 +62,14 @@ pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
         Some(Status::Open)
     };
 
+    let now = jiff::Timestamp::now();
     let mut records = ctx.corpus.list(args.archived);
     records.retain(|record| match &record.note {
         Ok(note) => {
             !args.invalid
                 && args.kind.is_none_or(|kind| kind == note.kind)
                 && wanted.is_none_or(|status| status == note.status)
-                && within(args.since, note.updated)
+                && within(args.since, note.updated, now)
                 && ctx
                     .scope
                     .as_ref()
@@ -89,6 +91,7 @@ pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
             scope: ctx.scope.as_deref(),
             records: &records,
             color: ctx.color,
+            now: jiff::Timestamp::now(),
         },
         ctx.format,
     )
@@ -292,6 +295,7 @@ pub fn archive(ctx: &Ctx, args: &IdArgs) -> Result<()> {
 }
 
 pub fn digest(ctx: &Ctx, args: &DigestArgs) -> Result<()> {
+    let now = jiff::Timestamp::now();
     let records: Vec<Record> = ctx
         .corpus
         .list(false)
@@ -300,7 +304,7 @@ pub fn digest(ctx: &Ctx, args: &DigestArgs) -> Result<()> {
             Ok(note) => {
                 note.status == Status::Open
                     && args.kind.is_none_or(|kind| kind == note.kind)
-                    && within(args.since, note.updated)
+                    && within(args.since, note.updated, now)
                     && ctx
                         .scope
                         .as_ref()
@@ -342,6 +346,7 @@ pub fn digest(ctx: &Ctx, args: &DigestArgs) -> Result<()> {
             scope: ctx.scope.as_deref(),
             groups: &groups,
             color: ctx.color,
+            now,
         },
         ctx.format,
     )
@@ -462,7 +467,7 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
     if problems == 0 {
         println!(
             "midden: {}, nothing wrong",
-            render::plural(live.len(), "note")
+            relic_core::fmt::plural(live.len(), "note", "notes")
         );
     }
     Ok(problems == 0)
@@ -518,13 +523,13 @@ pub fn open_context(global: &Global) -> Result<Ctx> {
     let format = if global.json {
         Format::Json
     } else {
-        ui::resolve_format(global.format)
+        Format::from_process(global.format, "MIDDEN_UI")
     };
     let cwd = std::env::current_dir().context("reading the working directory")?;
     Ok(Ctx {
         corpus,
         format,
-        color: ui::use_color(global.color, format),
+        color: global.color.use_color(format),
         quiet: global.quiet,
         project: relic_core::path::project_key(&cwd),
         scope: global

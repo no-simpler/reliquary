@@ -8,7 +8,8 @@ use anyhow::Result;
 
 use crate::note::Status;
 use crate::store::Record;
-use crate::ui::Format;
+use relic_core::fmt::plural;
+use relic_core::ui::Format;
 
 pub const NO_TARGET: &str = "(no target)";
 
@@ -18,6 +19,9 @@ pub struct View<'a> {
     pub scope: Option<&'a Path>,
     pub records: &'a [Record],
     pub color: bool,
+    /// One instant for the whole frame. A render that reaches for the clock per
+    /// row can report two different "now"s in one table.
+    pub now: jiff::Timestamp,
 }
 
 pub fn list(view: &View<'_>, format: Format) -> Result<()> {
@@ -45,6 +49,8 @@ pub struct Digest<'a> {
     pub scope: Option<&'a Path>,
     pub groups: &'a [Group<'a>],
     pub color: bool,
+    /// One instant for the whole frame, for the same reason [`View`] carries one.
+    pub now: jiff::Timestamp,
 }
 
 pub fn digest(view: &Digest<'_>, format: Format) -> Result<()> {
@@ -65,7 +71,7 @@ pub struct Row {
     pub notes: Vec<String>,
 }
 
-pub fn row(position: usize, record: &Record) -> Row {
+pub fn row(position: usize, record: &Record, now: jiff::Timestamp) -> Row {
     match &record.note {
         Ok(note) => {
             let mut notes = Vec::new();
@@ -81,7 +87,7 @@ pub fn row(position: usize, record: &Record) -> Row {
                     record.id.to_string(),
                     note.kind.to_string(),
                     count(note.occurrences),
-                    crate::ui::age(note.updated),
+                    relic_core::fmt::age(note.updated, now),
                 ],
                 title: note.title.clone(),
                 detail: note.detail.clone().unwrap_or_default(),
@@ -142,15 +148,11 @@ pub fn aligned(rows: &[Row], indent: &str) -> (Vec<String>, usize) {
 /// The line every renderer opens with: what was read, and how much of it.
 pub fn heading(scope: Option<&Path>, count: usize) -> String {
     match scope {
-        Some(project) => format!("midden {} — {}", project.display(), plural(count, "note")),
-        None => format!("midden — {}", plural(count, "note")),
-    }
-}
-
-pub fn plural(count: usize, one: &str) -> String {
-    if count == 1 {
-        format!("{count} {one}")
-    } else {
-        format!("{count} {one}s")
+        Some(project) => format!(
+            "midden {} — {}",
+            project.display(),
+            plural(count, "note", "notes")
+        ),
+        None => format!("midden — {}", plural(count, "note", "notes")),
     }
 }

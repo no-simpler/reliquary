@@ -1,6 +1,8 @@
 use anyhow::Result;
 
-use super::{Digest, View, aligned, heading, plural, row};
+use relic_core::fmt::plural;
+
+use super::{Digest, View, aligned, heading, row};
 
 /// Aligned and uncoloured. Padding is worth its bytes here because it is what
 /// lets a reader — model or person — scan one column instead of parsing every
@@ -16,7 +18,7 @@ pub fn list(view: &View<'_>) -> Result<()> {
         .records
         .iter()
         .enumerate()
-        .map(|(index, record)| row(index + 1, record))
+        .map(|(index, record)| row(index + 1, record, view.now))
         .collect();
     let (lines, head) = aligned(&rows, "");
     let pad = " ".repeat(head);
@@ -49,13 +51,13 @@ pub fn digest(view: &Digest<'_>) -> Result<()> {
         println!(
             "{}  [{}]",
             group.target,
-            plural(group.records.len(), "note")
+            plural(group.records.len(), "note", "notes")
         );
         let rows: Vec<_> = group
             .records
             .iter()
             .enumerate()
-            .map(|(position, record)| row(position + 1, record))
+            .map(|(position, record)| row(position + 1, record, view.now))
             .collect();
         let (lines, head) = aligned(&rows, "  ");
         let pad = " ".repeat(head);

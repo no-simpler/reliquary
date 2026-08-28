@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use crate::item::Kind;
-use crate::ui::{ColorChoice, Format};
+use relic_core::ui::{ColorChoice, Format};
 
 pub const ROOT_AFTER_LONG_HELP: &str = "\
 docket guide handoff|relay|spec = doctrine

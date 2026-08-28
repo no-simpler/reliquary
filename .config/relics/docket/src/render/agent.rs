@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use super::{View, aligned, hit_row};
-use crate::ui::plural;
+use relic_core::fmt::plural;
 
 /// Aligned and uncoloured. Padding is worth its bytes here because it is what
 /// lets a reader — model or person — scan one column instead of parsing every
@@ -26,7 +26,7 @@ pub fn list(view: &View<'_>) -> Result<()> {
     let rows: Vec<_> = view
         .hits
         .iter()
-        .map(|hit| hit_row(hit, view.project.is_none()))
+        .map(|hit| hit_row(hit, view.project.is_none(), view.now))
         .collect();
     let (lines, head) = aligned(&rows, "");
     let pad = " ".repeat(head);

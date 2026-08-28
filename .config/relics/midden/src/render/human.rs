@@ -5,10 +5,12 @@ use anyhow::Result;
 use comfy_table::presets::UTF8_HORIZONTAL_ONLY;
 use comfy_table::{Attribute, Cell, Color, ColumnConstraint, ContentArrangement, Table, Width};
 
-use super::{Digest, View, count, heading, plural};
+use relic_core::fmt::plural;
+
+use super::{Digest, View, count, heading};
 use crate::note::{Kind, Note, Status};
 use crate::store::Record;
-use crate::ui::{age, age_days};
+use relic_core::fmt::{age, age_days};
 
 /// Cool while a note is fresh, hot once it has been sitting long enough that
 /// nobody is going to act on it without being reminded.
@@ -37,7 +39,7 @@ pub fn list(view: &View<'_>) -> Result<()> {
         println!("nothing on the midden");
         return Ok(());
     }
-    println!("{}", table(view.records, view.color, true));
+    println!("{}", table(view.records, view.color, view.now, true));
     Ok(())
 }
 
@@ -54,19 +56,22 @@ pub fn digest(view: &Digest<'_>) -> Result<()> {
         println!(
             "{}  [{}]",
             group.target,
-            plural(group.records.len(), "note")
+            plural(group.records.len(), "note", "notes")
         );
-        println!("{}", table_refs(&group.records, view.color, false));
+        println!(
+            "{}",
+            table_refs(&group.records, view.color, view.now, false)
+        );
     }
     Ok(())
 }
 
-fn table(records: &[Record], color: bool, with_target: bool) -> Table {
+fn table(records: &[Record], color: bool, now: jiff::Timestamp, with_target: bool) -> Table {
     let refs: Vec<&Record> = records.iter().collect();
-    table_refs(&refs, color, with_target)
+    table_refs(&refs, color, now, with_target)
 }
 
-fn table_refs(records: &[&Record], color: bool, with_target: bool) -> Table {
+fn table_refs(records: &[&Record], color: bool, now: jiff::Timestamp, with_target: bool) -> Table {
     let mut table = Table::new();
     // comfy-table would otherwise decide for itself by probing the terminal.
     // Colour is already resolved from --color, NO_COLOR and the output mode, and
@@ -103,9 +108,9 @@ fn table_refs(records: &[&Record], color: bool, with_target: bool) -> Table {
                     paint(Cell::new(note.kind), color, kind_color(note.kind)),
                     Cell::new(count(note.occurrences)),
                     paint(
-                        Cell::new(age(note.updated)),
+                        Cell::new(age(note.updated, now)),
                         color,
-                        age_color(age_days(note.updated)),
+                        age_color(age_days(note.updated, now)),
                     ),
                     Cell::new(&note.title),
                     Cell::new(detail_of(note)),

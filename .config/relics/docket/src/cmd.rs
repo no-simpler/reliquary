@@ -16,7 +16,8 @@ use crate::item::{Chain, Item, Kind, Rung, Stage, now};
 use crate::query;
 use crate::render::{self, View};
 use crate::store::{Depot, Record};
-use crate::ui::{self, Format, plural};
+use relic_core::fmt::{age, age_days, plural};
+use relic_core::ui::Format;
 
 pub struct Ctx {
     pub depot: Depot,
@@ -171,6 +172,7 @@ pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
             project: (!args.all).then_some(ctx.project.as_path()),
             hits: &hits,
             color: ctx.color,
+            now: jiff::Timestamp::now(),
             narrowed: filter.is_narrowing(),
         },
         ctx.format,
@@ -623,6 +625,7 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
         println!("{line}");
     };
 
+    let now = jiff::Timestamp::now();
     for project in ctx.depot.projects() {
         for record in ctx.depot.list(&project) {
             match &record.item {
@@ -680,11 +683,11 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
                             ));
                         }
                     }
-                    if ui::age_days(item.created) > 60 {
+                    if age_days(item.created, now) > 60 {
                         report(format!(
                             "stale    {} has been open {} — {}",
                             record.id,
-                            ui::age(item.created),
+                            age(item.created, now),
                             item.name
                         ));
                     }
@@ -824,10 +827,11 @@ pub fn announce(ctx: &Ctx, args: &AnnounceArgs) -> Result<()> {
         return Ok(());
     }
 
+    let now = jiff::Timestamp::now();
     let rows: Vec<_> = records
         .iter()
         .enumerate()
-        .map(|(index, record)| render::row(index + 1, record))
+        .map(|(index, record)| render::row(index + 1, record, now))
         .collect();
     let (lines, head) = render::aligned(&rows, "  ");
     let pad = " ".repeat(head);
@@ -907,7 +911,7 @@ pub fn open_context(global: &Global) -> Result<Ctx> {
     let format = if global.json {
         Format::Json
     } else {
-        ui::resolve_format(global.format)
+        Format::from_process(global.format, "DOCKET_UI")
     };
     let project = relic_core::path::project_key(&match &global.project {
         Some(path) => path.clone(),
@@ -916,7 +920,7 @@ pub fn open_context(global: &Global) -> Result<Ctx> {
     Ok(Ctx {
         depot,
         format,
-        color: ui::use_color(global.color, format),
+        color: global.color.use_color(format),
         quiet: global.quiet,
         project,
     })

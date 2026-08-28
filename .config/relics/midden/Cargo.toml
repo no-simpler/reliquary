@@ -23,7 +23,6 @@ jiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml_ng.workspace = true
-supports-color.workspace = true
 
 # Integration tests are their own crate, so what the binary depends on is not
 # in scope for them.
