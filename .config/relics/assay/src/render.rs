@@ -88,6 +88,9 @@ fn tally(reports: &[Report]) -> (usize, usize) {
         match finding.severity {
             Severity::Broken => broken += 1,
             Severity::Soft => soft += 1,
+            // Notes are printed and never counted; counting them into a verdict
+            // is exactly what makes a gate get switched off.
+            Severity::Note => {}
         }
     }
     (broken, soft)
@@ -148,6 +151,7 @@ fn human_finding(out: &mut impl Write, finding: &Finding, color: bool) -> Result
     let (label, code) = match finding.severity {
         Severity::Broken => ("broken", RED),
         Severity::Soft => ("soft  ", YELLOW),
+        Severity::Note => ("note  ", DIM),
     };
     writeln!(
         out,

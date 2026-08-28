@@ -23,17 +23,26 @@ use serde::{Deserialize, Serialize};
 
 /// What a finding says about the machine.
 ///
-/// The test for which one, unchanged since it was written down: **does this mean
-/// the machine is no longer reproducible from the repo, or that something is
-/// silently disarmed?** If so it is [`Severity::Broken`]. A machine that is
-/// merely degraded — a budget exceeded, two dialects drifted apart in meaning —
-/// is [`Severity::Soft`].
+/// The test between the two that grade, unchanged since it was written down:
+/// **does this mean the machine is no longer reproducible from the repo, or that
+/// something is silently disarmed?** If so it is [`Severity::Broken`]. A machine
+/// that is merely degraded — a budget exceeded, two dialects drifted apart in
+/// meaning — is [`Severity::Soft`].
 ///
 /// There is no `Ok` variant. A finding that says nothing is wrong is not a
 /// finding; the absence of findings is what [`Grade::Ok`] means.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Severity {
+    /// Worth reading, and not a defect — most often a check that could not judge
+    /// one item: a tap this machine has not installed, a roster not cached, a
+    /// definition still encrypted.
+    ///
+    /// The per-item counterpart of [`Outcome::Skipped`], and it grades the same
+    /// way: not at all. A gate that reddens on something the reader cannot fix
+    /// where it fires teaches people to bypass the gate, which costs every other
+    /// check too.
+    Note,
     /// The machine is degraded, and still reproducible.
     Soft,
     /// The machine cannot be reproduced from the repo, or a guard is disarmed.
@@ -43,6 +52,7 @@ pub enum Severity {
 impl fmt::Display for Severity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::Note => "note",
             Self::Soft => "soft",
             Self::Broken => "broken",
         })
@@ -72,6 +82,7 @@ impl Grade {
         findings
             .into_iter()
             .map(|finding| match finding.severity {
+                Severity::Note => Self::Ok,
                 Severity::Soft => Self::Soft,
                 Severity::Broken => Self::Broken,
             })
@@ -174,6 +185,12 @@ impl StationId {
     #[must_use]
     pub fn broken(&self, summary: Summary) -> Finding {
         self.finds(Severity::Broken, summary)
+    }
+
+    /// A [`Severity::Note`] from this station: read it, do not grade on it.
+    #[must_use]
+    pub fn note(&self, summary: Summary) -> Finding {
+        self.finds(Severity::Note, summary)
     }
 }
 
@@ -576,6 +593,19 @@ mod tests {
         assert_eq!(
             Grade::of(&[id.soft(line("a")), id.broken(line("b"))]),
             Grade::Broken
+        );
+    }
+
+    #[test]
+    fn a_note_is_read_and_not_graded() {
+        let id = station();
+        assert_eq!(
+            Grade::of(&[id.note(line("a tap is not present here"))]),
+            Grade::Ok
+        );
+        assert_eq!(
+            Grade::of(&[id.note(line("unjudged")), id.soft(line("degraded"))]),
+            Grade::Soft
         );
     }
 

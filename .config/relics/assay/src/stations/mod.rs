@@ -5,4 +5,5 @@
 //! registry adapter, which probes `<name> doctor --format json`.
 
 pub mod bedrock;
+pub mod brew_health;
 pub mod md_blocks;

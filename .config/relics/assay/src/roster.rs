@@ -15,6 +15,7 @@ use crate::station::Station;
 pub fn roster() -> Vec<Box<dyn Station>> {
     vec![
         Box::new(crate::stations::bedrock::Bedrock::default()),
+        Box::new(crate::stations::brew_health::BrewHealth::default()),
         Box::new(crate::stations::md_blocks::MdBlocks::default()),
     ]
 }

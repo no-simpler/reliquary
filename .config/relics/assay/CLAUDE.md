@@ -96,3 +96,16 @@ own tree: the same findings, and the same exit code at all four grades.
 Carried over unchanged, and worth knowing: the **empty-block check is reachable
 only through a fence**. The inline pattern requires at least one character, so
 ``!`` `` matches nothing in either implementation and is not a block at all.
+
+## Deviations from `bin/check-brew-health`
+
+Parity verified against the live machine, and against fixture machines — a fake
+`brew` answering from files — for the states a healthy machine cannot produce.
+
+| deviation | why | pinned by |
+| --- | --- | --- |
+| A formula and a cask are separate types, not one struct carrying both identifier fields | they genuinely disagree: a formula's `name` is a string, a **cask's `name` is a list** of its titles, with `token` carrying the identifier. The shell checker never read a cask's `name`, so it never met this; the first typed draft refused the whole document and lost every other check with it | `a_cask_whose_name_is_a_list_still_parses` |
+| `NOTE` became `Severity::Note`, a finding that prints and does not grade | the shell helper's fourth level had no counterpart in a two-level severity, and folding "cannot judge this" into a warning is how a gate that cannot be cleared where it fires teaches people to bypass it | `what_cannot_be_judged_is_a_note_and_never_a_verdict` |
+| Brewfiles are parsed by splitting on the first quoted field, not by `grep`+`sed` per keyword | one pass over each file instead of three, and a line's keyword decides its lane instead of three patterns that can disagree | `every_scope_is_read_not_only_the_base` |
+| A replacement hint is a `fix`, not a separate `NOTE` line | it is what to do about the finding it follows, which is the field that already means that | `a_deprecated_package_is_soft_and_carries_its_deadline` |
+| No `HOMEBREW_NO_AUTO_UPDATE` export into the caller's environment | it is set per invocation instead, so the station cannot change what runs after it | the `Brew::command` constructor, which is the only way a `brew` runs here |

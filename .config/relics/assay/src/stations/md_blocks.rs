@@ -659,8 +659,11 @@ mod tests {
     #[test]
     fn a_file_with_no_blocks_at_all_says_nothing() {
         let home = Home::new();
-        home.write(".claude/commands/prose.md", "just prose, no blocks
-");
+        home.write(
+            ".claude/commands/prose.md",
+            "just prose, no blocks
+",
+        );
         assert_eq!(home.summaries(), Vec::<String>::new());
     }
 
