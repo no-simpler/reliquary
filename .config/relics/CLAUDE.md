@@ -1,6 +1,6 @@
 # In-house relics
 
-Each subdirectory with a `relic.sh` is a Stage 2 relic — see
+Each subdirectory with a manifest is a Stage 2 relic — see
 `~/.config/reliquary/GRADUATION.md` for the full system reference,
 including anatomy, manifest schema, publish flow, and promotion to
 external (Stage 3) status.
@@ -22,7 +22,7 @@ set of `[workspace.dependencies]`, the only `[profile]` blocks that count),
 to cargo. A relic **does not** carry its own `[profile]` (cargo ignores it),
 `rustfmt.toml`, or `Cargo.lock`.
 
-`crates/` is the shared-library boundary: a member with **no `relic.sh`**, which
+`crates/` is the shared-library boundary: a member with **no manifest**, which
 is what makes it inert to `relic list|status|doctor`, to the bootstrap snippet, and
 to `up` — all four gate on a readable manifest. `crates/relic-core` is the first.
 

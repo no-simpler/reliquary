@@ -70,7 +70,7 @@ irreducible-residue classes enumerate what it decides against.
 ~/.config/relics/<name>/
 ├── CLAUDE.md             # agent context for this relic
 ├── README.md             # optional human docs
-├── relic.sh              # bash-sourced manifest
+├── relic.toml            # manifest
 ├── Cargo.toml            # rust: a workspace member; see "The Rust lane"
 ├── entrypoints/          # interpreted only — one file (or symlink) per binary
 │   └── <name>            # filename = published name on PATH
@@ -80,19 +80,31 @@ irreducible-residue classes enumerate what it decides against.
     └── {publish,test,update}.sh
 ```
 
-### Manifest (`relic.sh`)
+### Manifest (`relic.toml`)
 
-```bash
-NAME="blab"                          # required — published name + registry owner
-DESCRIPTION="…"                      # optional — one-line summary
-RUNTIME="python"                     # required — rust by default, see the stance
-RUNTIME_EXEMPTION="…"                # required when RUNTIME is not rust
-MIN_RUNTIME_VERSION="3.11"           # optional — enforced at publish time
-ENTRYPOINTS=( )                      # optional — compiled relics only; default ( "$NAME" )
-BREW_DEPS=( "glab" )                 # optional — verified at publish time
-EXTERNAL_DEPS=( )                    # optional — free-form notes
-DOCKER=0                             # optional — 1 for docker-run shim entrypoints
+```toml
+[relic]
+name = "blab"                # required — published name + registry owner
+description = "…"            # optional — one-line summary
+runtime = "python"           # required — rust by default, see the stance
+runtime-exemption = "…"      # required when runtime is not rust
+min-runtime-version = "3.11" # optional — enforced at publish time
+entrypoints = []             # optional — compiled relics only; defaults to [ name ]
+brew-deps = ["glab"]         # optional — verified at publish time
+external-deps = []           # optional — free-form notes
+docker = false               # optional — true for docker-run shim entrypoints
 ```
+
+Keys sit under `[relic]` rather than at the top level: TOML binds everything
+after a table header to that table, so a flat manifest would capture the first
+future `[section]`'s keys into itself. Unknown keys inside `[relic]` are refused;
+unknown *tables* are left alone, which is what the namespace buys.
+
+`~/.config/reliquary/lib/relic.sh` is the only reader, and it reads both this
+and the legacy bash `relic.sh` into one record, so nothing above it knows or
+cares which format a relic is in. Every other consumer — the `relic` CLI, the
+bootstrap publish snippet, `up` — asks it with `relic::has_manifest`, so a
+converted manifest is visible everywhere at once.
 
 ### Entrypoints
 
@@ -149,7 +161,7 @@ the same discipline yadm applies to `$HOME`.
 ├── rustfmt.toml       # one config
 ├── .gitignore         # /target
 ├── target/            # one build cache, gitignored
-├── crates/            # shared libraries — members, not relics (no relic.sh)
+├── crates/            # shared libraries — members, not relics (no manifest)
 │   └── relic-core/
 ├── docket/  ernest/  midden/     # Rust relics: members
 └── relic/                        # bash: invisible to cargo
@@ -175,7 +187,7 @@ dependency they share is compiled once.
 
 ### `crates/` — the shared-library boundary
 
-A crate under `crates/` is a workspace member with **no `relic.sh`**, which is
+A crate under `crates/` is a workspace member with **no manifest**, which is
 exactly what makes it inert: `relic list|status|doctor`, the bootstrap snippet and
 `up` all gate on a readable manifest, so none of them sees it. It publishes
 nothing and owns no PATH name.
@@ -366,7 +378,7 @@ wedge the whole update run.
 4. **Add an explicit `scripts/publish.sh`** that sources
    `install-on-path.sh` directly. The external relic must not depend on
    `relic.sh` at runtime — only on `install-on-path.sh` (the stable
-   cross-stage API). `relic.sh` and `entrypoints/` may be kept or shed.
+   cross-stage API). `relic.toml` and `entrypoints/` may be kept or shed.
    For a Rust relic this is also its exit from the lane's workspace: drop its
    `members` entry, and give the repo back what the workspace was holding — its
    own `[profile]`, `rustfmt.toml`, `Cargo.lock`, and a decision about every

@@ -1,0 +1,16 @@
+# Manifest for an in-house relic. Read by ~/.config/reliquary/lib/relic.sh.
+# See ~/.config/reliquary/GRADUATION.md for the full schema.
+#
+# Keys live under [relic] so a later section cannot be captured into this one,
+# and unknown keys are refused rather than ignored.
+
+[relic]
+name = ""                # required — published name + META_NAME
+description = ""         # optional — one-line summary
+runtime = "rust"         # required — rust by default; see the stance
+runtime-exemption = ""   # required when runtime is not rust — why not
+min-runtime-version = "" # optional — e.g. "3.11"; enforced at publish time
+entrypoints = []         # optional — compiled only; defaults to [ name ]
+brew-deps = []           # optional — brew package names; verified at publish
+external-deps = []       # optional — free-form notes (not enforced)
+docker = false           # optional — true for docker-run shim entrypoints

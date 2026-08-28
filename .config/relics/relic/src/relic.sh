@@ -482,16 +482,32 @@ infer_runtime() {
     esac
 }
 
-# Rewrite a `KEY="..."` assignment in a bash manifest, preserving any trailing
+# Rewrite a `key = "..."` assignment in a manifest, preserving any trailing
 # `# comment`. Portable (no sed -i): awk to a temp file, then mv.
+#
+# The value is escaped for a TOML basic string here, and reaches awk through
+# the environment: `-v` runs escape processing over its argument, which would
+# undo exactly the escaping this just did.
 manifest_set() {
     local file="$1" key="$2" val="$3" tmp
+    val="${val//\\/\\\\}"
+    val="${val//\"/\\\"}"
     tmp="$(mktemp)" || return 1
-    awk -v k="$key" -v v="$val" '
-        $0 ~ ("^"k"=") {
+    MANIFEST_VALUE="$val" awk -v k="$key" '
+        $0 ~ ("^"k"[ \t]*=") {
             c = ""
-            if (match($0, /#.*/)) c = "  " substr($0, RSTART)
-            printf "%s=\"%s\"%s\n", k, v, c
+            col = 0
+            if (match($0, /#.*/)) { c = substr($0, RSTART); col = RSTART }
+            line = sprintf("%s = \"%s\"", k, ENVIRON["MANIFEST_VALUE"])
+            if (c != "") {
+                # Hold the comment column the file already uses, so a filled-in
+                # manifest reads like the template it came from.
+                pad = col - 1 - length(line)
+                if (pad < 1) pad = 1
+                while (pad-- > 0) line = line " "
+                line = line c
+            }
+            print line
             next
         }
         { print }
@@ -505,9 +521,9 @@ manifest_set() {
 scaffold_tree() {
     local name="$1" dir="$2" runtime="$3" src_script="${4:-}" exempt="${5:-}" workspace="${6:-}"
     cp -r "$TEMPLATE_DIR" "$dir" || return 1
-    manifest_set "$dir/relic.sh" NAME "$name" || return 1
-    manifest_set "$dir/relic.sh" RUNTIME "$runtime" || return 1
-    [[ -n "$exempt" ]] && { manifest_set "$dir/relic.sh" RUNTIME_EXEMPTION "$exempt" || return 1; }
+    manifest_set "$dir/relic.toml" name "$name" || return 1
+    manifest_set "$dir/relic.toml" runtime "$runtime" || return 1
+    [[ -n "$exempt" ]] && { manifest_set "$dir/relic.toml" runtime-exemption "$exempt" || return 1; }
     cat >"$dir/CLAUDE.md" <<EOF
 # \`$name\` — in-house (Stage-2) relic
 
@@ -852,7 +868,7 @@ cmd_doctor() {
     if [[ $any -eq 0 ]]; then
         printf '  %s(none)%s\n' "$_c_grn" "$_c_rst"
     else
-        info "  ${_c_dim}rewrite into the workspace, or record why not in relic.sh${_c_rst}"
+        info "  ${_c_dim}rewrite into the workspace, or record why not in the manifest${_c_rst}"
     fi
 
     info ""

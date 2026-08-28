@@ -8,13 +8,13 @@ For the full graduation reference, see `~/.config/reliquary/GRADUATION.md`.
 
 ## Rust unless exempted
 
-`relic.sh` ships `RUNTIME="rust"`, because that is the default and not a guess.
-Changing it means filling in `RUNTIME_EXEMPTION` with why this one is not Rust —
-`relic doctor` lists every relic that changed one without the other.
+`relic.toml` ships `runtime = "rust"`, because that is the default and not a
+guess. Changing it means filling in `runtime-exemption` with why this one is not
+Rust — `relic doctor` lists every relic that changed one without the other.
 
 ## What to fill in
 
-1. **`relic.sh`** — set `NAME`, `DESCRIPTION`, and `MIN_RUNTIME_VERSION`.
+1. **`relic.toml`** — set `name`, `description`, and `min-runtime-version`.
 2. **`src/`** — put your source here.
 3. **`tests/`** — optional; add tests in your runtime's idiom.
 4. **`CLAUDE.md`** — replace this file with project-specific agent context.
@@ -24,8 +24,8 @@ Changing it means filling in `RUNTIME_EXEMPTION` with why this one is not Rust �
 Add a `Cargo.toml` inheriting from `[workspace.package]` and add the relic to
 `members` in `~/.config/relics/Cargo.toml`. Declare no `[profile]` (cargo ignores a
 member's) and no `rustfmt.toml` or `Cargo.lock` (the workspace holds both). There
-is **no `entrypoints/`** — published names come from `ENTRYPOINTS`, defaulting to
-`NAME`, and resolve against the workspace `target/release/`. No `scripts/` either:
+is **no `entrypoints/`** — published names come from `entrypoints`, defaulting
+to `name`, and resolve against the workspace `target/release/`. No `scripts/` either:
 the lib's rust branch builds, tests and publishes.
 
 ### Interpreted (needs an exemption)

@@ -150,26 +150,34 @@ check "infer fish" "$(infer_runtime "$sdir/f")" "fish"
 printf 'no shebang here\n' >"$sdir/n"
 check "infer none" "$(infer_runtime "$sdir/n")" ""
 
-mf="$sdir/relic.sh"
-printf 'NAME=""                # x\nRUNTIME=""             # y\nDOCKER=0\n' >"$mf"
-manifest_set "$mf" NAME widget
-manifest_set "$mf" RUNTIME bash
-(
-    source "$mf"
-    printf '%s\n' "$NAME"
-) >"$sdir/_name"
-check "manifest NAME" "$(cat "$sdir/_name")" "widget"
-(
-    source "$mf"
-    printf '%s\n' "$RUNTIME"
-) >"$sdir/_rt"
-check "manifest RUNTIME" "$(cat "$sdir/_rt")" "bash"
+# Manifest fields are read back through the shipped reader; a second parser in
+# the suite could pass while the one every consumer uses is broken.
+_load_relic_lib
+field() {
+    (
+        relic::load_manifest "$1" >/dev/null 2>&1 || return 0
+        eval "printf '%s' \"\${$2}\""
+    )
+}
+
+mdir="$sdir/manifest"
+mkdir -p "$mdir"
+mf="$mdir/relic.toml"
+printf '[relic]\nname = ""                # x\nruntime = ""             # y\ndocker = false\n' >"$mf"
+manifest_set "$mf" name widget
+manifest_set "$mf" runtime bash
+check "manifest name" "$(field "$mdir" NAME)" "widget"
+check "manifest runtime" "$(field "$mdir" RUNTIME)" "bash"
 check "manifest keeps comment" "$(grep -c '# x' "$mf")" "1"
+check "manifest holds the comment column" \
+    "$(awk '/^name/{print index($0, "#")}' "$mf")" "26"
+manifest_set "$mf" name 'a "quoted" \ name'
+check "manifest escapes the value" "$(field "$mdir" NAME)" 'a "quoted" \ name'
 
 # scaffold_tree against a scratch template
 TEMPLATE_DIR="$sdir/template"
 mkdir -p "$TEMPLATE_DIR/src" "$TEMPLATE_DIR/entrypoints" "$TEMPLATE_DIR/tests"
-printf 'NAME=""\nRUNTIME=""\nRUNTIME_EXEMPTION=""\n' >"$TEMPLATE_DIR/relic.sh"
+printf '[relic]\nname = ""\nruntime = ""\nruntime-exemption = ""\n' >"$TEMPLATE_DIR/relic.toml"
 printf 'template doc\n' >"$TEMPLATE_DIR/CLAUDE.md"
 : >"$TEMPLATE_DIR/src/.gitkeep"
 : >"$TEMPLATE_DIR/entrypoints/.gitkeep"
@@ -179,11 +187,7 @@ printf 'template doc\n' >"$TEMPLATE_DIR/CLAUDE.md"
 mkdir -p "$sdir/relics"
 fresh="$sdir/relics/fresh"
 scaffold_tree fresh "$fresh" bash ""
-(
-    source "$fresh/relic.sh"
-    printf '%s %s\n' "$NAME" "$RUNTIME"
-) >"$sdir/_fresh"
-check "scaffold fresh manifest" "$(cat "$sdir/_fresh")" "fresh bash"
+check "scaffold fresh manifest" "$(field "$fresh" NAME) $(field "$fresh" RUNTIME)" "fresh bash"
 check "scaffold fresh CLAUDE stub" "$(grep -c 'in-house (Stage-2) relic' "$fresh/CLAUDE.md")" "1"
 check "scaffold fresh keeps gitkeep" "$([[ -f "$fresh/src/.gitkeep" ]] && echo y)" "y"
 
@@ -213,11 +217,7 @@ check "member appended last" "$(awk '/^\]/{print prev} {prev=$0}' "$ws" | tr -d 
 
 rustdir="$sdir/relics/rusty"
 scaffold_tree rusty "$rustdir" rust "" "" "$ws"
-(
-    source "$rustdir/relic.sh"
-    printf '%s %s\n' "$NAME" "$RUNTIME"
-) >"$sdir/_rusty"
-check "rust scaffold manifest" "$(cat "$sdir/_rusty")" "rusty rust"
+check "rust scaffold manifest" "$(field "$rustdir" NAME) $(field "$rustdir" RUNTIME)" "rusty rust"
 check "rust scaffold cargo bin" "$(grep -c 'path = "src/main.rs"' "$rustdir/Cargo.toml")" "1"
 check "rust scaffold inherits ws" "$(grep -c 'edition.workspace = true' "$rustdir/Cargo.toml")" "1"
 check "rust scaffold main.rs" "$([[ -f "$rustdir/src/main.rs" ]] && echo y)" "y"
@@ -235,11 +235,7 @@ check "rust scaffold moved it" "$([[ -e "$sdir/port-src" ]] && echo present)" ""
 # An exemption is written into the manifest when one is given.
 exdir="$sdir/relics/exempted"
 scaffold_tree exempted "$exdir" bash "" "needs bash 3.2 at bootstrap" "$ws"
-(
-    source "$exdir/relic.sh"
-    printf '%s\n' "$RUNTIME_EXEMPTION"
-) >"$sdir/_ex"
-check "exemption recorded" "$(cat "$sdir/_ex")" "needs bash 3.2 at bootstrap"
+check "exemption recorded" "$(field "$exdir" RUNTIME_EXEMPTION)" "needs bash 3.2 at bootstrap"
 
 rm -rf "$sdir"
 
