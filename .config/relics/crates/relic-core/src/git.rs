@@ -10,13 +10,18 @@
 //! session hooks and from `up`, where a credential prompt is a hang, not a
 //! question.
 //!
-//! Holding a [`Git`] is the proof that git answered. Callers that can work
+//! Holding a [`Git`] is the proof that git is there. Callers that can work
 //! without it ask [`detect`] and take the ungit path on `None`; callers that
 //! cannot should refuse rather than proceed blind.
+//!
+//! Built on [`crate::tool`], which supplies the guarantees every external
+//! program needs — `C` locale, closed stdin. What is git-specific stays here.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::OnceLock;
+
+use crate::tool::Tool;
 
 /// Overrides the binary, and disables the layer outright when set to nothing.
 /// Tests reach the ungit path through it.
@@ -43,27 +48,21 @@ const AMBIENT: &[&str] = &[
 #[derive(Clone, Copy)]
 pub struct Git;
 
-/// One `git --version` per process, whatever asks.
+/// One PATH resolution per process, whatever asks.
+///
+/// Presence, not a handshake: `which` proves an executable file, and a git that
+/// is present but broken fails the first real invocation with its own message,
+/// which is more legible than this returning `None`. That also keeps a fork off
+/// the session-start hook path, where the whole budget is milliseconds.
 pub fn detect() -> Option<Git> {
-    static FOUND: OnceLock<Option<Git>> = OnceLock::new();
-    *FOUND.get_or_init(|| {
-        if std::env::var_os(OVERRIDE).is_some_and(|value| value.is_empty()) {
-            return None;
-        }
-        Git.command()
-            .arg("--version")
-            .output()
-            .ok()
-            .filter(|out| out.status.success())
-            .map(|_| Git)
-    })
+    tool().map(|_| Git)
 }
 
-fn program() -> PathBuf {
-    match std::env::var_os(OVERRIDE) {
-        Some(value) if !value.is_empty() => PathBuf::from(value),
-        _ => PathBuf::from("git"),
-    }
+fn tool() -> Option<&'static Tool> {
+    static FOUND: OnceLock<Option<Tool>> = OnceLock::new();
+    FOUND
+        .get_or_init(|| Tool::find_with_override("git", OVERRIDE))
+        .as_ref()
 }
 
 impl Git {
@@ -71,15 +70,20 @@ impl Git {
     /// only thing that decides which tree is acted on, and forbids anything
     /// that could block on a prompt.
     pub fn command(self) -> Command {
-        let mut command = Command::new(program());
+        let mut command = match tool() {
+            Some(tool) => tool.command(),
+            // Only reachable when a caller built a `Git` without asking
+            // `detect`. Naming the program still produces a legible failure at
+            // spawn rather than a silent no-op.
+            None => Tool::at_path("git", PathBuf::from("git")).command(),
+        };
         for key in AMBIENT {
             command.env_remove(key);
         }
         command
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_OPTIONAL_LOCKS", "0")
-            .stdin(Stdio::null());
+            .env("GIT_OPTIONAL_LOCKS", "0");
         command
     }
 

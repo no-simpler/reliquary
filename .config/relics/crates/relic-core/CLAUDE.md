@@ -28,6 +28,17 @@ key.
 
 ## What is here
 
+`tool` — an external program as a capability, and the generalisation `git` is
+now built on. Holding a `Tool` proves the program is there. Two properties are
+guaranteed **by construction**, because a caller who has to remember them will
+not: the locale is `C` (house rule 1 — where no machine-readable interface
+exists, the message must at least be the one the parser was written against),
+and stdin is closed (a relic runs from hooks and from `up`, where a prompt is a
+hang). `resolve` takes the override *value* rather than reading a variable, so
+the seam is testable without mutating a process environment — the same shape
+`ui::Format::resolve` takes, and the shape `unsafe_code = "forbid"` forces, since
+`std::env::set_var` is unsafe in edition 2024.
+
 `git` — git as a zero-sized capability. `Git::command` is the *only* sanctioned
 constructor, because it is what strips the ambient `GIT_*` environment: `GIT_DIR`
 outranks `-C`, so a relic run from a git hook would otherwise answer for the
@@ -35,7 +46,11 @@ hook's repository rather than the user's. It also forbids anything that can bloc
 (`GIT_TERMINAL_PROMPT=0`, null stdin) — a relic runs from session hooks and from
 `up`, where a credential prompt is a hang, not a question. `RELIC_GIT` is the seam:
 a path overrides the binary, an empty value disables the layer so tests reach the
-ungit path.
+ungit path. `detect` resolves the program on PATH once per process and no longer
+forks `git --version`: `which` proves an executable file, and a git that is
+present but broken fails the first real invocation with its own message, which is
+more legible than `detect` returning `None` — and that keeps a fork off the
+session-start hook path.
 
 `path` — one meaning for a path. `resolve_lenient` is absolute and symlink-free as
 far as the path exists and lexical past that, so a directory keys the same however

@@ -24,4 +24,5 @@ pub mod fs;
 pub mod git;
 pub mod lock;
 pub mod path;
+pub mod tool;
 pub mod ui;
