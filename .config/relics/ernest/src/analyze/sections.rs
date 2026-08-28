@@ -48,7 +48,9 @@ fn walk(node: Node, prefix: &str, src: &str, out: &mut Vec<Section>) {
     out.push(Section {
         label: label.clone(),
         start: node.start_byte(),
-        end: nested.first().map_or(node.end_byte(), |s| s.start_byte()),
+        end: nested
+            .first()
+            .map_or(node.end_byte(), tree_sitter::Node::start_byte),
     });
 
     for child in nested {
@@ -68,13 +70,14 @@ fn heading(node: Node, src: &str) -> String {
             head.children(&mut cursor)
                 .find(|child| child.kind() == "inline" || child.kind() == "paragraph")
                 .map(|inline| {
-                    src[inline.start_byte()..inline.end_byte()]
+                    src.get(inline.start_byte()..inline.end_byte())
+                        .unwrap_or("")
                         .trim()
-                        .to_string()
+                        .to_owned()
                 })
         });
     match text {
         Some(text) if !text.is_empty() => text,
-        _ => PREAMBLE.to_string(),
+        _ => PREAMBLE.to_owned(),
     }
 }

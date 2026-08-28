@@ -80,7 +80,7 @@ impl Blocks {
     pub fn push(&mut self, block: impl Into<String>) {
         let block = block.into();
         if !block.trim().is_empty() {
-            self.0.push(block.trim_end().to_string());
+            self.0.push(block.trim_end().to_owned());
         }
     }
 
@@ -97,7 +97,7 @@ impl Blocks {
 /// than the phrase lets a caller put the number where its sentence wants it.
 pub fn plural(n: u64, noun: &str) -> String {
     if n == 1 {
-        noun.to_string()
+        noun.to_owned()
     } else {
         format!("{noun}s")
     }
@@ -132,7 +132,7 @@ pub fn signed(n: i64) -> String {
 pub fn percent(density: Option<f64>) -> String {
     match density {
         Some(d) => format!("{:.1}%", d * 100.0),
-        None => "n/a".to_string(),
+        None => "n/a".to_owned(),
     }
 }
 
@@ -143,7 +143,7 @@ pub fn percent_delta(before: Option<f64>, after: Option<f64>) -> String {
             let pp = (a - b) * 100.0;
             format!("{}{:.1}", if pp < 0.0 { "-" } else { "+" }, pp.abs())
         }
-        _ => "n/a".to_string(),
+        _ => "n/a".to_owned(),
     }
 }
 

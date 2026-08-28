@@ -1,6 +1,19 @@
 //! End-to-end behaviour of the binary: exit codes, snapshot round-trip, and
 //! the before/after loop ernest exists for.
 
+// Clippy's in-test carve-outs (see `clippy.toml`) reach `#[test]` functions and
+// `#[cfg(test)]` modules — not the helpers beside them. An integration test crate
+// is test code end to end, so the carve-out belongs at its root, where its scope
+// is still exactly the tests.
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::unwrap_used
+)]
+
+use std::fmt::Write;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -156,11 +169,15 @@ fn the_table_rolls_up_from_languages_through_cohorts_to_the_total() {
     assert_eq!(cohorts, ["source", "docs"], "{text}");
     for nested in &languages {
         let mut sorted = nested.clone();
-        sorted.sort();
+        sorted.sort_unstable();
         assert_eq!(nested, &sorted, "languages are not in order:\n{text}");
     }
 
-    let mut listed: Vec<String> = languages.concat().iter().map(|l| l.to_string()).collect();
+    let mut listed: Vec<String> = languages
+        .concat()
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect();
     listed.sort();
     assert_eq!(listed, fixture_languages(), "{text}");
 }
@@ -456,7 +473,7 @@ fn an_unknown_language_is_a_usage_error() {
     assert!(stderr.contains("markdown"), "should list what it does take");
 }
 
-/// Every shell clap_complete knows, rather than the ones this machine happens to
+/// Every shell `clap_complete` knows, rather than the ones this machine happens to
 /// run — the enum is taken whole so a shell added upstream arrives for free, and
 /// this is what would notice if one stopped generating.
 #[test]
@@ -598,12 +615,17 @@ fn relocating_prose_into_a_document_does_not_move_the_headline() {
     // A block comment, so the whole body carries one delimiter pair however
     // long it grows — `/*` and `*/`, four characters, the only prose the move
     // can destroy. A line comment per line would lose `//` twelve times over.
-    let prose: String = (1..=12)
-        .map(|n| format!("Paragraph {n} explains at length why the widget reticulates.\n"))
-        .collect();
-    let statements: String = (1..=12)
-        .map(|n| format!("$widget{n} = reticulate($spline{n}, $tolerance{n});\n"))
-        .collect();
+    let prose: String = (1..=12).fold(String::new(), |mut out, n| {
+        let _ = writeln!(
+            out,
+            "Paragraph {n} explains at length why the widget reticulates."
+        );
+        out
+    });
+    let statements: String = (1..=12).fold(String::new(), |mut out, n| {
+        let _ = writeln!(out, "$widget{n} = reticulate($spline{n}, $tolerance{n});");
+        out
+    });
 
     std::fs::write(&code, format!("<?php\n/*\n{prose}*/\n{statements}")).unwrap();
     std::fs::write(&doc, "# Guide\n").unwrap();
@@ -679,8 +701,10 @@ fn relocating_prose_into_a_document_does_not_move_the_headline() {
     let pp: f64 = headline
         .split_once('(')
         .and_then(|(_, rest)| rest.split_once(" pp"))
-        .map(|(pp, _)| pp.trim().parse().expect("a pp delta"))
-        .unwrap_or_else(|| panic!("no pp delta in:\n{text}"));
+        .map_or_else(
+            || panic!("no pp delta in:\n{text}"),
+            |(pp, _)| pp.trim().parse().expect("a pp delta"),
+        );
     assert!(
         pp.abs() < 0.5,
         "the headline delta should read as a no-op, got {pp} pp:\n{text}"
@@ -787,8 +811,8 @@ fn scope_separates_the_second_brain_from_the_noise() {
             .iter()
             .map(|f| {
                 let path = f["path"].as_str().unwrap();
-                let name = path.rsplit('/').next().unwrap().to_string();
-                (name, f["provenance"].as_str().unwrap().to_string())
+                let name = path.rsplit('/').next().unwrap().to_owned();
+                (name, f["provenance"].as_str().unwrap().to_owned())
             })
             .collect::<Vec<_>>()
     };
@@ -801,8 +825,8 @@ fn scope_separates_the_second_brain_from_the_noise() {
     assert_eq!(
         local,
         vec![
-            ("NOTES.md".to_string(), "local".to_string()),
-            ("README.md".to_string(), "tracked".to_string()),
+            ("NOTES.md".to_owned(), "local".to_owned()),
+            ("README.md".to_owned(), "tracked".to_owned()),
         ],
         "the default reaches the second brain but not the noise"
     );
@@ -977,7 +1001,7 @@ fn an_extensionless_script_is_measured_by_its_shebang() {
     // The shebang is uninteresting; only the comment counts as prose.
     assert_eq!(
         report["files"][0]["prose_chars"],
-        "#Whythisexists.".len() as u64
+        ernest::span::tally("#Whythisexists.".len())
     );
 }
 

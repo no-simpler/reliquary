@@ -7,6 +7,8 @@
 //! which left a diff silently free of the `.ernestignore` and unit caveats that
 //! govern both of the snapshots it compares.
 
+use std::fmt::Write;
+
 use crate::aggregate::Report;
 use crate::span::Unit;
 use crate::walk::Provenance;
@@ -40,10 +42,7 @@ impl Notes {
     pub fn census(&mut self, report: &Report, level: Verbosity) {
         let mut line = count(report.files_scanned, "file") + " measured";
         if report.files_skipped > 0 {
-            line.push_str(&format!(
-                ", {} unsupported",
-                thousands(report.files_skipped)
-            ));
+            let _ = write!(line, ", {} unsupported", thousands(report.files_skipped));
             // The histogram is summarised at the default level and whole at `-v`:
             // "+2 more" is the right answer to a question nobody asked, and the
             // wrong one to a caller who asked for provenance.
@@ -53,11 +52,11 @@ impl Notes {
                 GAPS
             };
             if let Some(named) = unsupported(report, gaps) {
-                line.push_str(&format!(" ({named})"));
+                let _ = write!(line, " ({named})");
             }
         }
         if report.files_failed > 0 {
-            line.push_str(&format!(", {} unreadable", thousands(report.files_failed)));
+            let _ = write!(line, ", {} unreadable", thousands(report.files_failed));
         }
         self.push(line);
     }
@@ -129,10 +128,11 @@ impl Notes {
         for path in &report.ernestignore {
             let mut line = format!("{path} applied");
             if report.ernestignore_excluded > 0 {
-                line.push_str(&format!(
+                let _ = write!(
+                    line,
                     " — {} excluded as a declared corpus",
                     count(report.ernestignore_excluded, "file")
-                ));
+                );
             } else {
                 line.push_str(" — a declared corpus is not measured");
             }
@@ -196,7 +196,7 @@ impl Notes {
     /// A truncated list that looks complete is worse than no list.
     pub fn truncated(&mut self, shown: usize, total: usize, noun: &str) {
         if total > shown {
-            let withheld = (total - shown) as u64;
+            let withheld = crate::span::tally(total - shown);
             self.push(format!(
                 "… {} more {} — --top 0 shows every row",
                 thousands(withheld),
@@ -212,7 +212,7 @@ impl Notes {
     /// `--json` is offered only where there is a measurement to snapshot — a
     /// diff reads snapshots rather than writing one.
     pub fn views(&mut self, snapshot: bool) {
-        let mut line = VIEWS.to_string();
+        let mut line = VIEWS.to_owned();
         if snapshot {
             line.push_str(", --json");
         }
@@ -220,10 +220,10 @@ impl Notes {
     }
 
     pub fn render(&self) -> String {
-        self.0
-            .iter()
-            .map(|note| format!("  {note}\n"))
-            .collect::<String>()
+        self.0.iter().fold(String::new(), |mut out, note| {
+            let _ = writeln!(out, "  {note}");
+            out
+        })
     }
 }
 
@@ -253,7 +253,10 @@ fn unsupported(report: &Report, limit: usize) -> Option<String> {
         .map(|(ext, n)| format!("{ext} {}", thousands(**n)))
         .collect();
     if gaps.len() > limit {
-        named.push(format!("+{} more", thousands((gaps.len() - limit) as u64)));
+        named.push(format!(
+            "+{} more",
+            thousands(crate::span::tally(gaps.len() - limit))
+        ));
     }
     Some(named.join(", "))
 }
@@ -299,12 +302,12 @@ mod tests {
         report.files_skipped = 17;
         report.files_failed = 2;
         report.unsupported = [
-            ("json".to_string(), 14),
-            ("lock".to_string(), 1),
-            ("map".to_string(), 9),
-            ("vim".to_string(), 20),
-            ("log".to_string(), 3),
-            ("bin".to_string(), 2),
+            ("json".to_owned(), 14),
+            ("lock".to_owned(), 1),
+            ("map".to_owned(), 9),
+            ("vim".to_owned(), 20),
+            ("log".to_owned(), 3),
+            ("bin".to_owned(), 2),
         ]
         .into_iter()
         .collect();

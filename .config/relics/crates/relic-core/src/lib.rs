@@ -24,7 +24,7 @@
 #![deny(missing_docs)]
 // Off workspace-wide, because it is noise on a binary whose `pub` only crosses
 // modules. Here `pub` is the API every relic writes against.
-#![warn(clippy::must_use_candidate)]
+#![deny(clippy::must_use_candidate)]
 
 pub mod fmt;
 pub mod fs;

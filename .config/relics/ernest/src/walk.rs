@@ -132,7 +132,7 @@ pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>, keep_paths: 
     //
     // Conditional, so only the rare repository that writes one pays for it. The
     // second walk here is the same shape `Scope::All` above already takes.
-    let excluded: Vec<PathBuf> = if walked.ernestignore.is_empty() {
+    let dropped: Vec<PathBuf> = if walked.ernestignore.is_empty() {
         Vec::new()
     } else {
         let seen: HashSet<&PathBuf> = walked.found.iter().map(|(path, _)| path).collect();
@@ -173,10 +173,10 @@ pub fn collect(roots: &[PathBuf], scope: Scope, lang: Option<&str>, keep_paths: 
         candidates,
         unsupported: walked.unsupported,
         ernestignore: walked.ernestignore,
-        excluded,
+        excluded: dropped,
         unsupported_paths: walked.unsupported_paths,
         scope,
-        lang: lang.map(str::to_string),
+        lang: lang.map(str::to_owned),
         roots: roots.to_vec(),
     }
 }
@@ -265,8 +265,9 @@ fn files(
     keep_paths: bool,
 ) -> Walked {
     let respect = scope != Scope::All;
-    let mut builder = WalkBuilder::new(&roots[0]);
-    for root in &roots[1..] {
+    let mut roots = roots.iter();
+    let mut builder = WalkBuilder::new(roots.next().map_or(Path::new("."), PathBuf::as_path));
+    for root in roots {
         builder.add(root);
     }
     builder
@@ -320,7 +321,7 @@ fn files(
         }
         match profile_for(&path) {
             Some(profile) if lang.is_none_or(|l| l == profile.language) => {
-                walked.found.push((path, profile))
+                walked.found.push((path, profile));
             }
             // Narrowed away by `--lang`, not unsupported: counting it would
             // read as a coverage gap that is not there.
@@ -344,8 +345,7 @@ fn files(
 fn extension_of(path: &Path) -> String {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .unwrap_or_else(|| "(no extension)".to_string())
+        .map_or_else(|| "(no extension)".to_owned(), str::to_ascii_lowercase)
 }
 
 /// A root the user named explicitly is read whether or not it is a directory,

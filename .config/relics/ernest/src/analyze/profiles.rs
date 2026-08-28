@@ -386,12 +386,12 @@ const WEB_PRAGMA_PREFIXES: &[&str] = &[
     "@vite-ignore",
 ];
 
-/// One `comment` kind carries `//`, `/* */` and `/** */` alike, so a JSDoc block
+/// One `comment` kind carries `//`, `/* */` and `/** */` alike, so a `JSDoc` block
 /// is counted whole exactly as a PHP docblock is. `html_comment` is the Annex B
 /// `<!--` line comment — rare, but genuinely a comment, and naming it costs one
 /// word against a false negative.
 ///
-/// JSDoc's `@param` is PHPDoc's convention verbatim, so `annotation_line`
+/// `JSDoc`'s `@param` is `PHPDoc`'s convention verbatim, so `annotation_line`
 /// transfers unchanged. Decorators are untouched by it: they are syntax rather
 /// than comment bodies, and the rule only runs inside a prose node.
 ///

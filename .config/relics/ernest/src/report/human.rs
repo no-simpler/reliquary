@@ -4,6 +4,8 @@
 //! them, and notes that each fire on their own condition. A bare run is the
 //! figure it was called for and the caveats on that figure, nothing else.
 
+use std::fmt::Write;
+
 use crate::aggregate::{DOCS_COHORT, Report, SOURCE_COHORT};
 use crate::span::Counts;
 
@@ -28,7 +30,7 @@ pub fn render(report: &Report, found: &Diagnostics, show: Presentation) -> Strin
 pub fn value(report: &Report) -> String {
     match report.headline().density {
         Some(density) => format!("{:.1}\n", density * 100.0),
-        None => "n/a\n".to_string(),
+        None => "n/a\n".to_owned(),
     }
 }
 
@@ -37,7 +39,7 @@ fn headline(report: &Report) -> String {
     let unit = report.unit;
     let total = report.headline();
     if report.cohorts.is_empty() {
-        return "prose density  n/a   (no supported files found)\n".to_string();
+        return "prose density  n/a   (no supported files found)\n".to_owned();
     }
     let base = total.counts.prose(unit) + total.counts.code(unit);
     format!(
@@ -82,7 +84,7 @@ fn breakdown(report: &Report, show: Presentation) -> String {
     let mut table = Table::new(columns);
 
     let roll = |label: &str, density: Option<f64>, counts: Counts, files: u64| {
-        let mut row = vec![label.to_string()];
+        let mut row = vec![label.to_owned()];
         if languages {
             row.push(String::new());
         }
@@ -109,7 +111,7 @@ fn breakdown(report: &Report, show: Presentation) -> String {
                 2,
                 vec![
                     language.language.clone(),
-                    language.provenance.label().to_string(),
+                    language.provenance.label().to_owned(),
                     percent(language.density),
                     thousands(language.counts.prose(unit)),
                     thousands(language.counts.code(unit)),
@@ -354,10 +356,11 @@ fn docs_line(report: &Report) -> String {
         .map(|c| c.counts.code(unit))
         .filter(|code| *code > 0)
     {
-        line.push_str(&format!(
+        let _ = write!(
+            line,
             " — {:.1}% of source code",
-            prose as f64 / code as f64 * 100.0
-        ));
+            crate::span::approx(prose) / crate::span::approx(code) * 100.0
+        );
     }
     let local: u64 = docs
         .languages
@@ -366,10 +369,11 @@ fn docs_line(report: &Report) -> String {
         .map(|l| l.counts.prose(unit))
         .sum();
     if local > 0 {
-        line.push_str(&format!(
+        let _ = write!(
+            line,
             ", {:.1}% of it local-only",
-            local as f64 / prose as f64 * 100.0
-        ));
+            crate::span::approx(local) / crate::span::approx(prose) * 100.0
+        );
     }
     line.push('\n');
     line
@@ -386,7 +390,7 @@ mod tests {
 
     fn bare() -> Presentation {
         Presentation {
-            views: Default::default(),
+            views: crate::aggregate::Views::default(),
             top: 20,
             verbosity: Verbosity::default(),
         }

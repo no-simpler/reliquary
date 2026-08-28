@@ -13,6 +13,17 @@
 //! case and takes them one at a time. Read each — an accepted wrong answer is
 //! still wrong.
 
+// Clippy's in-test carve-outs (see `clippy.toml`) reach `#[test]` functions and
+// `#[cfg(test)]` modules — not the helpers beside them. An integration test crate
+// is test code end to end, so the carve-out belongs at its root, where its scope
+// is still exactly the tests.
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::unwrap_used
+)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

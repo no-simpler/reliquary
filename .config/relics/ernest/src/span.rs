@@ -14,14 +14,58 @@ pub enum Class {
     Ignored,
 }
 
-impl Class {
-    const fn index(self) -> usize {
-        match self {
-            Class::Prose => 0,
-            Class::Code => 1,
-            Class::Ignored => 2,
+/// A tally per class, reached by `Class` rather than by number: the enum owns
+/// which fields exist, so a lookup is total and adding a class is a compiler
+/// error everywhere it matters rather than an off-by-one.
+#[derive(Clone, Copy, Debug, Default)]
+struct ByClass {
+    prose: u64,
+    code: u64,
+    ignored: u64,
+}
+
+impl ByClass {
+    const fn get(self, class: Class) -> u64 {
+        match class {
+            Class::Prose => self.prose,
+            Class::Code => self.code,
+            Class::Ignored => self.ignored,
         }
     }
+
+    const fn bump(&mut self, class: Class) {
+        match class {
+            Class::Prose => self.prose += 1,
+            Class::Code => self.code += 1,
+            Class::Ignored => self.ignored += 1,
+        }
+    }
+}
+
+/// A count in the unit `Counts` uses. Saturating rather than fallible: a `usize`
+/// that does not fit a `u64` cannot exist on a target this runs on, and an error
+/// arm for it would be unreachable in every caller.
+#[must_use]
+pub fn tally(n: usize) -> u64 {
+    u64::try_from(n).unwrap_or(u64::MAX)
+}
+
+/// A count as a signed delta operand. Saturating for the same reason.
+#[must_use]
+pub fn delta(n: u64) -> i64 {
+    i64::try_from(n).unwrap_or(i64::MAX)
+}
+
+/// A count as a float. `f64` is exact below 2^53, which no character count in a
+/// repository approaches — the one place that conversion is written.
+#[must_use]
+#[expect(
+    clippy::cast_precision_loss,
+    clippy::as_conversions,
+    reason = "counts stay far below 2^53"
+)]
+pub fn approx(n: u64) -> f64 {
+    n as f64
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,7 +118,7 @@ impl Counts {
         if base == 0 {
             None
         } else {
-            Some(prose as f64 / base as f64)
+            Some(approx(prose) / approx(base))
         }
     }
 
@@ -149,34 +193,35 @@ pub fn measure(src: &str, spans: &[Span], default: Class) -> Counts {
 pub fn measure_range(src: &str, spans: &[Span], default: Class, from: usize, to: usize) -> Counts {
     let coverage = cover(spans, src.len(), default);
 
-    let mut totals = [0u64; 3];
-    let mut line = [0u64; 3];
+    let mut totals = ByClass::default();
+    let mut line = ByClass::default();
     let mut counts = Counts::default();
     let mut cursor = 0usize;
 
-    let flush_line = |line: &mut [u64; 3], counts: &mut Counts| {
+    let flush_line = |line: &mut ByClass, counts: &mut Counts| {
         // Ties go to code, the convention line-based counters use for a line
         // that carries both. A blank line reaches no class at all.
-        let winner = if line[Class::Code.index()] >= line[Class::Prose.index()]
-            && line[Class::Code.index()] >= line[Class::Ignored.index()]
+        let winner = if line.get(Class::Code) >= line.get(Class::Prose)
+            && line.get(Class::Code) >= line.get(Class::Ignored)
         {
             Class::Code
-        } else if line[Class::Prose.index()] >= line[Class::Ignored.index()] {
+        } else if line.get(Class::Prose) >= line.get(Class::Ignored) {
             Class::Prose
         } else {
             Class::Ignored
         };
-        if line[winner.index()] > 0 {
+        if line.get(winner) > 0 {
             match winner {
                 Class::Prose => counts.prose_lines += 1,
                 Class::Code => counts.code_lines += 1,
                 Class::Ignored => counts.ignored_lines += 1,
             }
         }
-        *line = [0u64; 3];
+        *line = ByClass::default();
     };
 
-    for (offset, ch) in src[from..to].char_indices().map(|(i, c)| (i + from, c)) {
+    let window = src.get(from..to).unwrap_or("");
+    for (offset, ch) in window.char_indices().map(|(i, c)| (i + from, c)) {
         if ch == '\n' {
             flush_line(&mut line, &mut counts);
             continue;
@@ -184,21 +229,21 @@ pub fn measure_range(src: &str, spans: &[Span], default: Class, from: usize, to:
         if ch.is_whitespace() {
             continue;
         }
-        while cursor < coverage.len() && offset >= coverage[cursor].end {
+        while coverage.get(cursor).is_some_and(|span| offset >= span.end) {
             cursor += 1;
         }
         let class = coverage
             .get(cursor)
             .filter(|s| offset >= s.start)
             .map_or(default, |s| s.class);
-        totals[class.index()] += 1;
-        line[class.index()] += 1;
+        totals.bump(class);
+        line.bump(class);
     }
     flush_line(&mut line, &mut counts);
 
-    counts.prose_chars = totals[Class::Prose.index()];
-    counts.code_chars = totals[Class::Code.index()];
-    counts.ignored_chars = totals[Class::Ignored.index()];
+    counts.prose_chars = totals.prose;
+    counts.code_chars = totals.code;
+    counts.ignored_chars = totals.ignored;
     counts
 }
 

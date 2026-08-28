@@ -61,7 +61,7 @@ fn run(cli: Cli) -> Result<i32> {
     // is the one subcommand that wants no walk, no snapshot and no flags.
     if let Some(Command::Completions { shell }) = cli.command {
         let mut command = <Cli as clap::CommandFactory>::command();
-        let name = command.get_name().to_string();
+        let name = command.get_name().to_owned();
         let mut script = Vec::new();
         clap_complete::generate(shell, &mut command, name, &mut script);
         emit(&String::from_utf8(script).context("generating the completion script")?)?;

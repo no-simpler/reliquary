@@ -1,0 +1,21 @@
+# The coverage ratchet: region coverage per package, as a floor that may not fall.
+#
+# See "Track 3 — the verification ratchet" in ~/.config/reliquary/HARDENING.md.
+# Enforced by `relic test --cover` through cargo-llvm-cov's own
+# `--fail-under-regions`, never by scraping a percentage out of its table: an
+# exit code is the machine-readable interface and a table is human-facing.
+#
+# Regions, not lines. llvm-cov counts regions, so every `?` and every match arm
+# shows the partial coverage that line counting hides — which is why these
+# numbers are lower than a line-based tool would report for the same suites.
+#
+# Each is the measured figure floored to a whole percent. The point spare is
+# deliberate: a baseline pinned to the last decimal fails on a test that runs
+# conditionally, and a gate that flaps is a gate that gets switched off.
+#
+# Raising one is an edit in the same commit as the tests that earned it.
+
+relic-core = 92
+docket = 88
+midden = 78
+ernest = 94

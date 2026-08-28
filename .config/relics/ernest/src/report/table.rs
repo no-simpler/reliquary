@@ -67,7 +67,8 @@ impl Table {
             .map(|(i, column)| {
                 self.rows
                     .iter()
-                    .map(|row| row[i].chars().count())
+                    .filter_map(|row| row.get(i))
+                    .map(|cell| cell.chars().count())
                     .chain(std::iter::once(column.header.chars().count()))
                     .max()
                     .unwrap_or(0)
@@ -93,8 +94,12 @@ fn line(out: &mut String, cells: &[&str], widths: &[usize], columns: &[Column]) 
         if i > 0 {
             rendered.push_str("  ");
         }
-        let pad = widths[i].saturating_sub(cell.chars().count());
-        match columns[i].align {
+        let pad = widths
+            .get(i)
+            .copied()
+            .unwrap_or(0)
+            .saturating_sub(cell.chars().count());
+        match columns.get(i).map_or(Align::Left, |column| column.align) {
             Align::Left => {
                 rendered.push_str(cell);
                 rendered.push_str(&" ".repeat(pad));
@@ -114,7 +119,10 @@ mod tests {
     use super::*;
 
     fn cells(values: &[&str]) -> Vec<String> {
-        values.iter().map(|v| v.to_string()).collect()
+        values
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect()
     }
 
     fn table() -> Table {

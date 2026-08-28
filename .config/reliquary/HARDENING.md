@@ -271,7 +271,13 @@ assertions are structural gains nothing from it and should not adopt it for symm
 ### Coverage, and what it is worth
 
 `cargo-llvm-cov`, **70% floor, 85% for platform crates**, plus a committed per-crate baseline
-that may never regress. The floor is deliberately low so the ratchet starts working
+that may never regress.
+
+**Coverage is measured over the workspace, never over one package.** The baselines are per
+package, and a profile collected from one relic's run reports every other package as
+uncovered — a gate that fails on packages the run never touched is a gate nobody trusts.
+**Regions, not lines**: the two differ by several points on the same suite, and the ratchet
+compares against the one `--fail-under-regions` reads. The floor is deliberately low so the ratchet starts working
 immediately rather than after a catch-up phase; the ratchet does the real work.
 
 Coverage alone is gameable by exactly the behaviour this guards against — a test that executes

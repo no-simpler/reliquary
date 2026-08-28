@@ -11,6 +11,11 @@
 //! The grammar is chosen the way the tool chooses it, so this needs no editing
 //! when a profile is added — only that the profile exists.
 
+// A developer probe, run by hand to read a grammar's node kinds. It is not
+// shipped and has no caller to return an error to, so it says what went wrong
+// and stops.
+#![allow(clippy::expect_used, clippy::panic, clippy::string_slice)]
+
 use std::path::Path;
 
 use ernest::analyze::parse;

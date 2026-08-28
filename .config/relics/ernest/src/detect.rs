@@ -47,7 +47,7 @@ pub fn profile_for(path: &Path) -> Option<&'static Profile> {
 /// shebang is naming an interpreter.
 pub(crate) fn shebang_len(src: &str) -> Option<usize> {
     let end = src.find('\n').unwrap_or(src.len());
-    interpreter(&src[..end])?;
+    interpreter(src.get(..end).unwrap_or(src))?;
     Some(end)
 }
 
@@ -82,9 +82,11 @@ fn basename(path: &str) -> &str {
 fn first_line(path: &Path) -> Option<String> {
     let mut buffer = [0u8; PEEK];
     let read = fs_err::File::open(path).ok()?.read(&mut buffer).ok()?;
-    let head = &buffer[..read];
+    let head = buffer.get(..read).unwrap_or(&buffer);
     let end = head.iter().position(|b| *b == b'\n').unwrap_or(read);
-    std::str::from_utf8(&head[..end]).ok().map(str::to_owned)
+    std::str::from_utf8(head.get(..end).unwrap_or(head))
+        .ok()
+        .map(str::to_owned)
 }
 
 #[cfg(test)]

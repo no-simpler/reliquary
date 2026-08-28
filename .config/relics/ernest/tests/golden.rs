@@ -9,6 +9,17 @@
 //! still wrong. `insta::glob!` names snapshots after the fixture path and reports
 //! every drifted fixture in one run rather than stopping at the first.
 
+// Clippy's in-test carve-outs (see `clippy.toml`) reach `#[test]` functions and
+// `#[cfg(test)]` modules — not the helpers beside them. An integration test crate
+// is test code end to end, so the carve-out belongs at its root, where its scope
+// is still exactly the tests.
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::unwrap_used
+)]
+
 use std::path::{Path, PathBuf};
 
 use ernest::analyze::analyze_file;
@@ -61,7 +72,7 @@ fn fixtures_match_their_expected_counts() {
 fn every_character_is_bucketed_exactly_once() {
     for path in fixtures() {
         let (_, src, counts) = measure(&path);
-        let in_file = src.chars().filter(|c| !c.is_whitespace()).count() as u64;
+        let in_file = ernest::span::tally(src.chars().filter(|c| !c.is_whitespace()).count());
         let bucketed = counts.prose_chars + counts.code_chars + counts.ignored_chars;
         assert_eq!(
             in_file,
@@ -99,7 +110,7 @@ fn every_fixture_parses_without_error_nodes() {
 fn no_line_is_counted_twice() {
     for path in fixtures() {
         let (_, src, counts) = measure(&path);
-        let in_file = src.lines().count() as u64;
+        let in_file = ernest::span::tally(src.lines().count());
         let bucketed = counts.prose_lines + counts.code_lines + counts.ignored_lines;
         assert!(
             bucketed <= in_file,
@@ -215,7 +226,7 @@ fn the_adversarial_jsx_fixture_bills_markup_copy_as_code() {
     );
     assert_eq!(
         counts.code_chars - after.code_chars,
-        ("ReticulatingSplines".len() - 1) as u64,
+        ernest::span::tally("ReticulatingSplines".len() - 1),
         "interface copy should bill as code, character for character"
     );
 }
@@ -291,7 +302,7 @@ fn the_adversarial_html_fixture_bills_markup_copy_as_code() {
     );
     assert_eq!(
         counts.code_chars - after.code_chars,
-        ("Interfacecopyistheproduct,notproseaboutcode.".len() - 1) as u64,
+        ernest::span::tally("Interfacecopyistheproduct,notproseaboutcode.".len() - 1),
         "interface copy should bill as code, character for character"
     );
 }

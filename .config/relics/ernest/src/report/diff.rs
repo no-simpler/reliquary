@@ -4,6 +4,8 @@
 //! Same three registers as the measurement report, and the same `--by`: a bare
 //! diff is the delta, and the rows that produced it are asked for.
 
+use std::fmt::Write;
+
 use std::collections::BTreeMap;
 
 use anyhow::{Result, bail};
@@ -16,6 +18,12 @@ use super::notes::Notes;
 use super::table::{Column, Table};
 use super::{Blocks, Presentation, Verbosity, count, percent, percent_delta, signed, thousands};
 
+/// The whole comparison, rendered.
+///
+/// # Errors
+///
+/// When the two snapshots were measured in different units, which makes every
+/// row of the comparison meaningless rather than merely odd.
 pub fn render(before: &Report, after: &Report, show: Presentation) -> Result<String> {
     let unit = same_unit(before, after)?;
     let mut blocks = Blocks::default();
@@ -55,7 +63,7 @@ pub fn render(before: &Report, after: &Report, show: Presentation) -> Result<Str
                         .map(|s| (key(&s.path, &s.section), s.counts.prose(unit), s.density)),
                     a.iter()
                         .map(|s| (key(&s.path, &s.section), s.counts.prose(unit), s.density)),
-                ))
+                ));
             }
             _ => notes.push("per-section movement needs both snapshots taken with --by section"),
         }
@@ -91,6 +99,10 @@ pub fn render(before: &Report, after: &Report, show: Presentation) -> Result<Str
 /// The density alone, as a change in percentage points. What `--format value`
 /// writes on this side, so a gate reading a diff speaks the dialect one reading
 /// a measurement does.
+///
+/// # Errors
+///
+/// When the two snapshots were measured in different units.
 pub fn quiet(before: &Report, after: &Report) -> Result<String> {
     same_unit(before, after)?;
     Ok(format!(
@@ -133,9 +145,10 @@ fn same_unit(before: &Report, after: &Report) -> Result<Unit> {
 fn headline(before: &Report, after: &Report, unit: Unit) -> String {
     let (b, a) = (before.headline(), after.headline());
     if before.cohorts.is_empty() && after.cohorts.is_empty() {
-        return "prose density  n/a   (no supported files found)\n".to_string();
+        return "prose density  n/a   (no supported files found)\n".to_owned();
     }
-    let prose_delta = a.counts.prose(unit) as i64 - b.counts.prose(unit) as i64;
+    let prose_delta =
+        crate::span::delta(a.counts.prose(unit)) - crate::span::delta(b.counts.prose(unit));
     format!(
         "prose density  {} -> {}   ({} pp,  prose {} {})\n{}",
         percent(b.density),
@@ -173,10 +186,10 @@ fn docs_line(before: &Report, after: &Report, unit: Unit) -> String {
             .cohort(SOURCE_COHORT)
             .map(|c| c.counts.code(unit))
             .filter(|code| *code > 0)
-            .map(|code| prose as f64 / code as f64 * 100.0)
+            .map(|code| crate::span::approx(prose) / crate::span::approx(code) * 100.0)
     };
     if let (Some(b), Some(a)) = (against(before, b), against(after, a)) {
-        line.push_str(&format!(" — {b:.1}% -> {a:.1}% of source code"));
+        let _ = write!(line, " — {b:.1}% -> {a:.1}% of source code");
     }
     line.push('\n');
     line
@@ -305,11 +318,11 @@ fn movers(
 ) -> String {
     let mut moved: BTreeMap<String, (i64, Option<f64>)> = BTreeMap::new();
     for (key, prose, _) in before {
-        moved.entry(key).or_insert((0, None)).0 -= prose as i64;
+        moved.entry(key).or_insert((0, None)).0 -= crate::span::delta(prose);
     }
     for (key, prose, density) in after {
         let entry = moved.entry(key).or_insert((0, None));
-        entry.0 += prose as i64;
+        entry.0 += crate::span::delta(prose);
         entry.1 = density;
     }
     let mut rows: Vec<(String, i64, Option<f64>)> = moved
@@ -342,17 +355,20 @@ fn row(
     before_counts: Counts,
     unit: Unit,
 ) -> Vec<String> {
-    let mut row = vec![label.to_string()];
+    let mut row = vec![label.to_owned()];
     // `None` is a table without the column at all; a roll-up row in a table that
     // has one still needs its blank cell.
     if let Some(provenance) = provenance {
-        row.push(provenance.to_string());
+        row.push(provenance.to_owned());
     }
     row.extend([
         percent(after),
         percent_delta(before, after),
         thousands(after_counts.prose(unit)),
-        signed(after_counts.prose(unit) as i64 - before_counts.prose(unit) as i64),
+        signed(
+            crate::span::delta(after_counts.prose(unit))
+                - crate::span::delta(before_counts.prose(unit)),
+        ),
     ]);
     row
 }

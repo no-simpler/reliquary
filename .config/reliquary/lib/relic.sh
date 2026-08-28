@@ -465,26 +465,22 @@ relic::cover() {
         return $?
     }
 
-    local root c
+    local root
     root="$(relic::_cargo_workspace_root "$dir")" || {
         relic::_die "no cargo workspace above $dir"
         return $?
     }
 
-    # Every shared crate too: code that moved into crates/ is covered from each
-    # of its dependents rather than by nobody, the same reason relic::test
-    # passes them.
-    local pkgs=(-p "$NAME")
-    while IFS= read -r c; do
-        [[ -n "$c" ]] && pkgs=("${pkgs[@]}" -p "$c")
-    done < <(relic::_shared_crates "$root")
-
+    # The whole workspace, not the named relic: the ratchet holds one baseline per
+    # package, and a profile collected from one relic's run reports every other
+    # package as uncovered. It also covers a shared crate from each of its
+    # dependents rather than from nobody, which is the point of `crates/`.
     (
-        cd "$dir" || exit $?
+        cd "$root" || exit $?
         if command -v cargo-nextest >/dev/null 2>&1; then
-            cargo llvm-cov nextest "${pkgs[@]}" --summary-only
+            cargo llvm-cov nextest --workspace --summary-only
         else
-            cargo llvm-cov "${pkgs[@]}" --summary-only
+            cargo llvm-cov --workspace --summary-only
         fi
     ) || return $?
 

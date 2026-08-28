@@ -33,6 +33,11 @@ pub struct Analysis {
     pub health: Health,
 }
 
+/// Classify `src` under `profile`, with sections when they were asked for.
+///
+/// # Errors
+///
+/// When the grammar will not load or the parse returns nothing — see [`parse`].
 pub fn analyze(src: &str, profile: &Profile, wants_sections: bool) -> Result<Analysis> {
     let tree = parse(src, profile)?;
     let spans = classify(&tree, src, profile);
@@ -49,6 +54,10 @@ pub fn analyze(src: &str, profile: &Profile, wants_sections: bool) -> Result<Ana
 }
 
 /// Classify `src` under `profile` and roll the result up into counts.
+///
+/// # Errors
+///
+/// When the grammar will not load or the parse returns nothing — see [`parse`].
 pub fn analyze_file(src: &str, profile: &Profile) -> Result<Counts> {
     let tree = parse(src, profile)?;
     let spans = classify(&tree, src, profile);
@@ -57,6 +66,10 @@ pub fn analyze_file(src: &str, profile: &Profile) -> Result<Counts> {
 
 /// As `analyze_file`, plus one row per innermost section of the document.
 /// Sections that measure to nothing are dropped rather than reported as `n/a`.
+///
+/// # Errors
+///
+/// When the grammar will not load or the parse returns nothing — see [`parse`].
 pub fn analyze_sections(src: &str, profile: &Profile) -> Result<(Counts, Vec<(String, Counts)>)> {
     let tree = parse(src, profile)?;
     let spans = classify(&tree, src, profile);
@@ -127,6 +140,11 @@ fn health(tree: &Tree) -> Health {
 
 /// Public so a test can ask whether a grammar actually read a file, rather than
 /// only what the rules made of what it returned.
+///
+/// # Errors
+///
+/// When the grammar will not load, or when tree-sitter returns no tree at all —
+/// which it does on a source it cannot even begin, rather than on a syntax error.
 pub fn parse(src: &str, profile: &Profile) -> Result<Tree> {
     let mut parser = Parser::new();
     parser
@@ -193,7 +211,7 @@ fn push_recognised(
     src: &str,
     out: &mut Vec<Span>,
 ) {
-    let text = &src[start..end];
+    let text = src.get(start..end).unwrap_or("");
 
     // Ahead of the class branch, so a directive is uninteresting whether it
     // arrived as a comment or as raw markup.
@@ -247,23 +265,30 @@ fn fold_generated_regions(spans: &mut Vec<Span>, profile: &Profile, src: &str) {
     }
     let mut at = 0usize;
     while at < spans.len() {
-        let opened = profile
+        let Some(opener) = spans.get(at) else { break };
+        let opening = profile
             .generated_regions
             .iter()
-            .find(|(open, _)| marker(&spans[at], profile, src).starts_with(open));
-        let Some((_, close)) = opened else {
+            .find(|(open, _)| marker(opener, profile, src).starts_with(open));
+        let Some((_, close)) = opening else {
             at += 1;
             continue;
         };
         // An unclosed opener leaves the rest of the file alone; a later pair
         // still folds.
-        let closed =
-            (at + 1..spans.len()).find(|&i| marker(&spans[i], profile, src).starts_with(close));
+        let closed = (at + 1..spans.len()).find(|&i| {
+            spans
+                .get(i)
+                .is_some_and(|span| marker(span, profile, src).starts_with(close))
+        });
         let Some(end) = closed else {
             at += 1;
             continue;
         };
-        let region = Span::new(spans[at].start, spans[end].end, Class::Ignored);
+        let (Some(start), Some(stop)) = (spans.get(at), spans.get(end)) else {
+            break;
+        };
+        let region = Span::new(start.start, stop.end, Class::Ignored);
         spans.splice(at..=end, [region]);
         at += 1;
     }
@@ -272,7 +297,7 @@ fn fold_generated_regions(spans: &mut Vec<Span>, profile: &Profile, src: &str) {
 /// A span's first line, stripped to its comment body, so region markers are
 /// tested against real content.
 fn marker<'a>(span: &Span, profile: &Profile, src: &'a str) -> &'a str {
-    let text = &src[span.start..span.end];
+    let text = src.get(span.start..span.end).unwrap_or("");
     comment_body(text.lines().next().unwrap_or(""), profile.comment_frame)
 }
 
@@ -300,9 +325,9 @@ fn line_offsets(text: &str) -> impl Iterator<Item = (usize, &str)> {
         if at > text.len() {
             return None;
         }
-        let rest = &text[at..];
+        let rest = text.get(at..).unwrap_or("");
         let (line, step) = match rest.find('\n') {
-            Some(i) => (&rest[..i], i + 1),
+            Some(i) => (rest.get(..i).unwrap_or(rest), i + 1),
             None => (rest, rest.len() + 1),
         };
         let start = at;
@@ -313,6 +338,12 @@ fn line_offsets(text: &str) -> impl Iterator<Item = (usize, &str)> {
 
 #[cfg(test)]
 mod tests {
+    /// A literal's length in the unit `Counts` counts in. Written once so the
+    /// assertions read as arithmetic rather than as conversions.
+    fn len(text: &str) -> u64 {
+        u64::try_from(text.len()).unwrap_or(u64::MAX)
+    }
+
     use super::*;
     use profiles::{
         CSS, HTML, JAVASCRIPT, MARKDOWN, PHP, RUST, SHELL, TOML, TSX, TWIG, TYPESCRIPT, XML, YAML,
@@ -339,15 +370,9 @@ mod tests {
         let src = "<?php\n/**\n * Resolves a tenant.\n * @param int $id\n */\n$x = 1;\n";
         let c = counts(src, &PHP);
         // "/**", "* Resolves a tenant." and "*/" stay prose, delimiters included.
-        assert_eq!(
-            c.prose_chars,
-            "/**".len() as u64 + "*Resolvesatenant.".len() as u64 + 2
-        );
+        assert_eq!(c.prose_chars, len("/**") + len("*Resolvesatenant.") + 2);
         // The annotation line reclassifies whole, frame and all.
-        assert_eq!(
-            c.code_chars,
-            "*@paramint$id".len() as u64 + "$x=1;".len() as u64
-        );
+        assert_eq!(c.code_chars, len("*@paramint$id") + len("$x=1;"));
     }
 
     #[test]
@@ -361,7 +386,7 @@ mod tests {
     #[test]
     fn a_shebang_is_uninteresting() {
         let c = counts("#!/usr/bin/env php\n<?php\n$x = 1;\n", &PHP);
-        assert_eq!(c.ignored_chars, "#!/usr/bin/envphp".len() as u64 + 5);
+        assert_eq!(c.ignored_chars, len("#!/usr/bin/envphp") + 5);
         assert_eq!(c.prose_chars, 0);
     }
 
@@ -377,9 +402,9 @@ mod tests {
     #[test]
     fn a_shebang_the_grammar_claimed_as_a_comment_is_still_uninteresting() {
         let c = counts("#!/usr/bin/env bash\nx=1\n", &SHELL);
-        assert_eq!(c.ignored_chars, "#!/usr/bin/envbash".len() as u64);
+        assert_eq!(c.ignored_chars, len("#!/usr/bin/envbash"));
         assert_eq!(c.prose_chars, 0);
-        assert_eq!(c.code_chars, "x=1".len() as u64);
+        assert_eq!(c.code_chars, len("x=1"));
     }
 
     #[test]
@@ -408,7 +433,7 @@ mod tests {
     fn a_shellcheck_directive_is_uninteresting_not_prose() {
         let c = counts("# shellcheck disable=SC1091\nsource f\n", &SHELL);
         assert_eq!(c.prose_chars, 0);
-        assert_eq!(c.ignored_chars, "#shellcheckdisable=SC1091".len() as u64);
+        assert_eq!(c.ignored_chars, len("#shellcheckdisable=SC1091"));
     }
 
     /// `##`, `#>` and `#.` are house comment sigils, not a machine-consumed
@@ -418,18 +443,15 @@ mod tests {
         let c = counts("## Section\n#>  mcd PATH\n#.  -a  dotfiles\n", &SHELL);
         assert_eq!(c.code_chars, 0);
         assert_eq!(c.ignored_chars, 0);
-        assert_eq!(c.prose_chars, "##Section#>mcdPATH#.-adotfiles".len() as u64);
+        assert_eq!(c.prose_chars, len("##Section#>mcdPATH#.-adotfiles"));
     }
 
     #[test]
     fn doc_comments_and_ordinary_comments_are_prose_alike() {
         let src = "//! Module doc.\n/// Item doc.\n// Plain note.\nfn f() {}\n";
         let c = counts(src, &RUST);
-        assert_eq!(
-            c.prose_chars,
-            "//!Moduledoc.///Itemdoc.//Plainnote.".len() as u64
-        );
-        assert_eq!(c.code_chars, "fnf(){}".len() as u64);
+        assert_eq!(c.prose_chars, len("//!Moduledoc.///Itemdoc.//Plainnote."));
+        assert_eq!(c.code_chars, len("fnf(){}"));
     }
 
     /// The one that made this profile worth writing carefully: the line is an
@@ -438,9 +460,9 @@ mod tests {
     #[test]
     fn an_inner_attribute_on_line_one_is_a_pragma_not_a_shebang() {
         let c = counts("#![deny(missing_docs)]\nfn f() {}\n", &RUST);
-        assert_eq!(c.ignored_chars, "#![deny(missing_docs)]".len() as u64);
+        assert_eq!(c.ignored_chars, len("#![deny(missing_docs)]"));
         assert_eq!(c.prose_chars, 0);
-        assert_eq!(c.code_chars, "fnf(){}".len() as u64);
+        assert_eq!(c.code_chars, len("fnf(){}"));
     }
 
     /// A lint directive is uninteresting whichever vehicle a language gives it;
@@ -448,11 +470,11 @@ mod tests {
     #[test]
     fn lint_attributes_are_uninteresting_and_semantic_ones_are_code() {
         let lint = counts("#[allow(dead_code)]\nfn f() {}\n", &RUST);
-        assert_eq!(lint.ignored_chars, "#[allow(dead_code)]".len() as u64);
+        assert_eq!(lint.ignored_chars, len("#[allow(dead_code)]"));
 
         let semantic = counts("#[derive(Debug)]\nstruct S;\n", &RUST);
         assert_eq!(semantic.ignored_chars, 0);
-        assert_eq!(semantic.code_chars, "#[derive(Debug)]structS;".len() as u64);
+        assert_eq!(semantic.code_chars, len("#[derive(Debug)]structS;"));
     }
 
     #[test]
@@ -474,10 +496,10 @@ mod tests {
     #[test]
     fn a_nested_block_comment_closes_once_and_four_slashes_are_prose() {
         let nested = counts("/* outer /* inner */ still outer */\nfn f() {}\n", &RUST);
-        assert_eq!(nested.code_chars, "fnf(){}".len() as u64);
+        assert_eq!(nested.code_chars, len("fnf(){}"));
 
         let four = counts("//// not a doc comment\n", &RUST);
-        assert_eq!(four.prose_chars, "////notadoccomment".len() as u64);
+        assert_eq!(four.prose_chars, len("////notadoccomment"));
     }
 
     /// Comments reach inside macro token trees, so the coverage does not stop
@@ -485,7 +507,7 @@ mod tests {
     #[test]
     fn a_comment_inside_a_macro_is_still_a_comment() {
         let c = counts("fn f() {\n    println!(\"{}\", /* note */ 1);\n}\n", &RUST);
-        assert_eq!(c.prose_chars, "/*note*/".len() as u64);
+        assert_eq!(c.prose_chars, len("/*note*/"));
     }
 
     #[test]
@@ -508,11 +530,11 @@ mod tests {
     #[test]
     fn a_private_class_field_is_not_a_comment() {
         let c = counts("class C {\n    #count = 0; // a note\n}\n", &JAVASCRIPT);
-        assert_eq!(c.prose_chars, "//anote".len() as u64);
-        assert_eq!(c.code_chars, "classC{#count=0;}".len() as u64);
+        assert_eq!(c.prose_chars, len("//anote"));
+        assert_eq!(c.code_chars, len("classC{#count=0;}"));
     }
 
-    /// JSDoc is PHPDoc's convention in another language, so the annotation rule
+    /// `JSDoc` is `PHPDoc`'s convention in another language, so the annotation rule
     /// transfers verbatim.
     #[test]
     fn a_jsdoc_annotation_line_is_code_and_its_description_is_prose() {
@@ -520,12 +542,9 @@ mod tests {
         let c = counts(src, &JAVASCRIPT);
         assert_eq!(
             c.prose_chars,
-            "/**".len() as u64 + "*Resolvesatenant.".len() as u64 + "*/".len() as u64
+            len("/**") + len("*Resolvesatenant.") + len("*/")
         );
-        assert_eq!(
-            c.code_chars,
-            "*@param{number}id".len() as u64 + "constx=1;".len() as u64
-        );
+        assert_eq!(c.code_chars, len("*@param{number}id") + len("constx=1;"));
     }
 
     /// The Annex B line comment. It is script-only syntax, so it cannot sit in
@@ -533,8 +552,8 @@ mod tests {
     #[test]
     fn an_annex_b_html_comment_is_prose() {
         let c = counts("<!-- a legacy comment\nvar x = 1;\n", &JAVASCRIPT);
-        assert_eq!(c.prose_chars, "<!--alegacycomment".len() as u64);
-        assert_eq!(c.code_chars, "varx=1;".len() as u64);
+        assert_eq!(c.prose_chars, len("<!--alegacycomment"));
+        assert_eq!(c.code_chars, len("varx=1;"));
     }
 
     #[test]
@@ -543,7 +562,7 @@ mod tests {
         assert_eq!(eslint.prose_chars, 0);
         assert_eq!(
             eslint.ignored_chars,
-            "//eslint-disable-next-lineno-undef".len() as u64
+            len("//eslint-disable-next-lineno-undef")
         );
 
         let coverage = counts("/* istanbul ignore next */\nfunction f() {}\n", &JAVASCRIPT);
@@ -559,7 +578,7 @@ mod tests {
             &TYPESCRIPT,
         );
         assert_eq!(ignore.prose_chars, 0);
-        assert_eq!(ignore.code_chars, "x();".len() as u64);
+        assert_eq!(ignore.code_chars, len("x();"));
 
         // The triple-slash form, which is why `///` leads the comment frame.
         let reference = counts(
@@ -569,7 +588,7 @@ mod tests {
         assert_eq!(reference.prose_chars, 0);
         assert_eq!(
             reference.ignored_chars,
-            "///<referencetypes=\"node\"/>".len() as u64
+            len("///<referencetypes=\"node\"/>")
         );
     }
 
@@ -582,7 +601,7 @@ mod tests {
         assert_eq!(copy.prose_chars, 0);
 
         let commented = counts("const A = () => <p>{/* note */}text</p>;\n", &TSX);
-        assert_eq!(commented.prose_chars, "/*note*/".len() as u64);
+        assert_eq!(commented.prose_chars, len("/*note*/"));
     }
 
     #[test]
@@ -607,9 +626,9 @@ mod tests {
         );
         assert_eq!(
             c.prose_chars,
-            "/*Whythisrule.*/".len() as u64 + "//Anote.".len() as u64 + "/*why*/".len() as u64
+            len("/*Whythisrule.*/") + len("//Anote.") + len("/*why*/")
         );
-        assert_eq!(c.code_chars, ".a{color:red;}".len() as u64);
+        assert_eq!(c.code_chars, len(".a{color:red;}"));
         assert_eq!(c.ignored_chars, 0);
     }
 
@@ -622,16 +641,16 @@ mod tests {
         assert_eq!(c.prose_chars, 0);
         assert_eq!(
             c.ignored_chars,
-            "/*stylelint-disableno-descending-specificity*/".len() as u64
+            len("/*stylelint-disableno-descending-specificity*/")
         );
     }
 
     #[test]
     fn the_html_doctype_is_uninteresting() {
         let c = counts("<!DOCTYPE html>\n<p>x</p>\n", &HTML);
-        assert_eq!(c.ignored_chars, "<!DOCTYPEhtml>".len() as u64);
+        assert_eq!(c.ignored_chars, len("<!DOCTYPEhtml>"));
         assert_eq!(c.prose_chars, 0);
-        assert_eq!(c.code_chars, "<p>x</p>".len() as u64);
+        assert_eq!(c.code_chars, len("<p>x</p>"));
     }
 
     /// Body copy is the interface's own text rather than prose describing code,
@@ -642,8 +661,8 @@ mod tests {
             "<!-- Why this markup. -->\n<p>Reticulating splines</p>\n",
             &HTML,
         );
-        assert_eq!(c.prose_chars, "<!--Whythismarkup.-->".len() as u64);
-        assert_eq!(c.code_chars, "<p>Reticulatingsplines</p>".len() as u64);
+        assert_eq!(c.prose_chars, len("<!--Whythismarkup.-->"));
+        assert_eq!(c.code_chars, len("<p>Reticulatingsplines</p>"));
     }
 
     /// The grammar hands an inline script or stylesheet back as `raw_text`, so
@@ -665,7 +684,7 @@ mod tests {
     fn an_html_tooling_directive_is_uninteresting_not_prose() {
         let c = counts("<!-- prettier-ignore -->\n<p>x</p>\n", &HTML);
         assert_eq!(c.prose_chars, 0);
-        assert_eq!(c.ignored_chars, "<!--prettier-ignore-->".len() as u64);
+        assert_eq!(c.ignored_chars, len("<!--prettier-ignore-->"));
     }
 
     /// The whitespace-control markers are part of the delimiter, and the
@@ -678,13 +697,13 @@ mod tests {
         );
         assert_eq!(
             c.prose_chars,
-            "{#Whythistemplate.#}".len() as u64 + "{#-Trimmed.-#}".len() as u64
+            len("{#Whythistemplate.#}") + len("{#-Trimmed.-#}")
         );
-        assert_eq!(c.code_chars, "<p>x</p>".len() as u64);
+        assert_eq!(c.code_chars, len("<p>x</p>"));
     }
 
     /// `{# @var … #}` is an IDE type hint: avoidable, machine-consumed, not
-    /// prose. PHPDoc's convention in another vehicle, so the rule transfers.
+    /// prose. `PHPDoc`'s convention in another vehicle, so the rule transfers.
     #[test]
     fn a_twig_type_hint_is_code_and_a_description_is_prose() {
         let hint = counts(
@@ -694,18 +713,18 @@ mod tests {
         assert_eq!(hint.prose_chars, 0);
         assert_eq!(
             hint.code_chars,
-            "{#@varpost\\App\\Entity\\Post#}".len() as u64 + "{{post.title}}".len() as u64
+            len("{#@varpost\\App\\Entity\\Post#}") + len("{{post.title}}")
         );
 
         let described = counts("{# Renders one row. #}\n{{ row }}\n", &TWIG);
-        assert_eq!(described.prose_chars, "{#Rendersonerow.#}".len() as u64);
+        assert_eq!(described.prose_chars, len("{#Rendersonerow.#}"));
     }
 
     #[test]
     fn a_twig_cs_fixer_directive_is_uninteresting_not_prose() {
         let c = counts("{# twig-cs-fixer-disable #}\n{{ x }}\n", &TWIG);
         assert_eq!(c.prose_chars, 0);
-        assert_eq!(c.ignored_chars, "{#twig-cs-fixer-disable#}".len() as u64);
+        assert_eq!(c.ignored_chars, len("{#twig-cs-fixer-disable#}"));
     }
 
     /// The grammar is template-first: everything between the delimiters arrives
@@ -718,11 +737,8 @@ mod tests {
             "{# Twig comment. #}\n<!-- HTML comment. -->\n<p>x</p>\n",
             &TWIG,
         );
-        assert_eq!(c.prose_chars, "{#Twigcomment.#}".len() as u64);
-        assert_eq!(
-            c.code_chars,
-            "<!--HTMLcomment.-->".len() as u64 + "<p>x</p>".len() as u64
-        );
+        assert_eq!(c.prose_chars, len("{#Twigcomment.#}"));
+        assert_eq!(c.code_chars, len("<!--HTMLcomment.-->") + len("<p>x</p>"));
     }
 
     #[test]
@@ -733,9 +749,9 @@ mod tests {
         );
         assert_eq!(
             c.ignored_chars,
-            "<?xmlversion=\"1.0\"?>".len() as u64 + "<!DOCTYPEaSYSTEM\"a.dtd\">".len() as u64
+            len("<?xmlversion=\"1.0\"?>") + len("<!DOCTYPEaSYSTEM\"a.dtd\">")
         );
-        assert_eq!(c.prose_chars, "<!--Why.-->".len() as u64);
+        assert_eq!(c.prose_chars, len("<!--Why.-->"));
     }
 
     #[test]
@@ -765,8 +781,8 @@ mod tests {
     #[test]
     fn a_toml_comment_is_prose_wherever_it_sits() {
         let c = counts("[a]\n# Why this table.\nkey = 1 # why\n", &TOML);
-        assert_eq!(c.prose_chars, "#Whythistable.#why".len() as u64);
-        assert_eq!(c.code_chars, "[a]key=1".len() as u64);
+        assert_eq!(c.prose_chars, len("#Whythistable.#why"));
+        assert_eq!(c.code_chars, len("[a]key=1"));
         assert_eq!(c.ignored_chars, 0);
     }
 
@@ -774,7 +790,7 @@ mod tests {
     fn a_toml_schema_directive_is_uninteresting_not_prose() {
         let c = counts("#:schema https://e.com/s.json\nkey = 1\n", &TOML);
         assert_eq!(c.prose_chars, 0);
-        assert_eq!(c.ignored_chars, "#:schemahttps://e.com/s.json".len() as u64);
+        assert_eq!(c.ignored_chars, len("#:schemahttps://e.com/s.json"));
     }
 
     #[test]
@@ -817,19 +833,13 @@ mod tests {
     #[test]
     fn a_universal_directive_is_uninteresting_in_every_language() {
         let yaml = counts("# SPDX-License-Identifier: MIT\nkey: 1\n", &YAML);
-        assert_eq!(
-            yaml.ignored_chars,
-            "#SPDX-License-Identifier:MIT".len() as u64
-        );
+        assert_eq!(yaml.ignored_chars, len("#SPDX-License-Identifier:MIT"));
 
         let shell = counts("# SPDX-License-Identifier: MIT\nx=1\n", &SHELL);
-        assert_eq!(
-            shell.ignored_chars,
-            "#SPDX-License-Identifier:MIT".len() as u64
-        );
+        assert_eq!(shell.ignored_chars, len("#SPDX-License-Identifier:MIT"));
 
         let toml = counts("# vim: set ft=toml:\nkey = 1\n", &TOML);
-        assert_eq!(toml.ignored_chars, "#vim:setft=toml:".len() as u64);
+        assert_eq!(toml.ignored_chars, len("#vim:setft=toml:"));
     }
 
     #[test]
@@ -844,10 +854,10 @@ mod tests {
     #[test]
     fn a_fence_is_uninteresting_and_what_it_holds_is_code() {
         let c = counts("# H\n\n```php\n$x = 1;\n```\n", &MARKDOWN);
-        assert_eq!(c.prose_chars, "#H".len() as u64);
-        assert_eq!(c.code_chars, "$x=1;".len() as u64);
+        assert_eq!(c.prose_chars, len("#H"));
+        assert_eq!(c.code_chars, len("$x=1;"));
         // Both delimiters and the info string.
-        assert_eq!(c.ignored_chars, "``````php".len() as u64);
+        assert_eq!(c.ignored_chars, len("``````php"));
     }
 
     #[test]
@@ -864,16 +874,16 @@ mod tests {
     #[test]
     fn front_matter_is_uninteresting() {
         let c = counts("---\nkey: value\n---\n\n# H\n", &MARKDOWN);
-        assert_eq!(c.ignored_chars, "---key:value---".len() as u64);
-        assert_eq!(c.prose_chars, "#H".len() as u64);
+        assert_eq!(c.ignored_chars, len("---key:value---"));
+        assert_eq!(c.prose_chars, len("#H"));
     }
 
     #[test]
     fn table_cells_are_prose_and_the_structure_holding_them_is_code() {
         let c = counts("| a | b |\n| - | - |\n| c | d |\n", &MARKDOWN);
-        assert_eq!(c.prose_chars, "abcd".len() as u64);
+        assert_eq!(c.prose_chars, len("abcd"));
         // Six pipes framing the two content rows, and the delimiter row whole.
-        assert_eq!(c.code_chars, "||||||".len() as u64 + "|-|-|".len() as u64);
+        assert_eq!(c.code_chars, len("||||||") + len("|-|-|"));
     }
 
     #[test]
@@ -887,8 +897,8 @@ mod tests {
     fn raw_markup_is_code_but_a_directive_is_uninteresting() {
         let c = counts("<!-- rumdl-disable MD033 -->\n\n<div>x</div>\n", &MARKDOWN);
         assert_eq!(c.prose_chars, 0);
-        assert_eq!(c.code_chars, "<div>x</div>".len() as u64);
-        assert_eq!(c.ignored_chars, "<!--rumdl-disableMD033-->".len() as u64);
+        assert_eq!(c.code_chars, len("<div>x</div>"));
+        assert_eq!(c.ignored_chars, len("<!--rumdl-disableMD033-->"));
     }
 
     fn labels(src: &str) -> Vec<String> {

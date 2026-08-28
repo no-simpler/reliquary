@@ -31,6 +31,11 @@ pub struct Selection {
 impl Selection {
     /// `None` when nothing narrowed the ranking, so the caller can leave the
     /// whole thing alone rather than build a predicate that admits everything.
+    ///
+    /// # Errors
+    ///
+    /// When a `--focus` glob will not compile, or when `--changed` was asked for
+    /// outside a git repository.
     pub fn build(
         focus: &[String],
         changed: Option<&str>,
@@ -119,7 +124,9 @@ fn normalize(path: &Path) -> Option<PathBuf> {
             Component::ParentDir => {
                 out.pop();
             }
-            other => out.push(other),
+            other @ (Component::Prefix(_) | Component::RootDir | Component::Normal(_)) => {
+                out.push(other);
+            }
         }
     }
     Some(out)
@@ -130,7 +137,7 @@ fn normalize(path: &Path) -> Option<PathBuf> {
 mod git {
     use relic_core::tool::Tool;
 
-    use super::*;
+    use super::{Context, HashSet, OnceLock, Path, PathBuf, Result, Scope, bail, normalize};
 
     /// Paths differing from `reference`, plus the untracked files beside them.
     ///

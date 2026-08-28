@@ -90,20 +90,20 @@ unused = { level = "deny", priority = -1 }
 [workspace.lints.clippy]
 all = { level = "deny", priority = -2 }
 
-# The typed-domain worklist. `warn` now, `deny` at W3 exit once the retro-fit
-# onto the platform layer has rewritten most of what fires. Landing a dozen
-# lints hot buys a wall of failures and a matching wall of #[allow].
-pedantic = { level = "warn", priority = -1 }
+# The typed-domain standard, at `deny` since the W3 retro-fit cleared every site
+# it fires on. It was landed at `warn` and flipped once, which is the only way a
+# dozen lints arrive without a matching wall of suppressions.
+pedantic = { level = "deny", priority = -1 }
 
 # Opaque representations stop at the I/O boundary.
-as_conversions = "warn"
-indexing_slicing = "warn"
-string_slice = "warn"
-str_to_string = "warn"
+as_conversions = "deny"
+indexing_slicing = "deny"
+string_slice = "deny"
+str_to_string = "deny"
 
 # A `_ =>` on our own enum is how a new variant gets silently mishandled.
-wildcard_enum_match_arm = "warn"
-match_wildcard_for_single_variants = "warn"
+wildcard_enum_match_arm = "deny"
+match_wildcard_for_single_variants = "deny"
 
 # Two pedantic lints turned off in the one place that is a record rather than a
 # scattering. A suppression per site would say the same thing twenty times, and
@@ -118,8 +118,8 @@ unnecessary_wraps = "allow"
 must_use_candidate = "allow"
 
 # Errors are values. Test carve-outs live in clippy.toml, never in a #![allow].
-unwrap_used = "warn"
-expect_used = "warn"
-panic = "warn"
-missing_errors_doc = "warn"
-missing_panics_doc = "warn"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+missing_errors_doc = "deny"
+missing_panics_doc = "deny"

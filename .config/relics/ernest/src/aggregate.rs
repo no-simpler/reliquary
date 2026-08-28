@@ -10,6 +10,7 @@ use crate::analyze::profiles::Cohort;
 use crate::analyze::{Health, analyze};
 use crate::rank::Selection;
 use crate::report::Diagnostics;
+use crate::span::tally;
 use crate::span::{Counts, Unit};
 use crate::walk::{Provenance, Survey};
 
@@ -95,7 +96,7 @@ pub struct Report {
 
 /// A snapshot written before `scope` existed was taken at the default.
 fn default_scope() -> String {
-    "local".to_string()
+    "local".to_owned()
 }
 
 /// One file the run could not measure, and what stopped it. Three failures used
@@ -133,7 +134,7 @@ impl RankingScope {
     pub fn label(&self) -> String {
         match &self.asked {
             Some(asked) => asked.clone(),
-            None => "the whole measurement".to_string(),
+            None => "the whole measurement".to_owned(),
         }
     }
 }
@@ -195,7 +196,7 @@ impl Report {
     pub fn empty(unit: Unit) -> Self {
         Report {
             schema_version: SCHEMA_VERSION,
-            tool: "ernest".to_string(),
+            tool: "ernest".to_owned(),
             unit,
             scope: default_scope(),
             lang: None,
@@ -232,6 +233,10 @@ impl Report {
 /// the change just made to it — so showing one unasked spends a reader's
 /// attention on rows that read the same before and after the work.
 #[derive(Debug, Clone, Copy, Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "one field per view the report can carry; a bitflag would read worse"
+)]
 pub struct Views {
     pub by_cohort: bool,
     pub by_language: bool,
@@ -267,6 +272,10 @@ struct Outcome {
 /// `files_scanned` stay repository-wide — which is what keeps the headline
 /// relocation-invariant, and the whole reason the ranking scope is a predicate
 /// here rather than a second walk.
+#[expect(
+    clippy::too_many_lines,
+    reason = "three folding stages that read in order"
+)]
 pub fn run(
     survey: &Survey,
     unit: Unit,
@@ -279,7 +288,7 @@ pub fn run(
         .map(|candidate| {
             let fail = |reason: &str| Failure {
                 path: candidate.path.display().to_string(),
-                reason: reason.to_string(),
+                reason: reason.to_owned(),
             };
             let bytes = fs_err::read(&candidate.path).map_err(|_| fail("unreadable"))?;
             // Byte offsets from tree-sitter are only char boundaries in valid
@@ -319,7 +328,7 @@ pub fn run(
     let mut grammar: BTreeMap<String, GrammarHealth> = BTreeMap::new();
     let mut unread: Vec<String> = Vec::new();
     for outcome in &outcomes {
-        let entry = grammar.entry(outcome.language.to_string()).or_default();
+        let entry = grammar.entry(outcome.language.to_owned()).or_default();
         entry.measured += 1;
         if outcome.health.clean() {
             continue;
@@ -354,7 +363,7 @@ pub fn run(
                     totals.add(&counts);
                     files += count;
                     LanguageReport {
-                        language: language.to_string(),
+                        language: language.to_owned(),
                         provenance,
                         density: counts.density(unit),
                         files: count,
@@ -363,7 +372,7 @@ pub fn run(
                 })
                 .collect();
             CohortReport {
-                cohort: cohort.to_string(),
+                cohort: cohort.to_owned(),
                 density: totals.density(unit),
                 files,
                 counts: totals,
@@ -394,8 +403,8 @@ pub fn run(
             .filter(ranked)
             .map(|o| FileReport {
                 path: o.path.display().to_string(),
-                language: o.language.to_string(),
-                cohort: o.cohort.to_string(),
+                language: o.language.to_owned(),
+                cohort: o.cohort.to_owned(),
                 provenance: o.provenance,
                 density: o.counts.density(unit),
                 counts: o.counts,
@@ -420,7 +429,7 @@ pub fn run(
                 o.sections.iter().map(|(section, counts)| SectionReport {
                     path: o.path.display().to_string(),
                     section: section.clone(),
-                    cohort: o.cohort.to_string(),
+                    cohort: o.cohort.to_owned(),
                     density: counts.density(unit),
                     counts: *counts,
                 })
@@ -437,16 +446,16 @@ pub fn run(
     });
 
     let report = Report {
-        scope: survey.scope.label().to_string(),
+        scope: survey.scope.label().to_owned(),
         lang: survey.lang.clone(),
         roots: survey
             .roots
             .iter()
             .map(|p| p.display().to_string())
             .collect(),
-        files_scanned: outcomes.len() as u64,
+        files_scanned: tally(outcomes.len()),
         files_skipped: survey.unsupported.values().sum(),
-        files_failed: failed.len() as u64,
+        files_failed: tally(failed.len()),
         unsupported: survey.unsupported.clone(),
         failed,
         ernestignore: survey
@@ -454,12 +463,12 @@ pub fn run(
             .iter()
             .map(|p| p.display().to_string())
             .collect(),
-        ernestignore_excluded: survey.excluded.len() as u64,
+        ernestignore_excluded: tally(survey.excluded.len()),
         grammar,
         ranking: RankingScope {
             asked: selection.map(|selection| selection.asked.clone()),
-            ranked: outcomes.iter().filter(ranked).count() as u64,
-            measured: outcomes.len() as u64,
+            ranked: tally(outcomes.iter().filter(ranked).count()),
+            measured: tally(outcomes.len()),
         },
         total,
         cohorts,
