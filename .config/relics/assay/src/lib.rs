@@ -11,6 +11,7 @@
 
 pub mod probe;
 pub mod render;
+pub mod repo;
 pub mod roster;
 pub mod run;
 pub mod station;

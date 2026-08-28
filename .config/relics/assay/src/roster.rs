@@ -18,6 +18,7 @@ pub fn roster() -> Vec<Box<dyn Station>> {
         Box::new(crate::stations::brew_health::BrewHealth::default()),
         Box::new(crate::stations::md_blocks::MdBlocks::default()),
         Box::new(crate::stations::shell_parity::ShellParity::default()),
+        Box::new(crate::stations::shell_lint::ShellLint::default()),
         Box::new(crate::stations::shell_startup::ShellStartup::default()),
         Box::new(crate::stations::relic_cache::RelicCache::default()),
         Box::new(crate::stations::yadm_coverage::YadmCoverage::default()),

@@ -245,7 +245,7 @@ remaining work is a list rather than a rediscovery:
 | bedrock dependencies | `bedrock` |
 | Homebrew package health | `brew-health` |
 | tracking coverage | `yadm-coverage` |
-| shell lint and format | **still to take** — a station over `check-shell-lint` |
+| shell lint and format | **`shell-lint`** |
 | relic build cache | **`relic-cache`** |
 | encrypted archive drift · archive vs disk verification | **stays in the wrapper.** Genuinely dotfile-specific, and the second is the one Touch-ID check |
 | ske wiring | the registry adapter, once `ske` speaks the protocol — which is migration ④. Until then the wrapper keeps one call, because losing it would lose the check that a broken `gpg.ssh.program` shim breaks every commit |
@@ -282,3 +282,30 @@ fixes the unit so the answer does not depend on a `BLOCKSIZE` the environment
 happens to carry. It also counts **blocks**, which is what the disk is actually
 holding — a walk summing apparent sizes would answer a different question and
 report a different number from the one `up` acts on.
+
+## Deviations from `bin/check-shell-lint`
+
+Three gates over the shell that stays shell: lint, format, and the count of
+inline suppressions. The third exists because the first two cannot see it — a
+`# shellcheck disable=` makes a finding vanish from both — so the count is
+committed per file and compared as an **equality**. Removing one means lowering
+the number in the same commit; an inequality would let slack accumulate, and
+slack is suppressions that can be added back unseen.
+
+Parity was measured before the script retires. Over the live tree both select
+**the same 63 files** and issue **the same flags** to both tools — verified by
+running the station with recording shims in front of `shellcheck` and `shfmt`
+and diffing against the script's own `enumerate` — and both grade `ok`.
+
+| deviation | why | pinned by |
+| --- | --- | --- |
+| `shellcheck -f json1`, not `-f gcc` | file, line, column, level and code arrive as fields. The script counted lines of `path:line:col: level: message`, which a message containing the separator would have split wrongly — and `json1` also carries the `fix` object a line reader never sees | `the_json1_shape_is_the_one_shellcheck_emits` |
+| An unparseable file is a `Broken` finding | the script sent `shfmt`'s stderr to `/dev/null`, so a file neither tool could read passed the format gate in silence — and passed the lint gate too whenever `shellcheck` was absent | `a_file_the_formatter_cannot_parse_is_reported_rather_than_silenced` |
+| One finding per file, with its position and the lints in the detail | the script emitted one lumped line per gate plus indented text. A finding that carries a `Location` is one an editor can open | `a_lint_is_broken_and_carries_its_code_and_position` |
+| Ratchet drift is one finding per file, naming both numbers | the script diffed two sorted `path<TAB>count` lists and printed `baseline only:` / `tree only:` lines, so a *changed* count appeared twice and never said what changed | `a_changed_count_reports_both_numbers` |
+| The baseline is parsed as TOML | the script parsed it with an `awk` that split on `=`, stripped quotes from the key and non-digits from the value — so a malformed line was silently dropped rather than refused. An unusable baseline now stops the station | `an_unusable_baseline_stops_the_station_rather_than_grading_a_clean_machine` |
+| A repository that cannot be reached is `Broken` | the script's `yadm ls-files 2>/dev/null` returned nothing on a broken machine, printed "no shell files in scope" and exited `0` — a clean bill for a machine it could not read. Same stance as `yadm-coverage` | `no_yadm_on_the_path_is_broken_and_never_a_silent_pass` |
+| Scope is decided per file by name and shebang, in `Rel` terms | same rules as the script's `in_scope`, but without a `head` and a `grep` per file. `zsh` and `fish` spell `sh` without naming it, which is what the word boundary is for | `a_shebang_naming_bash_or_sh_is_ours_and_one_naming_anything_else_is_not` |
+| `shfmt` output is intersected with the population | `shfmt` has no `-0`, so a path holding a newline would arrive as two lines naming nothing. A line that is not a file the station handed over is said out loud rather than guessed at | `a_formatter_naming_something_it_was_not_given_says_so` |
+| No subset mode | the script took paths and then had to disable the ratchet for them, because a subset cannot tell a file with no directives from a file it was not asked about. A station always runs over the whole population, so the special case disappears | — |
+| The tools are shimmed in tests, and their contract is pinned against captured output | a test that shells out to the machine's `shellcheck` answers for that machine's version. The station's logic and the tool's format are two facts, pinned separately | `the_json1_shape_is_the_one_shellcheck_emits` |
