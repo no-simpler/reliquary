@@ -20,7 +20,8 @@ if [ -d "$HOME/.config/bin" ]; then
     _cb="$HOME/.config/bin"
     _p=":$PATH:"
     _p="${_p//:$_cb:/:}"
-    _p="${_p#:}"; _p="${_p%:}"
+    _p="${_p#:}"
+    _p="${_p%:}"
     export PATH="$_cb:$_p"
     unset _cb _p
 fi

@@ -22,5 +22,5 @@ else
             print_bold -ad "Installing $pkg..."
             npm install -g "$pkg"
         fi
-    done < "$GLOBALS_FILE"
+    done <"$GLOBALS_FILE"
 fi

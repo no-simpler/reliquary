@@ -19,11 +19,16 @@
 set -o pipefail
 
 # --- Colors ----------------------------------------------------------------
-BOLD="\033[1m"; DIM="\033[2m"; RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; RESET="\033[0m"
+BOLD="\033[1m"
+DIM="\033[2m"
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+RESET="\033[0m"
 
-print_msg()  { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}${GREEN}$1${RESET}"; }
+print_msg() { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}${GREEN}$1${RESET}"; }
 print_warn() { printf '%b\n' "${BOLD}${YELLOW}==>${RESET} ${YELLOW}$1${RESET}"; }
-print_err()  { printf '%b\n' "${BOLD}${RED}!!>${RESET} ${RED}$1${RESET}"; }
+print_err() { printf '%b\n' "${BOLD}${RED}!!>${RESET} ${RED}$1${RESET}"; }
 
 # --- Network resilience (VPN-friendly) -------------------------------------
 # Abort git transfers that stall under ~1 KB/s for 30s rather than hang forever
@@ -50,13 +55,16 @@ export CARGO_NET_GIT_FETCH_WITH_CLI="${CARGO_NET_GIT_FETCH_WITH_CLI:-true}"
 # Hard wall-clock caps for network steps when a timeout binary is available
 # (`timeout` on Linux, `gtimeout` from `brew install coreutils`). Without one,
 # net_timeout runs the command directly and relies on the per-tool limits above.
-if   command -v timeout  &>/dev/null; then TIMEOUT_BIN="timeout"
-elif command -v gtimeout &>/dev/null; then TIMEOUT_BIN="gtimeout"
+if command -v timeout &>/dev/null; then
+    TIMEOUT_BIN="timeout"
+elif command -v gtimeout &>/dev/null; then
+    TIMEOUT_BIN="gtimeout"
 else TIMEOUT_BIN=""; fi
 
 # net_timeout <seconds> <cmd...>
 net_timeout() {
-    local secs="$1"; shift
+    local secs="$1"
+    shift
     if [ -n "$TIMEOUT_BIN" ]; then
         # --foreground keeps the child attached to the tty (sudo prompts, the
         # vim-plug UI) and lets Ctrl-C through.
@@ -94,15 +102,18 @@ STEP_RESULTS=()
 
 run_step() {
     # run_step <label> <function> [args...]
-    local label="$1"; shift
+    local label="$1"
+    shift
     print_msg "${label}..."
     local rc=0
     "$@" || rc=$?
     case "$rc" in
         0) STEP_RESULTS+=("OK|${label}") ;;
         3) STEP_RESULTS+=("SKIP|${label}") ;;
-        *) STEP_RESULTS+=("FAIL|${label} (exit ${rc})")
-           print_err "${label} failed (exit ${rc}); continuing with remaining steps." ;;
+        *)
+            STEP_RESULTS+=("FAIL|${label} (exit ${rc})")
+            print_err "${label} failed (exit ${rc}); continuing with remaining steps."
+            ;;
     esac
     return 0
 }
@@ -116,9 +127,12 @@ print_summary() {
         status="${entry%%|*}"
         text="${entry#*|}"
         case "$status" in
-            OK)   printf '%b\n' "    ${GREEN}\xe2\x9c\x94 ${text}${RESET}" ;;
+            OK) printf '%b\n' "    ${GREEN}\xe2\x9c\x94 ${text}${RESET}" ;;
             SKIP) printf '%b\n' "    ${DIM}\xe2\x80\x93 ${text} (skipped)${RESET}" ;;
-            *)    printf '%b\n' "    ${RED}\xe2\x9c\x97 ${text}${RESET}"; failures=$((failures + 1)) ;;
+            *)
+                printf '%b\n' "    ${RED}\xe2\x9c\x97 ${text}${RESET}"
+                failures=$((failures + 1))
+                ;;
         esac
     done
     return "$failures"
@@ -127,7 +141,7 @@ print_summary() {
 # --- Package managers ------------------------------------------------------
 update_brew() {
     local rc=0
-    net_timeout 1200 brew update        || rc=1
+    net_timeout 1200 brew update || rc=1
     # Formulae and casks upgrade in separate passes so --force stays scoped to
     # casks: a bare `brew upgrade` covers both, but --force means two different
     # things — for casks "overwrite an existing app" (what we want below), for
@@ -145,8 +159,8 @@ update_brew() {
     # deemed outdated; --greedy is deliberately NOT used, so apps that keep
     # themselves current are left to their own updaters.
     net_timeout 1800 brew upgrade --cask --force || rc=1
-    brew cleanup    || true
-    brew doctor     || true   # advisory only — never fail the step on this
+    brew cleanup || true
+    brew doctor || true # advisory only — never fail the step on this
     # Attributes what `brew update` only reports as anonymous noise ("Some
     # installed kegs have no formulae!"): names the package, the deadline and the
     # replacement, and extends the same check to the Brewfiles so a declaration
@@ -158,16 +172,16 @@ update_brew() {
 
 update_debian() {
     local rc=0
-    sudo apt update          || rc=1
-    sudo apt upgrade -y      || rc=1
+    sudo apt update || rc=1
+    sudo apt upgrade -y || rc=1
     sudo apt dist-upgrade -y || rc=1
-    sudo apt autoremove -y   || rc=1
+    sudo apt autoremove -y || rc=1
     return "$rc"
 }
 
 update_redhat() {
     local rc=0
-    sudo dnf upgrade -y    || rc=1
+    sudo dnf upgrade -y || rc=1
     sudo dnf autoremove -y || rc=1
     return "$rc"
 }
@@ -175,28 +189,34 @@ update_redhat() {
 update_arch() {
     local rc=0
     sudo pacman -Syu --noconfirm || rc=1
-    sudo pacman -Sc --noconfirm  || rc=1
+    sudo pacman -Sc --noconfirm || rc=1
     return "$rc"
 }
 
 update_suse() {
     local rc=0
-    sudo zypper refresh        || rc=1
-    sudo zypper update -y      || rc=1
-    sudo zypper dist-upgrade -y|| rc=1
-    sudo zypper clean --all    || rc=1
+    sudo zypper refresh || rc=1
+    sudo zypper update -y || rc=1
+    sudo zypper dist-upgrade -y || rc=1
+    sudo zypper clean --all || rc=1
     return "$rc"
 }
 
 # --- Global npm packages ---------------------------------------------------
 update_npm() {
-    command -v npm &>/dev/null || { echo "npm is not installed. Skipping."; return 3; }
+    command -v npm &>/dev/null || {
+        echo "npm is not installed. Skipping."
+        return 3
+    }
     net_timeout 600 npm update -g --fetch-retries=3
 }
 
 # --- Rust toolchains -------------------------------------------------------
 update_rust() {
-    command -v rustup &>/dev/null || { echo "rustup is not installed. Skipping."; return 3; }
+    command -v rustup &>/dev/null || {
+        echo "rustup is not installed. Skipping."
+        return 3
+    }
     net_timeout 600 rustup update
 }
 
@@ -216,18 +236,21 @@ run_cargo_update() {
     local inner='cargo install-update -a; echo $? > "'"$rcf"'"'
     if [ -t 1 ] && [ -t 0 ] && command -v script &>/dev/null; then
         case "$OSTYPE" in
-            darwin*|*bsd*) net_timeout 2400 script -q "$log" /bin/bash -c "$inner" ;;
-            *)             net_timeout 2400 script -q -e -c "$inner" "$log" ;;
+            darwin* | *bsd*) net_timeout 2400 script -q "$log" /bin/bash -c "$inner" ;;
+            *) net_timeout 2400 script -q -e -c "$inner" "$log" ;;
         esac
-        [ -s "$log" ] && return 0   # pty worked; rc already stashed by $inner
+        [ -s "$log" ] && return 0 # pty worked; rc already stashed by $inner
     fi
     net_timeout 2400 cargo install-update -a 2>&1 | tee "$log"
-    echo "${PIPESTATUS[0]}" > "$rcf"
+    echo "${PIPESTATUS[0]}" >"$rcf"
 }
 
 # --- Cargo-installed binaries ----------------------------------------------
 update_cargo_bins() {
-    command -v cargo-install-update &>/dev/null || { echo "cargo-update is not installed. Skipping."; return 3; }
+    command -v cargo-install-update &>/dev/null || {
+        echo "cargo-update is not installed. Skipping."
+        return 3
+    }
 
     local log rcf attempt=1 max=3 backoff=5 rc=0
     log="$(mktemp -t up-cargo 2>/dev/null || mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/up-cargo.$$")"
@@ -238,17 +261,19 @@ update_cargo_bins() {
         # the resolver cache first and spacing out a few retries rides out a
         # blip far better than cargo's own sub-second internal retries.
         prime_dns index.crates.io static.crates.io
-        printf '1\n' > "$rcf"   # default to failure if the run is interrupted
+        printf '1\n' >"$rcf" # default to failure if the run is interrupted
         # Single, *visible* pass (check + update) under a tty for full color.
         # The old code ran `-l` (list) then a silent `-q` update, so the slow
         # part produced no output and looked hung.
         run_cargo_update "$log" "$rcf"
-        rc="$(head -n1 "$rcf" 2>/dev/null)"; case "$rc" in ''|*[!0-9]*) rc=1 ;; esac
+        rc="$(head -n1 "$rcf" 2>/dev/null)"
+        case "$rc" in '' | *[!0-9]*) rc=1 ;; esac
         [ "$rc" -eq 0 ] && break
         [ "$attempt" -ge "$max" ] && break
         print_warn "cargo update attempt ${attempt}/${max} failed (exit ${rc}); retrying in ${backoff}s..."
         sleep "$backoff"
-        attempt=$((attempt + 1)); backoff=$((backoff * 2))
+        attempt=$((attempt + 1))
+        backoff=$((backoff * 2))
     done
 
     if [ "$rc" -ne 0 ] && net_looks_unreachable "$log"; then
@@ -265,7 +290,10 @@ update_cargo_bins() {
 update_zinit() {
     command -v zsh &>/dev/null || return 3
     local ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
-    [ -d "$ZINIT_HOME" ] || { echo "zinit is not installed. Skipping."; return 3; }
+    [ -d "$ZINIT_HOME" ] || {
+        echo "zinit is not installed. Skipping."
+        return 3
+    }
 
     # zinit 3.15.0+ pipes the self-update changelog through its own pager
     # (.zinit-pager -> less/more), which grabs the tty and hangs a hands-off
@@ -285,7 +313,10 @@ update_zinit() {
 # --- fisher (fish plugins) -------------------------------------------------
 update_fisher() {
     command -v fish &>/dev/null || return 3
-    [ -f "$HOME/.config/fish/functions/fisher.fish" ] || { echo "fisher is not installed. Skipping."; return 3; }
+    [ -f "$HOME/.config/fish/functions/fisher.fish" ] || {
+        echo "fisher is not installed. Skipping."
+        return 3
+    }
     # `fisher update` (no args) re-reads ~/.config/fish/fish_plugins and pulls
     # each pinned plugin over git, so it inherits the low-speed abort above.
     # Mirrors how bootstrap's 12-fish.sh applies the manifest on a fresh machine
@@ -296,14 +327,20 @@ update_fisher() {
 # --- vim-plug plugins ------------------------------------------------------
 update_vimplug() {
     command -v vim &>/dev/null || return 3
-    [ -f "$HOME/.config/vim/autoload/plug.vim" ] || { echo "vim-plug is not installed. Skipping."; return 3; }
+    [ -f "$HOME/.config/vim/autoload/plug.vim" ] || {
+        echo "vim-plug is not installed. Skipping."
+        return 3
+    }
     # PlugUpdate clones/pulls over git, so it inherits the low-speed abort above.
     net_timeout 900 vim +PlugUpdate +qall
 }
 
 # --- gcloud CLI components -------------------------------------------------
 update_gcloud() {
-    command -v gcloud &>/dev/null || { echo "gcloud is not installed. Skipping."; return 3; }
+    command -v gcloud &>/dev/null || {
+        echo "gcloud is not installed. Skipping."
+        return 3
+    }
     if ! net_timeout 30 gcloud info --format='value(config.account)' &>/dev/null; then
         echo "gcloud is not authenticated (or unreachable). Skipping."
         return 3
@@ -314,7 +351,10 @@ update_gcloud() {
 # --- tmux plugin manager ---------------------------------------------------
 update_tpm() {
     local tpm_path="$HOME/.config/tmux/plugins/tpm"
-    [ -d "$tpm_path" ] || { echo "TPM is not installed. Skipping."; return 3; }
+    [ -d "$tpm_path" ] || {
+        echo "TPM is not installed. Skipping."
+        return 3
+    }
     # --ff-only so a diverged local checkout can't hang on an interactive merge.
     net_timeout 300 git -C "$tpm_path" pull --ff-only || return $?
     # Then the plugins themselves. Pulling only their manager left every plugin
@@ -332,7 +372,10 @@ update_relics() {
         return 3
     fi
     case " $* " in
-        *" --no-relics "*) echo "Skipping relic update (--no-relics)."; return 3 ;;
+        *" --no-relics "*)
+            echo "Skipping relic update (--no-relics)."
+            return 3
+            ;;
     esac
 
     local lib="$HOME/.config/reliquary/lib/relic.sh"
@@ -346,7 +389,10 @@ update_relics() {
         [ -d "$lane" ] || continue
         for r in "$lane"/*/; do
             [ -f "${r}relic.sh" ] || continue
-            ( cd "$r" && relic::update "$r" ) || { print_err "  relic update failed: $r"; rc=1; }
+            (cd "$r" && relic::update "$r") || {
+                print_err "  relic update failed: $r"
+                rc=1
+            }
         done
     done
     return "$rc"
@@ -373,15 +419,15 @@ prune_cargo_cache() {
     local size_kb
     size_kb="$(du -sk "$target" 2>/dev/null | awk '{print $1}')"
     if [ -z "$size_kb" ] || [ "$size_kb" -lt "$RELIC_TARGET_CEILING_KB" ]; then
-        echo "Build cache is $(( ${size_kb:-0} / 1024 )) MiB, under the $(( RELIC_TARGET_CEILING_KB / 1024 )) MiB ceiling. Skipping."
+        echo "Build cache is $((${size_kb:-0} / 1024)) MiB, under the $((RELIC_TARGET_CEILING_KB / 1024)) MiB ceiling. Skipping."
         return 3
     fi
 
     local lane="$HOME/.config/relics"
     # Artifacts from toolchains no longer installed, then anything untouched for
     # a month. Neither is allowed to fail the run.
-    ( cd "$lane" && cargo sweep --installed ) || print_warn "  cargo sweep --installed failed; continuing."
-    ( cd "$lane" && cargo sweep --time 30 )   || print_warn "  cargo sweep --time failed; continuing."
+    (cd "$lane" && cargo sweep --installed) || print_warn "  cargo sweep --installed failed; continuing."
+    (cd "$lane" && cargo sweep --time 30) || print_warn "  cargo sweep --time failed; continuing."
     echo "Build cache now $(du -sh "$target" 2>/dev/null | awk '{print $1}')."
 }
 
@@ -396,9 +442,15 @@ update_decruft() {
         return 3
     fi
     case " $* " in
-        *" --no-decruft "*) echo "Skipping OS-cruft sweep (--no-decruft)."; return 3 ;;
+        *" --no-decruft "*)
+            echo "Skipping OS-cruft sweep (--no-decruft)."
+            return 3
+            ;;
     esac
-    command -v decruft &>/dev/null || { echo "decruft is not installed. Skipping."; return 3; }
+    command -v decruft &>/dev/null || {
+        echo "decruft is not installed. Skipping."
+        return 3
+    }
     decruft
 }
 
@@ -421,22 +473,22 @@ else
     STEP_RESULTS+=("SKIP|System packages (unsupported OS)")
 fi
 
-run_step "Global npm packages"            update_npm
-run_step "Rust toolchains"                update_rust
-run_step "Cargo binaries"                 update_cargo_bins
-run_step "zinit & plugins"                update_zinit
-run_step "fisher plugins"                 update_fisher
-run_step "vim-plug plugins"               update_vimplug
-run_step "gcloud components"              update_gcloud
-run_step "TPM"                            update_tpm
-run_step "In-house relics"                update_relics "$@"
-run_step "Cargo build cache"               prune_cargo_cache
-run_step "OS cruft sweep"                 update_decruft "$@"
+run_step "Global npm packages" update_npm
+run_step "Rust toolchains" update_rust
+run_step "Cargo binaries" update_cargo_bins
+run_step "zinit & plugins" update_zinit
+run_step "fisher plugins" update_fisher
+run_step "vim-plug plugins" update_vimplug
+run_step "gcloud components" update_gcloud
+run_step "TPM" update_tpm
+run_step "In-house relics" update_relics "$@"
+run_step "Cargo build cache" prune_cargo_cache
+run_step "OS cruft sweep" update_decruft "$@"
 
 # Record the attempt timestamp (marks "last ran up", regardless of per-step
 # results — the interactive nag in shell/interactive.d/080-check.sh reads this).
 mkdir -p ~/.local/state/up
-date +%s > ~/.local/state/up/last_upped_at
+date +%s >~/.local/state/up/last_upped_at
 
 print_summary
 summary_rc=$?

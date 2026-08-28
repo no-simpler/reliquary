@@ -23,8 +23,8 @@ export D__SHELL=bash
 ## Source the box-specific '.pre.*sh' files
 ##
 
-[ -f ~/.pre.bash -a -r ~/.pre.bash ] && source ~/.pre.bash
-[ -f ~/.pre.sh -a -r ~/.pre.sh ] && source ~/.pre.sh
+[ -f ~/.pre.bash ] && [ -r ~/.pre.bash ] && source ~/.pre.bash
+[ -f ~/.pre.sh ] && [ -r ~/.pre.sh ] && source ~/.pre.sh
 
 ##
 ## Source all *.bash and *.sh files in ~/.config/shell/interactive.d, sorted
@@ -42,8 +42,8 @@ shopt -s dotglob nullglob
 #. order of their names.
 #
 for script_path in ~/.config/shell/interactive.d/*; do case $script_path in
-  *.bash | *.sh) source "$script_path" ;;
-  esac done
+    *.bash | *.sh) source "$script_path" ;;
+esac done
 unset script_path
 
 # Restore state of 'dotglob' and 'nullglob' options
@@ -54,8 +54,8 @@ unset cmd restore_opts
 ## Source the box-specific '.post.*sh' files
 ##
 
-[ -f ~/.post.bash -a -r ~/.post.bash ] && source ~/.post.bash
-[ -f ~/.post.sh -a -r ~/.post.sh ] && source ~/.post.sh
+[ -f ~/.post.bash ] && [ -r ~/.post.bash ] && source ~/.post.bash
+[ -f ~/.post.sh ] && [ -r ~/.post.sh ] && source ~/.post.sh
 
 ##
 ## Re-enable keyboard input

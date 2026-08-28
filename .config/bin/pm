@@ -42,55 +42,55 @@ animation_step=0.06
 freeze_delay=0.5
 
 # Parse command-line options
-while (( "$#" )); do
+while (("$#")); do
     case "$1" in
-        -h|--help)
+        -h | --help)
             show_help
             exit 0
             ;;
-        -a|--animate)
+        -a | --animate)
             animate=true
             shift
             ;;
-        -d|--delay)
+        -d | --delay)
             delay=true
             shift
             ;;
-        -p|--plain)
+        -p | --plain)
             type="plain"
             shift
             ;;
-        -n|--notice)
+        -n | --notice)
             type="notice"
             shift
             ;;
-        -i|--info)
+        -i | --info)
             type="info"
             shift
             ;;
-        -s|--success)
+        -s | --success)
             type="success"
             shift
             ;;
-        -w|--warning)
+        -w | --warning)
             type="warning"
             shift
             ;;
-        -e|--error)
+        -e | --error)
             type="error"
             shift
             ;;
-        -f|--festive)
+        -f | --festive)
             type="festive"
             shift
             ;;
-        -b|--bold)
+        -b | --bold)
             bold=true
             shift
             ;;
         -*)
             # Process combined single-dash options
-            for (( i=1; i<${#1}; i++ )); do
+            for ((i = 1; i < ${#1}; i++)); do
                 opt="${1:i:1}"
                 case "$opt" in
                     a)
@@ -180,12 +180,12 @@ print_message() {
     fi
 
     if $animate; then
-        for ((j=11; j>=0; j--)); do
+        for ((j = 11; j >= 0; j--)); do
             printf "\r${color_code}%s%s%s %s${RESET}" "${symbols1[j]}" "${symbols2[j]}" "${symbols3[j]}" "$message"
             sleep "$animation_step"
         done
 
-        for ((j=0; j<12; j++)); do
+        for ((j = 0; j < 12; j++)); do
             printf "\r${color_code}%s%s%s %s${RESET}" "${symbols1[j]}" "${symbols2[j]}" "${symbols3[j]}" "$message"
             sleep "$animation_step"
         done

@@ -3,7 +3,7 @@
 # Configure GPG agent to allow loopback pinentry (needed for yadm's 1Password-based decryption)
 mkdir -p ~/.gnupg
 if ! grep -q 'allow-loopback-pinentry' ~/.gnupg/gpg-agent.conf 2>/dev/null; then
-    echo 'allow-loopback-pinentry' >> ~/.gnupg/gpg-agent.conf
+    echo 'allow-loopback-pinentry' >>~/.gnupg/gpg-agent.conf
     print_info "Added allow-loopback-pinentry to gpg-agent.conf"
 fi
 

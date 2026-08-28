@@ -32,18 +32,18 @@ source_snippets util
 
 # Check the operating system and call the respective function
 case "$OS" in
-Darwin)
-    print_bold -ad "Configuring macOS"
-    source_snippets macos
-    ;;
-Linux)
-    print_bold -ad "Configuring Linux"
-    source_snippets linux
-    ;;
-*)
-    print_error -ad "Unsupported operating system: $OS"
-    exit 1
-    ;;
+    Darwin)
+        print_bold -ad "Configuring macOS"
+        source_snippets macos
+        ;;
+    Linux)
+        print_bold -ad "Configuring Linux"
+        source_snippets linux
+        ;;
+    *)
+        print_error -ad "Unsupported operating system: $OS"
+        exit 1
+        ;;
 esac
 
 print_bold -ad "Applying shared configuration"

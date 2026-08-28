@@ -23,31 +23,31 @@ check() {
 }
 
 # ── command prefix resolution ───────────────────────────────────────────────
-check "exact list"        "$(resolve_cmd list)"     "list"
-check "prefix st→status"  "$(resolve_cmd st)"       "status"
-check "prefix pub→publish" "$(resolve_cmd pub)"     "publish"
-check "single l→list"     "$(resolve_cmd l)"        "list"
-check "single r→registry" "$(resolve_cmd r)"        "registry"
-check "single m→migrate"  "$(resolve_cmd m)"        "migrate"
-check "single u→update"   "$(resolve_cmd u)"        "update"
-check "single h→help"     "$(resolve_cmd h)"        "help"
+check "exact list" "$(resolve_cmd list)" "list"
+check "prefix st→status" "$(resolve_cmd st)" "status"
+check "prefix pub→publish" "$(resolve_cmd pub)" "publish"
+check "single l→list" "$(resolve_cmd l)" "list"
+check "single r→registry" "$(resolve_cmd r)" "registry"
+check "single m→migrate" "$(resolve_cmd m)" "migrate"
+check "single u→update" "$(resolve_cmd u)" "update"
+check "single h→help" "$(resolve_cmd h)" "help"
 if resolve_cmd zz >/dev/null 2>&1; then check "unknown rejected" "ok" "rejected"; else check "unknown rejected" "rejected" "rejected"; fi
 
 # ── registry parsing ────────────────────────────────────────────────────────
 tmp="$(mktemp -d)"
 REGISTRY="$tmp/.reliquary-managed"
-printf '# comment\n\nbiogen\tbb\ntess\thalo\nownerless\n' > "$REGISTRY"
-if reg_has biogen;  then check "reg_has biogen" yes yes;  else check "reg_has biogen" no yes; fi
-if reg_has nope;    then check "reg_has nope"  yes no;    else check "reg_has nope"  no no; fi
-check "reg_owner biogen"    "$(reg_owner biogen)"    "bb"
+printf '# comment\n\nbiogen\tbb\ntess\thalo\nownerless\n' >"$REGISTRY"
+if reg_has biogen; then check "reg_has biogen" yes yes; else check "reg_has biogen" no yes; fi
+if reg_has nope; then check "reg_has nope" yes no; else check "reg_has nope" no no; fi
+check "reg_owner biogen" "$(reg_owner biogen)" "bb"
 check "reg_owner ownerless" "$(reg_owner ownerless)" ""
-check "reg_owner missing"   "$(reg_owner missing)"   ""
+check "reg_owner missing" "$(reg_owner missing)" ""
 check "external_pubstate by owner" "$(external_pubstate halo)" "published"
-check "external_pubstate unknown"  "$(external_pubstate nobody)" "unknown"
+check "external_pubstate unknown" "$(external_pubstate nobody)" "unknown"
 
 # ── GRADUATION.md external parsing ──────────────────────────────────────────
 GRADUATION="$tmp/GRADUATION.md"
-cat > "$GRADUATION" <<'MD'
+cat >"$GRADUATION" <<'MD'
 ## Stages
 intro text
 ### Known external relics
@@ -61,7 +61,7 @@ Append to this list when you promote a relic to Stage 3.
 - `not-a-relic` — `~/elsewhere/` — should not be parsed
 MD
 ext="$(external_relics)"
-check "external bb path"   "$(printf '%s\n' "$ext" | awk -F'\t' '$1=="bb"{print $2}')"   "$HOME/Developer/bb"
+check "external bb path" "$(printf '%s\n' "$ext" | awk -F'\t' '$1=="bb"{print $2}')" "$HOME/Developer/bb"
 check "external halo path" "$(printf '%s\n' "$ext" | awk -F'\t' '$1=="halo"{print $2}')" "$HOME/Developer/halo"
 check "external stops at next header" "$(printf '%s\n' "$ext" | grep -c 'not-a-relic')" "0"
 check "external count" "$(printf '%s\n' "$ext" | grep -c .)" "2"
@@ -70,15 +70,15 @@ check "external count" "$(printf '%s\n' "$ext" | grep -c .)" "2"
 RELICS_LANE="$tmp/relics"
 ATTIC_LANE="$tmp/attic"
 mkdir -p "$RELICS_LANE/pub" "$ATTIC_LANE/secret"
-printf 'NAME="pub"\nRUNTIME="bash"\n'    > "$RELICS_LANE/pub/relic.sh"
-printf 'NAME="secret"\nRUNTIME="bash"\n' > "$ATTIC_LANE/secret/relic.sh"
-chmod 000 "$ATTIC_LANE/secret/relic.sh"   # simulate undecrypted/unreadable
+printf 'NAME="pub"\nRUNTIME="bash"\n' >"$RELICS_LANE/pub/relic.sh"
+printf 'NAME="secret"\nRUNTIME="bash"\n' >"$ATTIC_LANE/secret/relic.sh"
+chmod 000 "$ATTIC_LANE/secret/relic.sh" # simulate undecrypted/unreadable
 listing="$(inhouse_relics)"
-check "public relic surfaced"     "$(printf '%s\n' "$listing" | awk -F'\t' '$1=="pub"{print "y"}')"    "y"
-check "unreadable attic hidden"   "$(printf '%s\n' "$listing" | awk -F'\t' '$1=="secret"{print "y"}')" ""
+check "public relic surfaced" "$(printf '%s\n' "$listing" | awk -F'\t' '$1=="pub"{print "y"}')" "y"
+check "unreadable attic hidden" "$(printf '%s\n' "$listing" | awk -F'\t' '$1=="secret"{print "y"}')" ""
 chmod 644 "$ATTIC_LANE/secret/relic.sh"
 listing="$(inhouse_relics)"
-check "readable attic surfaced"   "$(printf '%s\n' "$listing" | awk -F'\t' '$1=="secret"{print "y"}')" "y"
+check "readable attic surfaced" "$(printf '%s\n' "$listing" | awk -F'\t' '$1=="secret"{print "y"}')" "y"
 
 # ── state labels ────────────────────────────────────────────────────────────
 check "state_plain published" "$(state_plain published)" "yes"
@@ -88,26 +88,29 @@ check "state_plain unpublished" "$(state_plain unpublished)" "no"
 LOCAL_BIN="$tmp/bin"
 REGISTRY="$tmp/bin/.reliquary-managed"
 RELICS_LANE="$tmp/drelics"
-ATTIC_LANE="$tmp/dattic"          # absent dir → inhouse_relics skips it
+ATTIC_LANE="$tmp/dattic" # absent dir → inhouse_relics skips it
 mkdir -p "$LOCAL_BIN" "$RELICS_LANE/tool"
-printf '# header\n\nalive\towner1\ndead\towner2\ntool\trelicowner\n' > "$REGISTRY"
-: > "$LOCAL_BIN/alive";   chmod +x "$LOCAL_BIN/alive"
-: > "$LOCAL_BIN/tool";    chmod +x "$LOCAL_BIN/tool"
-: > "$LOCAL_BIN/foreign"; chmod +x "$LOCAL_BIN/foreign"   # on PATH lane, unregistered
+printf '# header\n\nalive\towner1\ndead\towner2\ntool\trelicowner\n' >"$REGISTRY"
+: >"$LOCAL_BIN/alive"
+chmod +x "$LOCAL_BIN/alive"
+: >"$LOCAL_BIN/tool"
+chmod +x "$LOCAL_BIN/tool"
+: >"$LOCAL_BIN/foreign"
+chmod +x "$LOCAL_BIN/foreign" # on PATH lane, unregistered
 # relic 'tool' declares two entrypoints; only 'tool' is registered, 'extra' is not
-printf 'NAME="tool"\nRUNTIME="bash"\n' > "$RELICS_LANE/tool/relic.sh"
+printf 'NAME="tool"\nRUNTIME="bash"\n' >"$RELICS_LANE/tool/relic.sh"
 mkdir -p "$RELICS_LANE/tool/entrypoints"
-: > "$RELICS_LANE/tool/entrypoints/tool"
-: > "$RELICS_LANE/tool/entrypoints/extra"
+: >"$RELICS_LANE/tool/entrypoints/tool"
+: >"$RELICS_LANE/tool/entrypoints/extra"
 
-check "doctor_orphans flags dead"   "$(doctor_orphans | awk -F'\t' '$1=="dead"{print $2}')"  "owner2"
-check "doctor_orphans skips alive"  "$(doctor_orphans | awk -F'\t' '$1=="alive"{print "y"}')" ""
-check "doctor_orphans count"        "$(doctor_orphans | grep -c .)"                            "1"
+check "doctor_orphans flags dead" "$(doctor_orphans | awk -F'\t' '$1=="dead"{print $2}')" "owner2"
+check "doctor_orphans skips alive" "$(doctor_orphans | awk -F'\t' '$1=="alive"{print "y"}')" ""
+check "doctor_orphans count" "$(doctor_orphans | grep -c .)" "1"
 check "doctor_unpublished flags extra" "$(doctor_unpublished | awk -F'\t' '$2=="extra"{print $1}')" "tool"
-check "doctor_unpublished skips tool"  "$(doctor_unpublished | awk -F'\t' '$2=="tool"{print "y"}')"  ""
-check "doctor_unmanaged flags foreign" "$(doctor_unmanaged | grep -x foreign)"                 "foreign"
-check "doctor_unmanaged skips registry dotfile" "$(doctor_unmanaged | grep -c '^\.')"          "0"
-check "doctor_unmanaged skips registered" "$(doctor_unmanaged | grep -xc alive)"               "0"
+check "doctor_unpublished skips tool" "$(doctor_unpublished | awk -F'\t' '$2=="tool"{print "y"}')" ""
+check "doctor_unmanaged flags foreign" "$(doctor_unmanaged | grep -x foreign)" "foreign"
+check "doctor_unmanaged skips registry dotfile" "$(doctor_unmanaged | grep -c '^\.')" "0"
+check "doctor_unmanaged skips registered" "$(doctor_unmanaged | grep -xc alive)" "0"
 
 # ── prune: install_on_path_prune_registry drops dead, keeps live + owner ────
 prune_out="$(
@@ -117,65 +120,84 @@ prune_out="$(
     install_on_path_prune_registry >/dev/null
     cat "$REGISTRY"
 )"
-check "prune keeps alive+owner"  "$(printf '%s\n' "$prune_out" | awk '$1=="alive"{print $2}')" "owner1"
-check "prune keeps tool"         "$(printf '%s\n' "$prune_out" | awk '$1=="tool"{print "y"}')"  "y"
-check "prune drops dead"         "$(printf '%s\n' "$prune_out" | awk '$1=="dead"{print "y"}')"  ""
-check "prune preserves comment"  "$(printf '%s\n' "$prune_out" | grep -c '^# header')"          "1"
+check "prune keeps alive+owner" "$(printf '%s\n' "$prune_out" | awk '$1=="alive"{print $2}')" "owner1"
+check "prune keeps tool" "$(printf '%s\n' "$prune_out" | awk '$1=="tool"{print "y"}')" "y"
+check "prune drops dead" "$(printf '%s\n' "$prune_out" | awk '$1=="dead"{print "y"}')" ""
+check "prune preserves comment" "$(printf '%s\n' "$prune_out" | grep -c '^# header')" "1"
 
 # ── scaffold: name/runtime validation, shebang inference, manifest patch, tree ─
 if valid_relic_name foo-bar_1; then check "valid name foo-bar_1" ok ok; else check "valid name foo-bar_1" no ok; fi
-if valid_relic_name ".hidden";  then check "reject leading dot"  no rej; else check "reject leading dot"  rej rej; fi
-if valid_relic_name "-dash";    then check "reject leading dash" no rej; else check "reject leading dash" rej rej; fi
-if valid_relic_name "a/b";      then check "reject slash"        no rej; else check "reject slash"        rej rej; fi
-if valid_relic_name "";         then check "reject empty"        no rej; else check "reject empty"        rej rej; fi
-if valid_runtime bash;          then check "valid runtime bash"  ok ok; else check "valid runtime bash"  no ok; fi
-if valid_runtime perl;          then check "reject runtime perl" no rej; else check "reject runtime perl" rej rej; fi
+if valid_relic_name ".hidden"; then check "reject leading dot" no rej; else check "reject leading dot" rej rej; fi
+if valid_relic_name "-dash"; then check "reject leading dash" no rej; else check "reject leading dash" rej rej; fi
+if valid_relic_name "a/b"; then check "reject slash" no rej; else check "reject slash" rej rej; fi
+if valid_relic_name ""; then check "reject empty" no rej; else check "reject empty" rej rej; fi
+if valid_runtime bash; then check "valid runtime bash" ok ok; else check "valid runtime bash" no ok; fi
+if valid_runtime perl; then check "reject runtime perl" no rej; else check "reject runtime perl" rej rej; fi
 
 sdir="$(mktemp -d)"
-printf '#!/usr/bin/env bash\necho hi\n'   > "$sdir/b";  check "infer bash"   "$(infer_runtime "$sdir/b")"  "bash"
-printf '#!/bin/sh\necho hi\n'             > "$sdir/s";  check "infer sh→bash" "$(infer_runtime "$sdir/s")"  "bash"
-printf '#!/usr/bin/env python3\nprint(1)\n' > "$sdir/p"; check "infer python" "$(infer_runtime "$sdir/p")"  "python"
-printf '#!/usr/bin/env fish\necho hi\n'   > "$sdir/f";  check "infer fish"   "$(infer_runtime "$sdir/f")"  "fish"
-printf 'no shebang here\n'                > "$sdir/n";  check "infer none"   "$(infer_runtime "$sdir/n")"  ""
+printf '#!/usr/bin/env bash\necho hi\n' >"$sdir/b"
+check "infer bash" "$(infer_runtime "$sdir/b")" "bash"
+printf '#!/bin/sh\necho hi\n' >"$sdir/s"
+check "infer sh→bash" "$(infer_runtime "$sdir/s")" "bash"
+printf '#!/usr/bin/env python3\nprint(1)\n' >"$sdir/p"
+check "infer python" "$(infer_runtime "$sdir/p")" "python"
+printf '#!/usr/bin/env fish\necho hi\n' >"$sdir/f"
+check "infer fish" "$(infer_runtime "$sdir/f")" "fish"
+printf 'no shebang here\n' >"$sdir/n"
+check "infer none" "$(infer_runtime "$sdir/n")" ""
 
 mf="$sdir/relic.sh"
-printf 'NAME=""                # x\nRUNTIME=""             # y\nDOCKER=0\n' > "$mf"
+printf 'NAME=""                # x\nRUNTIME=""             # y\nDOCKER=0\n' >"$mf"
 manifest_set "$mf" NAME widget
 manifest_set "$mf" RUNTIME bash
-( source "$mf"; printf '%s\n' "$NAME" )    > "$sdir/_name"; check "manifest NAME"    "$(cat "$sdir/_name")"    "widget"
-( source "$mf"; printf '%s\n' "$RUNTIME" ) > "$sdir/_rt";   check "manifest RUNTIME" "$(cat "$sdir/_rt")"      "bash"
+(
+    source "$mf"
+    printf '%s\n' "$NAME"
+) >"$sdir/_name"
+check "manifest NAME" "$(cat "$sdir/_name")" "widget"
+(
+    source "$mf"
+    printf '%s\n' "$RUNTIME"
+) >"$sdir/_rt"
+check "manifest RUNTIME" "$(cat "$sdir/_rt")" "bash"
 check "manifest keeps comment" "$(grep -c '# x' "$mf")" "1"
 
 # scaffold_tree against a scratch template
 TEMPLATE_DIR="$sdir/template"
 mkdir -p "$TEMPLATE_DIR/src" "$TEMPLATE_DIR/entrypoints" "$TEMPLATE_DIR/tests"
-printf 'NAME=""\nRUNTIME=""\nRUNTIME_EXEMPTION=""\n' > "$TEMPLATE_DIR/relic.sh"
-printf 'template doc\n'        > "$TEMPLATE_DIR/CLAUDE.md"
-: > "$TEMPLATE_DIR/src/.gitkeep"; : > "$TEMPLATE_DIR/entrypoints/.gitkeep"; : > "$TEMPLATE_DIR/tests/.gitkeep"
+printf 'NAME=""\nRUNTIME=""\nRUNTIME_EXEMPTION=""\n' >"$TEMPLATE_DIR/relic.sh"
+printf 'template doc\n' >"$TEMPLATE_DIR/CLAUDE.md"
+: >"$TEMPLATE_DIR/src/.gitkeep"
+: >"$TEMPLATE_DIR/entrypoints/.gitkeep"
+: >"$TEMPLATE_DIR/tests/.gitkeep"
 
 # fresh build (no src script)
 mkdir -p "$sdir/relics"
 fresh="$sdir/relics/fresh"
 scaffold_tree fresh "$fresh" bash ""
-( source "$fresh/relic.sh"; printf '%s %s\n' "$NAME" "$RUNTIME" ) > "$sdir/_fresh"
+(
+    source "$fresh/relic.sh"
+    printf '%s %s\n' "$NAME" "$RUNTIME"
+) >"$sdir/_fresh"
 check "scaffold fresh manifest" "$(cat "$sdir/_fresh")" "fresh bash"
 check "scaffold fresh CLAUDE stub" "$(grep -c 'in-house (Stage-2) relic' "$fresh/CLAUDE.md")" "1"
 check "scaffold fresh keeps gitkeep" "$([[ -f "$fresh/src/.gitkeep" ]] && echo y)" "y"
 
 # promotion (move a src script, wire entrypoint)
-printf '#!/usr/bin/env bash\necho promoted\n' > "$sdir/prom-src"; chmod +x "$sdir/prom-src"
+printf '#!/usr/bin/env bash\necho promoted\n' >"$sdir/prom-src"
+chmod +x "$sdir/prom-src"
 prom="$sdir/relics/prom"
 scaffold_tree prom "$prom" bash "$sdir/prom-src"
-check "scaffold promo src moved"   "$([[ -f "$prom/src/prom" ]] && echo y)"               "y"
-check "scaffold promo source gone" "$([[ -e "$sdir/prom-src" ]] && echo present)"          ""
-check "scaffold promo symlink"     "$(readlink "$prom/entrypoints/prom")"                  "../src/prom"
-check "scaffold promo drops gitkeep" "$([[ -e "$prom/entrypoints/.gitkeep" ]] && echo y)"  ""
+check "scaffold promo src moved" "$([[ -f "$prom/src/prom" ]] && echo y)" "y"
+check "scaffold promo source gone" "$([[ -e "$sdir/prom-src" ]] && echo present)" ""
+check "scaffold promo symlink" "$(readlink "$prom/entrypoints/prom")" "../src/prom"
+check "scaffold promo drops gitkeep" "$([[ -e "$prom/entrypoints/.gitkeep" ]] && echo y)" ""
 
 # ── the runtime stance: rust is the default, and it scaffolds a cargo member ──
 check "default runtime is rust" "$DEFAULT_RUNTIME" "rust"
 
 ws="$sdir/relics/Cargo.toml"
-printf '[workspace]\nresolver = "3"\nmembers = [\n    "crates/*",\n    "docket",\n    "midden",\n]\n' > "$ws"
+printf '[workspace]\nresolver = "3"\nmembers = [\n    "crates/*",\n    "docket",\n    "midden",\n]\n' >"$ws"
 
 workspace_add_member "$ws" "ernest"
 check "member inserted sorted" "$(awk '/^ *"/{gsub(/[^a-z*\/]/,"");printf "%s ",$0}' "$ws")" \
@@ -187,25 +209,32 @@ check "member appended last" "$(awk '/^\]/{print prev} {prev=$0}' "$ws" | tr -d 
 
 rustdir="$sdir/relics/rusty"
 scaffold_tree rusty "$rustdir" rust "" "" "$ws"
-( source "$rustdir/relic.sh"; printf '%s %s\n' "$NAME" "$RUNTIME" ) > "$sdir/_rusty"
-check "rust scaffold manifest"     "$(cat "$sdir/_rusty")"                                   "rusty rust"
-check "rust scaffold cargo bin"    "$(grep -c 'path = "src/main.rs"' "$rustdir/Cargo.toml")" "1"
-check "rust scaffold inherits ws"  "$(grep -c 'edition.workspace = true' "$rustdir/Cargo.toml")" "1"
-check "rust scaffold main.rs"      "$([[ -f "$rustdir/src/main.rs" ]] && echo y)"            "y"
-check "rust scaffold no entrypoints" "$([[ -e "$rustdir/entrypoints" ]] && echo present)"    ""
-check "rust scaffold is a member"  "$(grep -c '"rusty",' "$ws")"                             "1"
+(
+    source "$rustdir/relic.sh"
+    printf '%s %s\n' "$NAME" "$RUNTIME"
+) >"$sdir/_rusty"
+check "rust scaffold manifest" "$(cat "$sdir/_rusty")" "rusty rust"
+check "rust scaffold cargo bin" "$(grep -c 'path = "src/main.rs"' "$rustdir/Cargo.toml")" "1"
+check "rust scaffold inherits ws" "$(grep -c 'edition.workspace = true' "$rustdir/Cargo.toml")" "1"
+check "rust scaffold main.rs" "$([[ -f "$rustdir/src/main.rs" ]] && echo y)" "y"
+check "rust scaffold no entrypoints" "$([[ -e "$rustdir/entrypoints" ]] && echo present)" ""
+check "rust scaffold is a member" "$(grep -c '"rusty",' "$ws")" "1"
 
 # A promoted Stage-1 script cannot become a compiled relic as-is; it is parked.
-printf '#!/usr/bin/env bash\necho old\n' > "$sdir/port-src"; chmod +x "$sdir/port-src"
+printf '#!/usr/bin/env bash\necho old\n' >"$sdir/port-src"
+chmod +x "$sdir/port-src"
 portdir="$sdir/relics/ported"
 scaffold_tree ported "$portdir" rust "$sdir/port-src" "" "$ws"
 check "rust scaffold parks the script" "$([[ -f "$portdir/src/ported.port-me" ]] && echo y)" "y"
-check "rust scaffold moved it"         "$([[ -e "$sdir/port-src" ]] && echo present)"        ""
+check "rust scaffold moved it" "$([[ -e "$sdir/port-src" ]] && echo present)" ""
 
 # An exemption is written into the manifest when one is given.
 exdir="$sdir/relics/exempted"
 scaffold_tree exempted "$exdir" bash "" "needs bash 3.2 at bootstrap" "$ws"
-( source "$exdir/relic.sh"; printf '%s\n' "$RUNTIME_EXEMPTION" ) > "$sdir/_ex"
+(
+    source "$exdir/relic.sh"
+    printf '%s\n' "$RUNTIME_EXEMPTION"
+) >"$sdir/_ex"
 check "exemption recorded" "$(cat "$sdir/_ex")" "needs bash 3.2 at bootstrap"
 
 rm -rf "$sdir"

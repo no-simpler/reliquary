@@ -32,14 +32,25 @@
 set -o pipefail
 
 # --- Colors (house style, see bin/check-bedrock) ---------------------------
-BOLD="\033[1m"; RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; DIM="\033[2m"; RESET="\033[0m"
+BOLD="\033[1m"
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+DIM="\033[2m"
+RESET="\033[0m"
 
 FAILS=0
 WARNS=0
 
-ok()   { printf '%b\n' "  ${GREEN}✓${RESET} $1"; }
-warn() { printf '%b\n' "  ${YELLOW}!${RESET} $1"; WARNS=$((WARNS + 1)); }
-fail() { printf '%b\n' "  ${RED}✗${RESET} $1"; FAILS=$((FAILS + 1)); }
+ok() { printf '%b\n' "  ${GREEN}✓${RESET} $1"; }
+warn() {
+    printf '%b\n' "  ${YELLOW}!${RESET} $1"
+    WARNS=$((WARNS + 1))
+}
+fail() {
+    printf '%b\n' "  ${RED}✗${RESET} $1"
+    FAILS=$((FAILS + 1))
+}
 note() { printf '%b\n' "      ${DIM}$1${RESET}"; }
 head() { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}$1${RESET}"; }
 
@@ -47,19 +58,25 @@ head() { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}$1${RESET}"; }
 route() {
     local level="${1%%	*}" msg="${1#*	}"
     case "$level" in
-        OK)   ok   "$msg" ;;
+        OK) ok "$msg" ;;
         WARN) warn "$msg" ;;
         FAIL) fail "$msg" ;;
         NOTE) note "$msg" ;;
-        *)    note "$1" ;;
+        *) note "$1" ;;
     esac
 }
 
 # --- Args ------------------------------------------------------------------
 for a in "$@"; do
     case "$a" in
-        -h|--help) echo "usage: check-brew-health"; exit 0 ;;
-        *) printf 'check-brew-health: unknown argument: %s\n' "$a" >&2; exit 2 ;;
+        -h | --help)
+            echo "usage: check-brew-health"
+            exit 0
+            ;;
+        *)
+            printf 'check-brew-health: unknown argument: %s\n' "$a" >&2
+            exit 2
+            ;;
     esac
 done
 
@@ -88,7 +105,8 @@ BREW_DIR="$HOME/.config/brew"
 # it on stdin, because stdin is already spoken for by the heredoc carrying the
 # helper. That one call merges install receipts with Homebrew's cached API data,
 # which is where the deprecation metadata lives.
-analysis="$(python3 - "$FORMULA_NAMES" "$CASK_NAMES" "$TAPS_ROOT" <<'PY'
+analysis="$(
+    python3 - "$FORMULA_NAMES" "$CASK_NAMES" "$TAPS_ROOT" <<'PY'
 import json
 import os
 import subprocess
@@ -272,9 +290,9 @@ done
 # Entries in a Brewfile whose leading keyword is $1 ("brew", "cask" or "tap").
 declared() {
     # shellcheck disable=SC2086
-    grep -hE "^[[:space:]]*$1[[:space:]]+\"" $brewfiles 2>/dev/null \
-        | sed -E "s/^[[:space:]]*$1[[:space:]]+\"([^\"]+)\".*/\1/" \
-        | sort -u
+    grep -hE "^[[:space:]]*$1[[:space:]]+\"" $brewfiles 2>/dev/null |
+        sed -E "s/^[[:space:]]*$1[[:space:]]+\"([^\"]+)\".*/\1/" |
+        sort -u
 }
 
 # Report every name in $2 ($1 = "formula"/"cask") that brew cannot resolve.
@@ -286,7 +304,7 @@ check_declared() {
     [ -n "$names" ] || return 0
     case "$kind" in
         formula) flag="--formula" ;;
-        cask)    flag="--cask" ;;
+        cask) flag="--cask" ;;
     esac
     # shellcheck disable=SC2086
     brew info "$flag" --json=v2 $names >/dev/null 2>&1 && return 0
@@ -319,15 +337,19 @@ else
     # ambiguous, so record that up front and soften the verdict accordingly.
     UNTAPPED=0
     for t in $(declared tap); do
-        user="${t%%/*}"; repo="${t#*/}"
-        [ -d "$TAPS_ROOT/$user/homebrew-$repo" ] || { UNTAPPED=1; note "tap $t is declared but not tapped on this machine"; }
+        user="${t%%/*}"
+        repo="${t#*/}"
+        [ -d "$TAPS_ROOT/$user/homebrew-$repo" ] || {
+            UNTAPPED=1
+            note "tap $t is declared but not tapped on this machine"
+        }
     done
 
     before=$((FAILS + WARNS))
     check_declared formula "$(declared brew)"
-    check_declared cask    "$(declared cask)"
-    [ "$((FAILS + WARNS))" -eq "$before" ] \
-        && ok "every Brewfile entry still resolves ($(echo $brewfiles | wc -w | tr -d ' ') file(s) read)"
+    check_declared cask "$(declared cask)"
+    [ "$((FAILS + WARNS))" -eq "$before" ] &&
+        ok "every Brewfile entry still resolves ($(echo $brewfiles | wc -w | tr -d ' ') file(s) read)"
 fi
 
 # --- Check 5: everything installed on request is declared somewhere ---------
@@ -354,19 +376,25 @@ bare_names() { sed -E 's|.*/||' | sed -E 's/[[:space:]]+$//' | sort -u; }
 if [ -z "$brewfiles" ]; then
     : # already reported above
 else
-    declared_all="$( { declared brew; declared cask; } | bare_names )"
+    declared_all="$({
+        declared brew
+        declared cask
+    } | bare_names)"
     excused=""
     if [ -r "$UNDECLARED_FILE" ]; then
         excused="$(sed -E 's/#.*//' "$UNDECLARED_FILE" | awk 'NF {print $1}' | bare_names)"
     fi
 
-    installed_wanted="$( { brew leaves --installed-on-request 2>/dev/null
-                           brew list --cask 2>/dev/null; } | bare_names )"
+    installed_wanted="$({
+        brew leaves --installed-on-request 2>/dev/null
+        brew list --cask 2>/dev/null
+    } | bare_names)"
 
     # The subtraction happens in awk, with both lists reaching it through the
     # environment rather than through -v: -v rescans its value for escapes, and an
     # awk array index is a byte string whatever the locale, where `==` is not.
-    undeclared="$(SKIP="$declared_all
+    undeclared="$(
+        SKIP="$declared_all
 $excused" awk '
         BEGIN {
             n = split(ENVIRON["SKIP"], a, "\n")
@@ -376,7 +404,7 @@ $excused" awk '
     ' <<EOF
 $installed_wanted
 EOF
-)"
+    )"
 
     if [ -z "$undeclared" ]; then
         ok "every package installed on request is declared in a Brewfile"

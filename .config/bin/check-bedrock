@@ -22,14 +22,25 @@
 set -o pipefail
 
 # --- Colors (house style, see bin/check-shell-parity) ----------------------
-BOLD="\033[1m"; RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; DIM="\033[2m"; RESET="\033[0m"
+BOLD="\033[1m"
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+DIM="\033[2m"
+RESET="\033[0m"
 
 FAILS=0
 WARNS=0
 
-ok()   { printf '%b\n' "  ${GREEN}✓${RESET} $1"; }
-warn() { printf '%b\n' "  ${YELLOW}!${RESET} $1"; WARNS=$((WARNS + 1)); }
-fail() { printf '%b\n' "  ${RED}✗${RESET} $1"; FAILS=$((FAILS + 1)); }
+ok() { printf '%b\n' "  ${GREEN}✓${RESET} $1"; }
+warn() {
+    printf '%b\n' "  ${YELLOW}!${RESET} $1"
+    WARNS=$((WARNS + 1))
+}
+fail() {
+    printf '%b\n' "  ${RED}✗${RESET} $1"
+    FAILS=$((FAILS + 1))
+}
 note() { printf '%b\n' "      ${DIM}$1${RESET}"; }
 head() { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}$1${RESET}"; }
 
@@ -37,9 +48,15 @@ head() { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}$1${RESET}"; }
 DAEMON=0
 for a in "$@"; do
     case "$a" in
-        --daemon)  DAEMON=1 ;;
-        -h|--help) echo "usage: check-bedrock [--daemon]"; exit 0 ;;
-        *) printf 'check-bedrock: unknown argument: %s\n' "$a" >&2; exit 2 ;;
+        --daemon) DAEMON=1 ;;
+        -h | --help)
+            echo "usage: check-bedrock [--daemon]"
+            exit 0
+            ;;
+        *)
+            printf 'check-bedrock: unknown argument: %s\n' "$a" >&2
+            exit 2
+            ;;
     esac
 done
 
@@ -54,11 +71,11 @@ MEMBERS="bash python3 uv docker git curl just cargo"
 # extra copies are. Mirrors check-shell-parity's allow_for().
 expected_extra() {
     case "$1" in
-        bash)    echo "/bin/bash" ;;            # macOS stock bash 3.2 (frozen)
-        python3) echo "/usr/bin/python3" ;;     # macOS Command Line Tools stub
-        git)     echo "/usr/bin/git" ;;         # macOS CLT git shim
-        curl)    echo "/usr/bin/curl" ;;        # macOS system curl
-        *)       echo "" ;;
+        bash) echo "/bin/bash" ;;           # macOS stock bash 3.2 (frozen)
+        python3) echo "/usr/bin/python3" ;; # macOS Command Line Tools stub
+        git) echo "/usr/bin/git" ;;         # macOS CLT git shim
+        curl) echo "/usr/bin/curl" ;;       # macOS system curl
+        *) echo "" ;;
     esac
 }
 
@@ -101,26 +118,26 @@ check_python3() {
         return
     fi
     ok "python3 $ver — $w"
-    "$w" -m pip --version >/dev/null 2>&1 \
-        || warn "python3: 'python3 -m pip' unavailable (uv covers most needs; ensurepip may be missing)"
+    "$w" -m pip --version >/dev/null 2>&1 ||
+        warn "python3: 'python3 -m pip' unavailable (uv covers most needs; ensurepip may be missing)"
 }
 
 check_uv() {
     local w="$1" ver
     ver="$("$w" --version 2>/dev/null)"
     ok "uv ${ver#uv } — $w"
-    command -v uvx >/dev/null 2>&1 \
-        || warn "uv: 'uvx' not on PATH (older uv — use 'uv tool run' instead)"
+    command -v uvx >/dev/null 2>&1 ||
+        warn "uv: 'uvx' not on PATH (older uv — use 'uv tool run' instead)"
 }
 
 check_docker() {
     local w="$1" ver
     ver="$("$w" --version 2>/dev/null)"
     ok "docker — $w (${ver})"
-    "$w" compose version >/dev/null 2>&1 \
-        || fail "docker: 'docker compose' plugin missing (bedrock requires the full docker API)"
-    "$w" buildx version >/dev/null 2>&1 \
-        || fail "docker: 'docker buildx' plugin missing (bedrock requires the full docker API)"
+    "$w" compose version >/dev/null 2>&1 ||
+        fail "docker: 'docker compose' plugin missing (bedrock requires the full docker API)"
+    "$w" buildx version >/dev/null 2>&1 ||
+        fail "docker: 'docker buildx' plugin missing (bedrock requires the full docker API)"
     if [ "$DAEMON" = "1" ]; then
         if "$w" info >/dev/null 2>&1; then
             ok "docker daemon reachable"
@@ -160,14 +177,14 @@ check_cargo() {
         return
     fi
     ok "cargo ${ver#cargo } — $w"
-    command -v rustc >/dev/null 2>&1 \
-        || fail "cargo: 'rustc' not on PATH (cargo without a compiler builds nothing)"
-    "$w" fmt --version >/dev/null 2>&1 \
-        || fail "cargo: 'cargo fmt' unavailable (rustup component rustfmt; relic test needs it)"
-    "$w" clippy --version >/dev/null 2>&1 \
-        || fail "cargo: 'cargo clippy' unavailable (rustup component clippy; relic test needs it)"
-    command -v rustup >/dev/null 2>&1 \
-        || warn "cargo: 'rustup' not on PATH — the toolchain will not self-heal on \`up\`"
+    command -v rustc >/dev/null 2>&1 ||
+        fail "cargo: 'rustc' not on PATH (cargo without a compiler builds nothing)"
+    "$w" fmt --version >/dev/null 2>&1 ||
+        fail "cargo: 'cargo fmt' unavailable (rustup component rustfmt; relic test needs it)"
+    "$w" clippy --version >/dev/null 2>&1 ||
+        fail "cargo: 'cargo clippy' unavailable (rustup component clippy; relic test needs it)"
+    command -v rustup >/dev/null 2>&1 ||
+        warn "cargo: 'rustup' not on PATH — the toolchain will not self-heal on \`up\`"
 }
 
 # git / curl: presence is the whole contract — no sub-API to verify.
@@ -208,13 +225,13 @@ check_member() {
     fi
     winner="$(printf '%s\n' "$hits" | sed -n 1p)"
     case "$m" in
-        bash)    check_bash "$winner" ;;
+        bash) check_bash "$winner" ;;
         python3) check_python3 "$winner" ;;
-        uv)      check_uv "$winner" ;;
-        docker)  check_docker "$winner" ;;
-        just)    check_just "$winner" ;;
-        cargo)   check_cargo "$winner" ;;
-        *)       check_plain "$m" "$winner" ;;
+        uv) check_uv "$winner" ;;
+        docker) check_docker "$winner" ;;
+        just) check_just "$winner" ;;
+        cargo) check_cargo "$winner" ;;
+        *) check_plain "$m" "$winner" ;;
     esac
     check_shadows "$m" "$winner" "$hits"
 }

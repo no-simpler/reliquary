@@ -50,15 +50,26 @@
 set -o pipefail
 
 # --- Colors (house style, see bin/check-bedrock) ---------------------------
-BOLD="\033[1m"; RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; DIM="\033[2m"; RESET="\033[0m"
+BOLD="\033[1m"
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+DIM="\033[2m"
+RESET="\033[0m"
 
 FAILS=0
 WARNS=0
 VERBOSE=0
 
-ok()   { printf '%b\n' "  ${GREEN}✓${RESET} $1"; }
-warn() { printf '%b\n' "  ${YELLOW}!${RESET} $1"; WARNS=$((WARNS + 1)); }
-fail() { printf '%b\n' "  ${RED}✗${RESET} $1"; FAILS=$((FAILS + 1)); }
+ok() { printf '%b\n' "  ${GREEN}✓${RESET} $1"; }
+warn() {
+    printf '%b\n' "  ${YELLOW}!${RESET} $1"
+    WARNS=$((WARNS + 1))
+}
+fail() {
+    printf '%b\n' "  ${RED}✗${RESET} $1"
+    FAILS=$((FAILS + 1))
+}
 note() { printf '%b\n' "      ${DIM}$1${RESET}"; }
 head() { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}$1${RESET}"; }
 
@@ -66,23 +77,27 @@ head() { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}$1${RESET}"; }
 route() {
     local level="${1%%	*}" msg="${1#*	}"
     case "$level" in
-        OK)   ok   "$msg" ;;
+        OK) ok "$msg" ;;
         WARN) warn "$msg" ;;
         FAIL) fail "$msg" ;;
         NOTE) note "$msg" ;;
-        *)    note "$1" ;;
+        *) note "$1" ;;
     esac
 }
 
 # --- Args ------------------------------------------------------------------
 for a in "$@"; do
     case "$a" in
-        -v|--verbose) VERBOSE=1 ;;
-        -h|--help)
+        -v | --verbose) VERBOSE=1 ;;
+        -h | --help)
             echo "usage: check-yadm-coverage [-v|--verbose]"
             echo "  -v  list every undecided path instead of a capped sample"
-            exit 0 ;;
-        *) printf 'check-yadm-coverage: unknown argument: %s\n' "$a" >&2; exit 2 ;;
+            exit 0
+            ;;
+        *)
+            printf 'check-yadm-coverage: unknown argument: %s\n' "$a" >&2
+            exit 2
+            ;;
     esac
 done
 
@@ -111,7 +126,10 @@ if [ -z "$YADM_BIN" ]; then
     exit 2
 fi
 
-cd "$HOME" || { fail "cannot cd to \$HOME"; exit 2; }
+cd "$HOME" || {
+    fail "cannot cd to \$HOME"
+    exit 2
+}
 
 TRACKED="$("$YADM_BIN" ls-files 2>/dev/null)"
 if [ -z "$TRACKED" ]; then
@@ -135,12 +153,12 @@ OBJ_REACHABLE="$("$YADM_BIN" rev-list --objects --all 2>/dev/null | wc -l | tr -
 # --- Analysis --------------------------------------------------------------
 analysis="$(
     YADM_TRACKED="$TRACKED" \
-    YADM_IDENTITY_PATTERN="$IDENTITY_PATTERN" \
-    YADM_VERBOSE="$VERBOSE" \
-    YADM_OBJ_INPACK="${OBJ_INPACK:-0}" \
-    YADM_OBJ_PACKKIB="${OBJ_PACKKIB:-0}" \
-    YADM_OBJ_REACHABLE="${OBJ_REACHABLE:-0}" \
-    python3 - <<'PY'
+        YADM_IDENTITY_PATTERN="$IDENTITY_PATTERN" \
+        YADM_VERBOSE="$VERBOSE" \
+        YADM_OBJ_INPACK="${OBJ_INPACK:-0}" \
+        YADM_OBJ_PACKKIB="${OBJ_PACKKIB:-0}" \
+        YADM_OBJ_REACHABLE="${OBJ_REACHABLE:-0}" \
+        python3 - <<'PY'
 import fnmatch
 import glob
 import os
@@ -439,7 +457,7 @@ PY
 
 while IFS= read -r line; do
     [ -n "$line" ] && route "$line"
-done <<< "$analysis"
+done <<<"$analysis"
 
 # --- Summary ---------------------------------------------------------------
 # Cosmetic only, and suppressed when the output is captured (e.g. `yadm doctor`

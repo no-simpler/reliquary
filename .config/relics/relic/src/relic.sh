@@ -42,16 +42,28 @@ COMMANDS="list status publish test update scaffold registry migrate doctor help"
 # ── output ──────────────────────────────────────────────────────────────────
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
-    _c_dim=$'\033[2m'; _c_bold=$'\033[1m'
-    _c_red=$'\033[31m'; _c_grn=$'\033[32m'; _c_yel=$'\033[33m'; _c_rst=$'\033[0m'
+    _c_dim=$'\033[2m'
+    _c_bold=$'\033[1m'
+    _c_red=$'\033[31m'
+    _c_grn=$'\033[32m'
+    _c_yel=$'\033[33m'
+    _c_rst=$'\033[0m'
 else
-    _c_dim=''; _c_bold=''; _c_red=''; _c_grn=''; _c_yel=''; _c_rst=''
+    _c_dim=''
+    _c_bold=''
+    _c_red=''
+    _c_grn=''
+    _c_yel=''
+    _c_rst=''
 fi
 
 info() { printf '%s\n' "$*"; }
-warn() { printf '%swarn:%s %s\n'  "$_c_yel" "$_c_rst" "$*" >&2; }
-err()  { printf '%serror:%s %s\n' "$_c_red" "$_c_rst" "$*" >&2; }
-die()  { err "$*"; exit 1; }
+warn() { printf '%swarn:%s %s\n' "$_c_yel" "$_c_rst" "$*" >&2; }
+err() { printf '%serror:%s %s\n' "$_c_red" "$_c_rst" "$*" >&2; }
+die() {
+    err "$*"
+    exit 1
+}
 
 # ── library loading (lazy) ──────────────────────────────────────────────────
 
@@ -160,7 +172,11 @@ doctor_unmanaged() {
 
 # Read RUNTIME from a manifest without leaking globals into our process.
 relic_runtime() {
-    ( unset RUNTIME 2>/dev/null; source "$1/relic.sh" 2>/dev/null; printf '%s' "${RUNTIME:-?}" )
+    (
+        unset RUNTIME 2>/dev/null
+        source "$1/relic.sh" 2>/dev/null
+        printf '%s' "${RUNTIME:-?}"
+    )
 }
 
 # Emit "<name>\t<dir>\t<lane>" per in-house relic. Attic-safe: a relic is
@@ -185,7 +201,10 @@ external_relics() {
     [[ -r "$GRADUATION" ]] || return 0
     local in=0 line name path
     while IFS= read -r line; do
-        if [[ "$line" == '### Known external relics'* ]]; then in=1; continue; fi
+        if [[ "$line" == '### Known external relics'* ]]; then
+            in=1
+            continue
+        fi
         if [[ $in -eq 1 && "$line" == '#'* ]]; then break; fi
         if [[ $in -eq 1 && "$line" == '- '* ]]; then
             if [[ "$line" =~ \`([^\`]+)\`[^\`]*\`([^\`]+)\` ]]; then
@@ -196,7 +215,7 @@ external_relics() {
                 printf '%s\t%s\n' "$name" "$path"
             fi
         fi
-    done < "$GRADUATION"
+    done <"$GRADUATION"
 }
 
 # The names a relic publishes, one per line. A compiled relic declares them in
@@ -235,7 +254,10 @@ find_inhouse_dir() {
     local name="$1" lane d
     for lane in "$RELICS_LANE" "$ATTIC_LANE"; do
         d="$lane/$name"
-        [[ -r "$d/relic.sh" ]] && { printf '%s' "$d"; return 0; }
+        [[ -r "$d/relic.sh" ]] && {
+            printf '%s' "$d"
+            return 0
+        }
     done
     return 1
 }
@@ -243,7 +265,10 @@ find_inhouse_dir() {
 find_external_path() {
     local name="$1" n p
     while IFS=$'\t' read -r n p; do
-        [[ "$n" == "$name" ]] && { printf '%s' "$p"; return 0; }
+        [[ "$n" == "$name" ]] && {
+            printf '%s' "$p"
+            return 0
+        }
     done < <(external_relics)
     return 1
 }
@@ -253,13 +278,21 @@ detect_cwd_relic() {
     for lane in "$RELICS_LANE" "$ATTIC_LANE"; do
         case "$cwd/" in
             "$lane"/*)
-                name="${cwd#"$lane"/}"; name="${name%%/*}"
-                [[ -n "$name" && -r "$lane/$name/relic.sh" ]] && { printf '%s' "$name"; return 0; }
+                name="${cwd#"$lane"/}"
+                name="${name%%/*}"
+                [[ -n "$name" && -r "$lane/$name/relic.sh" ]] && {
+                    printf '%s' "$name"
+                    return 0
+                }
                 ;;
         esac
     done
     while IFS=$'\t' read -r n p; do
-        case "$cwd/" in "$p"/*) printf '%s' "$n"; return 0 ;; esac
+        case "$cwd/" in "$p"/*)
+            printf '%s' "$n"
+            return 0
+            ;;
+        esac
     done < <(external_relics)
     return 1
 }
@@ -273,14 +306,20 @@ inhouse_pubstate() {
         total=$((total + 1))
         reg_has "$n" && have=$((have + 1))
     done < <(relic_entrypoints "$dir")
-    if   [[ $total -eq 0 ]]; then echo "no-entrypoints"
-    elif [[ $have  -eq 0 ]]; then echo "unpublished"
-    elif [[ $have  -lt $total ]]; then echo "partial"
+    if [[ $total -eq 0 ]]; then
+        echo "no-entrypoints"
+    elif [[ $have -eq 0 ]]; then
+        echo "unpublished"
+    elif [[ $have -lt $total ]]; then
+        echo "partial"
     else echo "published"; fi
 }
 
 external_pubstate() {
-    [[ -f "$REGISTRY" ]] || { echo "unknown"; return; }
+    [[ -f "$REGISTRY" ]] || {
+        echo "unknown"
+        return
+    }
     if awk -v o="$1" '/^[[:space:]]*#/{next} $2==o{f=1;exit} END{exit !f}' "$REGISTRY"; then
         echo "published"
     else
@@ -290,25 +329,25 @@ external_pubstate() {
 
 state_label() {
     case "$1" in
-        published)      printf '%s● published%s'           "$_c_grn" "$_c_rst" ;;
-        partial)        printf '%s◐ partial%s'             "$_c_yel" "$_c_rst" ;;
-        unpublished)    printf '%s○ unpublished%s'         "$_c_dim" "$_c_rst" ;;
-        no-entrypoints) printf '%s— no entrypoints%s'      "$_c_dim" "$_c_rst" ;;
-        absent)         printf '%s○ listed, not present%s' "$_c_dim" "$_c_rst" ;;
-        unknown)        printf '%s? unknown%s'             "$_c_dim" "$_c_rst" ;;
-        *)              printf '%s' "$1" ;;
+        published) printf '%s● published%s' "$_c_grn" "$_c_rst" ;;
+        partial) printf '%s◐ partial%s' "$_c_yel" "$_c_rst" ;;
+        unpublished) printf '%s○ unpublished%s' "$_c_dim" "$_c_rst" ;;
+        no-entrypoints) printf '%s— no entrypoints%s' "$_c_dim" "$_c_rst" ;;
+        absent) printf '%s○ listed, not present%s' "$_c_dim" "$_c_rst" ;;
+        unknown) printf '%s? unknown%s' "$_c_dim" "$_c_rst" ;;
+        *) printf '%s' "$1" ;;
     esac
 }
 
 state_plain() {
     case "$1" in
-        published)      echo "yes" ;;
-        partial)        echo "partial" ;;
-        unpublished)    echo "no" ;;
+        published) echo "yes" ;;
+        partial) echo "partial" ;;
+        unpublished) echo "no" ;;
         no-entrypoints) echo "n/a (no entrypoints)" ;;
-        absent)         echo "not present" ;;
-        unknown)        echo "unknown" ;;
-        *)              echo "$1" ;;
+        absent) echo "not present" ;;
+        unknown) echo "unknown" ;;
+        *) echo "$1" ;;
     esac
 }
 
@@ -318,7 +357,7 @@ state_plain() {
 # underscore, not starting with a dot or dash. Rejects slashes and empties.
 valid_relic_name() {
     case "$1" in
-        ""|.*|-*) return 1 ;;
+        "" | .* | -*) return 1 ;;
         *[!A-Za-z0-9_-]*) return 1 ;;
         *) return 0 ;;
     esac
@@ -326,7 +365,7 @@ valid_relic_name() {
 
 valid_runtime() {
     case "$1" in
-        python|bash|fish|rust|docker) return 0 ;;
+        python | bash | fish | rust | docker) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -359,7 +398,7 @@ workspace_add_member() {
             print; next
         }
         { print }
-    ' "$file" > "$tmp" && mv "$tmp" "$file"
+    ' "$file" >"$tmp" && mv "$tmp" "$file"
 }
 
 # Lay down the cargo half of a Rust relic: a member manifest that inherits
@@ -368,7 +407,7 @@ workspace_add_member() {
 # because its artifact does not exist until cargo has run.
 scaffold_cargo() {
     local name="$1" dir="$2" workspace="$3"
-    cat > "$dir/Cargo.toml" <<EOF
+    cat >"$dir/Cargo.toml" <<EOF
 [package]
 name = "$name"
 version = "0.1.0"
@@ -383,7 +422,7 @@ path = "src/main.rs"
 
 [dependencies]
 EOF
-    cat > "$dir/src/main.rs" <<EOF
+    cat >"$dir/src/main.rs" <<EOF
 fn main() {
     println!("$name");
 }
@@ -399,16 +438,16 @@ EOF
 infer_runtime() {
     local script="$1" first
     [[ -r "$script" ]] || return 0
-    IFS= read -r first < "$script" || true
+    IFS= read -r first <"$script" || true
     case "$first" in
         '#!'*) ;;
         *) return 0 ;;
     esac
     case "$first" in
         *python*) printf 'python' ;;
-        *fish*)   printf 'fish'   ;;
-        *bash*)   printf 'bash'   ;;
-        *[/\ ]sh|*[/\ ]sh\ *) printf 'bash' ;;   # /bin/sh, /usr/bin/env sh, sh -e → bash
+        *fish*) printf 'fish' ;;
+        *bash*) printf 'bash' ;;
+        *[/\ ]sh | *[/\ ]sh\ *) printf 'bash' ;; # /bin/sh, /usr/bin/env sh, sh -e → bash
         *) return 0 ;;
     esac
 }
@@ -426,7 +465,7 @@ manifest_set() {
             next
         }
         { print }
-    ' "$file" > "$tmp" && mv "$tmp" "$file"
+    ' "$file" >"$tmp" && mv "$tmp" "$file"
 }
 
 # Build a relic tree at <dir> from $TEMPLATE_DIR: fill NAME/RUNTIME, drop a
@@ -439,7 +478,7 @@ scaffold_tree() {
     manifest_set "$dir/relic.sh" NAME "$name" || return 1
     manifest_set "$dir/relic.sh" RUNTIME "$runtime" || return 1
     [[ -n "$exempt" ]] && { manifest_set "$dir/relic.sh" RUNTIME_EXEMPTION "$exempt" || return 1; }
-    cat > "$dir/CLAUDE.md" <<EOF
+    cat >"$dir/CLAUDE.md" <<EOF
 # \`$name\` — in-house (Stage-2) relic
 
 Scaffolded from \`~/.config/reliquary/template\`. See
@@ -489,7 +528,7 @@ cmd_list() {
         while IFS=$'\t' read -r name dir lane; do
             rt="$(relic_runtime "$dir")"
             printf '  %-18s %-7s %s\n' "$name" "$rt" "$(state_label "$(inhouse_pubstate "$dir")")"
-        done <<< "$priv"
+        done <<<"$priv"
     fi
 
     local ext
@@ -500,7 +539,7 @@ cmd_list() {
         while IFS=$'\t' read -r name dir; do
             if [[ -d "$dir" ]]; then state="$(external_pubstate "$name")"; else state="absent"; fi
             printf '  %-18s %-7s %s\n' "$name" "ext" "$(state_label "$state")"
-        done <<< "$ext"
+        done <<<"$ext"
     fi
 }
 
@@ -567,8 +606,8 @@ _status_external() {
 }
 
 cmd_publish() { _run_op publish "$@"; }
-cmd_test()    { _run_op test    "$@"; }
-cmd_update()  { _run_op update  "$@"; }
+cmd_test() { _run_op test "$@"; }
+cmd_update() { _run_op update "$@"; }
 
 _run_op() {
     local op="$1" name="${2:-}" dir path
@@ -587,14 +626,24 @@ cmd_scaffold() {
     local name="" runtime="" exempt=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -r|--runtime) runtime="${2:-}"; shift 2 || die "missing value for $1" ;;
-            -e|--exempt)  exempt="${2:-}";  shift 2 || die "missing value for $1" ;;
+            -r | --runtime)
+                runtime="${2:-}"
+                shift 2 || die "missing value for $1"
+                ;;
+            -e | --exempt)
+                exempt="${2:-}"
+                shift 2 || die "missing value for $1"
+                ;;
             -*) die "unknown flag: $1" ;;
-            *) [[ -z "$name" ]] || die "unexpected extra argument: $1"; name="$1"; shift ;;
+            *)
+                [[ -z "$name" ]] || die "unexpected extra argument: $1"
+                name="$1"
+                shift
+                ;;
         esac
     done
 
-    [[ -n "$name" ]]        || die "scaffold: missing <name>"
+    [[ -n "$name" ]] || die "scaffold: missing <name>"
     valid_relic_name "$name" || die "invalid relic name: $name (use letters, digits, dash, underscore)"
     [[ -z "$runtime" ]] || valid_runtime "$runtime" || die "invalid runtime: $runtime (one of python|bash|fish|rust|docker)"
 
@@ -625,8 +674,8 @@ cmd_scaffold() {
         die "runtime '$runtime' needs a reason: pass --exempt \"<why this one is not Rust>\" (see GRADUATION.md)"
     fi
 
-    scaffold_tree "$name" "$dir" "$runtime" "$src" "$exempt" "$RELICS_LANE/Cargo.toml" \
-        || die "failed to scaffold $dir"
+    scaffold_tree "$name" "$dir" "$runtime" "$src" "$exempt" "$RELICS_LANE/Cargo.toml" ||
+        die "failed to scaffold $dir"
     info "${_c_grn}scaffolded${_c_rst} $dir ${_c_dim}(runtime: $runtime)${_c_rst}"
 
     if [[ "$runtime" == "rust" ]]; then
@@ -669,7 +718,7 @@ _stage_in_yadm() {
     command -v yadm >/dev/null 2>&1 || return 0
     yadm add "$dir" 2>/dev/null && staged=1
     if yadm ls-files --error-unmatch "$old" >/dev/null 2>&1; then
-        yadm add -A "$old" 2>/dev/null && staged=1   # -A records the deletion
+        yadm add -A "$old" 2>/dev/null && staged=1 # -A records the deletion
     fi
     if [[ $staged -eq 1 ]]; then
         info "${_c_dim}staged in yadm: ${dir#"$HOME"/}${_c_rst}"
@@ -679,8 +728,14 @@ _stage_in_yadm() {
 }
 
 cmd_registry() {
-    if [[ "${1:-}" == "--migrate" ]]; then cmd_migrate; return; fi
-    if [[ "${1:-}" == "--prune" ]]; then cmd_prune; return; fi
+    if [[ "${1:-}" == "--migrate" ]]; then
+        cmd_migrate
+        return
+    fi
+    if [[ "${1:-}" == "--prune" ]]; then
+        cmd_prune
+        return
+    fi
     if [[ ! -f "$REGISTRY" ]]; then
         info "${_c_dim}registry empty — $REGISTRY does not exist yet${_c_rst}"
         return
@@ -710,7 +765,8 @@ cmd_doctor() {
     any=0
     while IFS=$'\t' read -r name owner; do
         [[ -z "$name" ]] && continue
-        any=1; problems=$((problems + 1))
+        any=1
+        problems=$((problems + 1))
         info "  ${_c_yel}$name${_c_rst}${owner:+ ${_c_dim}(owner: $owner)${_c_rst}}"
     done < <(doctor_orphans)
     if [[ $any -eq 0 ]]; then
@@ -724,7 +780,8 @@ cmd_doctor() {
     any=0
     while IFS=$'\t' read -r name ep; do
         [[ -z "$ep" ]] && continue
-        any=1; problems=$((problems + 1))
+        any=1
+        problems=$((problems + 1))
         info "  ${_c_yel}$ep${_c_rst} ${_c_dim}($name)${_c_rst}"
     done < <(doctor_unpublished)
     if [[ $any -eq 0 ]]; then
@@ -799,12 +856,22 @@ EOF
 resolve_cmd() {
     local input="$1" c match="" n=0
     for c in $COMMANDS; do
-        [[ "$c" == "$input" ]] && { printf '%s' "$c"; return 0; }
+        [[ "$c" == "$input" ]] && {
+            printf '%s' "$c"
+            return 0
+        }
     done
     for c in $COMMANDS; do
-        case "$c" in "$input"*) match="$c"; n=$((n + 1)) ;; esac
+        case "$c" in "$input"*)
+            match="$c"
+            n=$((n + 1))
+            ;;
+        esac
     done
-    [[ $n -eq 1 ]] && { printf '%s' "$match"; return 0; }
+    [[ $n -eq 1 ]] && {
+        printf '%s' "$match"
+        return 0
+    }
     return 1
 }
 
@@ -817,16 +884,16 @@ main() {
         exit 1
     fi
     case "$cmd" in
-        list)     cmd_list "$@" ;;
-        status)   cmd_status "$@" ;;
-        publish)  cmd_publish "$@" ;;
-        test)     cmd_test "$@" ;;
-        update)   cmd_update "$@" ;;
+        list) cmd_list "$@" ;;
+        status) cmd_status "$@" ;;
+        publish) cmd_publish "$@" ;;
+        test) cmd_test "$@" ;;
+        update) cmd_update "$@" ;;
         scaffold) cmd_scaffold "$@" ;;
         registry) cmd_registry "$@" ;;
-        migrate)  cmd_migrate "$@" ;;
-        doctor)   cmd_doctor "$@" ;;
-        help)     usage ;;
+        migrate) cmd_migrate "$@" ;;
+        doctor) cmd_doctor "$@" ;;
+        help) usage ;;
     esac
 }
 

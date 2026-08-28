@@ -17,4 +17,4 @@
 ##
 
 # Source .bashrc in home directory
-[ -r ~/.bashrc -a -f ~/.bashrc ] && source ~/.bashrc
+[ -r ~/.bashrc ] && [ -f ~/.bashrc ] && source ~/.bashrc

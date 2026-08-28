@@ -35,6 +35,7 @@ brew "yq"
 brew "bat"
 brew "just"           # bedrock
 brew "shellcheck"
+brew "shfmt"
 brew "node"
 brew "redis"          # for redis-cli; server ships along but is never started as a service
 

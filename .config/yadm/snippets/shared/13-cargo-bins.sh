@@ -31,5 +31,5 @@ else
             print_bold -ad "Installing $crate..."
             cargo binstall --no-confirm "$crate" 2>/dev/null || cargo install "$crate"
         fi
-    done < "$CRATES_FILE"
+    done <"$CRATES_FILE"
 fi

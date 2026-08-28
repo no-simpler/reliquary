@@ -6,6 +6,6 @@ print_bold -ad "Running up"
 UP_PATH="$HOME/.config/bin/up"
 
 # Update packages/plugins
-if [ -f "$UP_PATH" -a -x "$UP_PATH" ]; then
+if [ -f "$UP_PATH" ] && [ -x "$UP_PATH" ]; then
     "$UP_PATH"
 fi

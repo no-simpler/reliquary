@@ -18,12 +18,12 @@ non_executables=()
 this_script="$(realpath "$0")"
 
 # Change into home directory for this script
-cd
+cd || exit 1
 
 # Check if yadm is available
 yadm_available=false
-yadm_files=()
-if command -v yadm &> /dev/null; then
+yadm_files=""
+if command -v yadm &>/dev/null; then
     yadm_available=true
     yadm_files=$(yadm list)
 

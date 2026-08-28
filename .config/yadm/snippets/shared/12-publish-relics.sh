@@ -10,8 +10,8 @@
 # file before publishing, so the first publish writes into the consolidated
 # registry. Idempotent; tolerates absence.
 # shellcheck disable=SC1091
-source "$HOME/.config/reliquary/lib/install-on-path.sh" 2>/dev/null \
-    && install_on_path_migrate_registries
+source "$HOME/.config/reliquary/lib/install-on-path.sh" 2>/dev/null &&
+    install_on_path_migrate_registries
 
 # shellcheck disable=SC1091
 source "$HOME/.config/reliquary/lib/relic.sh" 2>/dev/null || return 0

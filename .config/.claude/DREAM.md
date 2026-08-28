@@ -47,11 +47,11 @@ divergence is intentional and permanent, add the name to that pair's allowlist i
 `check-shell-parity` with a one-line reason.
 
 **Extension policy:** a new scriptable check is a **station** in `assay`, the aggregator
-`yadm doctor` calls — never a new section in the wrapper's bash `doctor()`, which is closed to
-extension, and never prose here. Until `assay` lands, a check that cannot wait goes in as a
-`bin/check-*` script and is absorbed as a station later. See
-`~/.config/reliquary/HARDENING.md`. The pre-pass is the reliable floor; the passes below are
-the judgment layer it cannot replace.
+`yadm doctor` will call — never prose here, and never new check *logic* inside the wrapper's
+bash `doctor()`. Until `assay` lands, a check goes in as a standalone `bin/check-*` script that
+`doctor()` merely registers (name, exit 0/1/2, output indented verbatim), and it is absorbed as
+a station later. See `~/.config/reliquary/HARDENING.md`. The pre-pass is the reliable floor;
+the passes below are the judgment layer it cannot replace.
 
 ## The read IS the pass
 

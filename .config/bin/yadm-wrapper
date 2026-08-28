@@ -33,7 +33,7 @@ store_sha256() {
 
     if [[ -f $ARCHIVE_FILE ]]; then
         mkdir -p "$(dirname "$SHA256_FILE")"
-        shasum -a 256 "$ARCHIVE_FILE" | awk '{print $1}' > "$SHA256_FILE"
+        shasum -a 256 "$ARCHIVE_FILE" | awk '{print $1}' >"$SHA256_FILE"
         echo "SHA256 of the yadm archive stored in $SHA256_FILE"
     else
         echo "Archive file not found. Skipping SHA256 storage."
@@ -99,6 +99,7 @@ verify_encrypted() {
     # Create temp dir with automatic cleanup
     local tmpdir
     tmpdir=$(mktemp -d)
+    # shellcheck disable=SC2064  # expand now: capture this tmpdir, not a later one
     trap "rm -rf '$tmpdir'" RETURN
 
     # Decrypt archive to temp dir (use yadm's configured gpg-program if set)
@@ -142,7 +143,7 @@ verify_encrypted() {
                 has_diff=true
             fi
         done
-    done < "$encrypt_file"
+    done <"$encrypt_file"
 
     # Cleanup happens via trap, confirm it
     rm -rf "$tmpdir"
@@ -171,9 +172,15 @@ list_all_tracked() {
 }
 
 # Reliquary health self-check helpers
-_doctor_ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
-_doctor_warn() { printf '  \033[33m!\033[0m %s\n' "$1"; DOCTOR_WARNS=$((DOCTOR_WARNS + 1)); }
-_doctor_fail() { printf '  \033[31m✗\033[0m %s\n' "$1"; DOCTOR_FAILS=$((DOCTOR_FAILS + 1)); }
+_doctor_ok() { printf '  \033[32m✓\033[0m %s\n' "$1"; }
+_doctor_warn() {
+    printf '  \033[33m!\033[0m %s\n' "$1"
+    DOCTOR_WARNS=$((DOCTOR_WARNS + 1))
+}
+_doctor_fail() {
+    printf '  \033[31m✗\033[0m %s\n' "$1"
+    DOCTOR_FAILS=$((DOCTOR_FAILS + 1))
+}
 _doctor_skip() { printf '  \033[2m–\033[0m %s\n' "$1"; }
 _doctor_head() { printf '\n\033[1m==>\033[0m \033[1m%s\033[0m\n' "$1"; }
 
@@ -183,9 +190,12 @@ _doctor_head() { printf '\n\033[1m==>\033[0m \033[1m%s\033[0m\n' "$1"; }
 _doctor_run() {
     local full=false
     case "${1:-}" in
-        -f|--full) full=true ;;
-        "")        ;;
-        *) echo "Usage: yadm doctor [--full]" >&2; return 2 ;;
+        -f | --full) full=true ;;
+        "") ;;
+        *)
+            echo "Usage: yadm doctor [--full]" >&2
+            return 2
+            ;;
     esac
 
     DOCTOR_FAILS=0
@@ -195,6 +205,7 @@ _doctor_run() {
     # Probe each shell ONCE (interactive, so env.d + interactive.d run), tagging
     # each datum so startup noise can't be mistaken for our output.
     local sh probe
+    # shellcheck disable=SC2034  # assigned indirectly below via eval "p_$sh=..."
     local p_bash p_zsh p_fish
     for sh in $shells; do
         if ! command -v "$sh" >/dev/null 2>&1; then
@@ -217,7 +228,10 @@ _doctor_run() {
     _doctor_head "yadm resolves to the wrapper (not brew)"
     for sh in $shells; do
         eval "probe=\$p_$sh"
-        if [ "$probe" = __skip__ ]; then _doctor_skip "$sh not installed"; continue; fi
+        if [ "$probe" = __skip__ ]; then
+            _doctor_skip "$sh not installed"
+            continue
+        fi
         local resolved
         resolved=$(_doctor_get "$probe" __D_YADM__)
         if [ "$resolved" = "$HOME/.config/bin/yadm" ]; then
@@ -231,7 +245,10 @@ _doctor_run() {
     _doctor_head "interactive shell startup is clean"
     for sh in $shells; do
         eval "probe=\$p_$sh"
-        if [ "$probe" = __skip__ ]; then _doctor_skip "$sh not installed"; continue; fi
+        if [ "$probe" = __skip__ ]; then
+            _doctor_skip "$sh not installed"
+            continue
+        fi
         if printf '%s' "$probe" | grep -q __D_OK__; then
             _doctor_ok "$sh -ic starts without error"
         else
@@ -243,7 +260,10 @@ _doctor_run() {
     _doctor_head "\$PATH has no duplicate entries"
     for sh in $shells; do
         eval "probe=\$p_$sh"
-        if [ "$probe" = __skip__ ]; then _doctor_skip "$sh not installed"; continue; fi
+        if [ "$probe" = __skip__ ]; then
+            _doctor_skip "$sh not installed"
+            continue
+        fi
         local path dups
         path=$(_doctor_get "$probe" __D_PATH__)
         dups=$(printf '%s' "$path" | tr ':' '\n' | grep -v '^$' | sort | uniq -d | tr '\n' ' ')
@@ -261,7 +281,8 @@ _doctor_run() {
     local parity="$HOME/.config/bin/check-shell-parity"
     if [ -x "$parity" ]; then
         local pout prc
-        pout=$("$parity" 2>&1); prc=$?
+        pout=$("$parity" 2>&1)
+        prc=$?
         if [ "$prc" -eq 0 ]; then
             _doctor_ok "in sync across paired configs"
         else
@@ -270,6 +291,29 @@ _doctor_run() {
         fi
     else
         _doctor_warn "check-shell-parity not found — skipped"
+    fi
+
+    # 4a. Shell lint and format. Bash has no type system, so a refactor here is
+    #     unverified by construction; static analysis is the whole budget. The
+    #     third gate is the suppression ratchet, without which silencing a
+    #     finding is invisible to the first two.
+    _doctor_head "shell lint and format"
+    local shlint="$HOME/.config/bin/check-shell-lint"
+    if [ -x "$shlint" ]; then
+        local lout lrc
+        lout=$("$shlint" 2>&1)
+        lrc=$?
+        if [ "$lrc" -eq 0 ]; then
+            _doctor_ok "$(printf '%s\n' "$lout" | head -1)"
+        elif [ "$lrc" -eq 1 ]; then
+            _doctor_warn "checked with gaps:"
+            printf '%s\n' "$lout" | sed 's/^/      /'
+        else
+            _doctor_fail "findings:"
+            printf '%s\n' "$lout" | sed 's/^/      /'
+        fi
+    else
+        _doctor_warn "check-shell-lint not found — skipped"
     fi
 
     # 4b. Claude Code ! blocks. A ```! fence executes when its skill or slash
@@ -281,7 +325,8 @@ _doctor_run() {
     local mdblocks="$HOME/.config/bin/check-md-shell-blocks"
     if [ -x "$mdblocks" ]; then
         local mout mrc
-        mout=$("$mdblocks" 2>&1); mrc=$?
+        mout=$("$mdblocks" 2>&1)
+        mrc=$?
         if [ "$mrc" -eq 0 ]; then
             _doctor_ok "every block would run"
         elif [ "$mrc" -eq 1 ]; then
@@ -300,7 +345,8 @@ _doctor_run() {
     local bedrock="$HOME/.config/bin/check-bedrock"
     if [ -x "$bedrock" ]; then
         local bout brc
-        bout=$("$bedrock" 2>&1); brc=$?
+        bout=$("$bedrock" 2>&1)
+        brc=$?
         if [ "$brc" -eq 0 ]; then
             _doctor_ok "all members present, configured, PATH-accessible"
         elif [ "$brc" -eq 1 ]; then
@@ -319,7 +365,8 @@ _doctor_run() {
     local brewhealth="$HOME/.config/bin/check-brew-health"
     if [ -x "$brewhealth" ]; then
         local hout hrc
-        hout=$("$brewhealth" 2>&1); hrc=$?
+        hout=$("$brewhealth" 2>&1)
+        hrc=$?
         if [ "$hrc" -eq 0 ]; then
             _doctor_ok "nothing deprecated, orphaned or unresolvable"
         elif [ "$hrc" -eq 1 ]; then
@@ -347,7 +394,7 @@ _doctor_run() {
     else
         local tkb tmib
         tkb=$(du -sk "$relic_target" 2>/dev/null | awk '{print $1}')
-        tmib=$(( ${tkb:-0} / 1024 ))
+        tmib=$((${tkb:-0} / 1024))
         if [ "${tkb:-0}" -lt 4194304 ]; then
             _doctor_ok "${tmib} MiB"
         else
@@ -363,7 +410,8 @@ _doctor_run() {
     local coverage="$HOME/.config/bin/check-yadm-coverage"
     if [ -x "$coverage" ]; then
         local cvout cvrc
-        cvout=$("$coverage" 2>&1); cvrc=$?
+        cvout=$("$coverage" 2>&1)
+        cvrc=$?
         if [ "$cvrc" -eq 0 ]; then
             _doctor_ok "every path accounted for"
         elif [ "$cvrc" -eq 1 ]; then
@@ -392,7 +440,8 @@ _doctor_run() {
     _doctor_head "archive vs disk verification"
     if $full; then
         local vout vrc
-        vout=$(verify_encrypted 2>&1); vrc=$?
+        vout=$(verify_encrypted 2>&1)
+        vrc=$?
         if [ "$vrc" -eq 0 ]; then
             _doctor_ok "all encrypted files in sync"
         else
@@ -411,7 +460,8 @@ _doctor_run() {
         _doctor_skip "ske not published (attic decrypted? bootstrap publishes relics)"
     else
         local sout src
-        sout=$(ske doctor 2>&1); src=$?
+        sout=$(ske doctor 2>&1)
+        src=$?
         if [ "$src" -eq 0 ]; then
             _doctor_ok "registry, ssh routing and git signing wired"
         else
@@ -444,9 +494,12 @@ doctor() {
     local quiet=false full="" a
     for a in "$@"; do
         case "$a" in
-            -q|--quiet) quiet=true ;;
-            -f|--full)  full=--full ;;
-            *) echo "Usage: yadm doctor [--full] [--quiet]" >&2; return 2 ;;
+            -q | --quiet) quiet=true ;;
+            -f | --full) full=--full ;;
+            *)
+                echo "Usage: yadm doctor [--full] [--quiet]" >&2
+                return 2
+                ;;
         esac
     done
 
@@ -459,7 +512,8 @@ doctor() {
     # _doctor_run exits non-zero on failures; warnings keep exit 0, so also gate
     # on the "healthy" summary marker (the only summary that means all-clear).
     local out rc
-    out=$(_doctor_run $full 2>&1); rc=$?
+    out=$(_doctor_run $full 2>&1)
+    rc=$?
     if [ "$rc" -ne 0 ] || ! printf '%s' "$out" | grep -q '==> healthy'; then
         printf '%s\n' "$out"
     fi
@@ -502,7 +556,7 @@ case $1 in
         set_yadm_repo_url "$REPO_URL_HTTPS"
         ;;
     decrypt)
-        if [[ ! " ${@:2} " =~ " -l " ]]; then
+        if [[ ! " ${*:2} " =~ " -l " ]]; then
             handle_encrypt_decrypt "$1"
         else
             $YADM_BIN "$@"

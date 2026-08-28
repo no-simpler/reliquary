@@ -90,9 +90,9 @@ _install_on_path_registry_add() {
     _install_on_path_registry_contains "$name" && return 0
     mkdir -p "$_INSTALL_ON_PATH_DIR"
     if [[ -n "$owner" ]]; then
-        printf '%s\t%s\n' "$name" "$owner" >> "$_INSTALL_ON_PATH_REGISTRY"
+        printf '%s\t%s\n' "$name" "$owner" >>"$_INSTALL_ON_PATH_REGISTRY"
     else
-        printf '%s\n' "$name" >> "$_INSTALL_ON_PATH_REGISTRY"
+        printf '%s\n' "$name" >>"$_INSTALL_ON_PATH_REGISTRY"
     fi
 }
 
@@ -170,9 +170,18 @@ install_on_path() {
     # the running process on the old inode. It is also atomic, so a concurrent
     # reader never sees a half-written binary.
     local staged="$target.new.$$"
-    cp "$src" "$staged" || { rm -f "$staged"; return 1; }
-    chmod +x "$staged" || { rm -f "$staged"; return 1; }
-    mv -f "$staged" "$target" || { rm -f "$staged"; return 1; }
+    cp "$src" "$staged" || {
+        rm -f "$staged"
+        return 1
+    }
+    chmod +x "$staged" || {
+        rm -f "$staged"
+        return 1
+    }
+    mv -f "$staged" "$target" || {
+        rm -f "$staged"
+        return 1
+    }
 
     _install_on_path_registry_add "$name"
 
@@ -209,8 +218,8 @@ install_on_path_migrate_registries() {
                 continue
             fi
             mkdir -p "$_INSTALL_ON_PATH_DIR"
-            printf '%s\t%s\n' "$name" "$meta" >> "$_INSTALL_ON_PATH_REGISTRY"
-        done < "$legacy"
+            printf '%s\t%s\n' "$name" "$meta" >>"$_INSTALL_ON_PATH_REGISTRY"
+        done <"$legacy"
 
         rm -f "$legacy"
     done
@@ -232,20 +241,23 @@ install_on_path_prune_registry() {
     while IFS= read -r line || [[ -n "$line" ]]; do
         # Pass comments and blanks through untouched.
         case "$line" in
-            '#'*|'') printf '%s\n' "$line" >> "$tmp"; continue ;;
+            '#'* | '')
+                printf '%s\n' "$line" >>"$tmp"
+                continue
+                ;;
         esac
         name="${line%%[[:space:]]*}"
         if [[ -z "$name" ]]; then
-            printf '%s\n' "$line" >> "$tmp"
+            printf '%s\n' "$line" >>"$tmp"
             continue
         fi
         if [[ -e "$_INSTALL_ON_PATH_DIR/$name" ]]; then
-            printf '%s\n' "$line" >> "$tmp"
+            printf '%s\n' "$line" >>"$tmp"
         else
             printf 'pruned %s (no file at %s)\n' "$name" "$_INSTALL_ON_PATH_DIR/$name"
             pruned=$((pruned + 1))
         fi
-    done < "$_INSTALL_ON_PATH_REGISTRY"
+    done <"$_INSTALL_ON_PATH_REGISTRY"
 
     mv "$tmp" "$_INSTALL_ON_PATH_REGISTRY"
     [[ $pruned -eq 0 ]] && printf 'registry clean — nothing to prune\n'

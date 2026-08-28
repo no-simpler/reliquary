@@ -18,11 +18,15 @@
 set -o pipefail
 
 # --- Colors (house style, see bin/up) --------------------------------------
-BOLD="\033[1m"; RED="\033[31m"; GREEN="\033[32m"; YELLOW="\033[33m"; RESET="\033[0m"
+BOLD="\033[1m"
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+RESET="\033[0m"
 
-print_msg()  { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}${GREEN}$1${RESET}"; }
+print_msg() { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}${GREEN}$1${RESET}"; }
 print_warn() { printf '%b\n' "${BOLD}${YELLOW}==>${RESET} ${YELLOW}$1${RESET}"; }
-print_err()  { printf '%b\n' "${BOLD}${RED}!!>${RESET} ${RED}$1${RESET}"; }
+print_err() { printf '%b\n' "${BOLD}${RED}!!>${RESET} ${RED}$1${RESET}"; }
 
 CONFIG="$HOME/.config"
 
@@ -44,14 +48,14 @@ PAIRS=(
 # permanent* per-shell divergences — not drift.
 allow_for() {
     case "$1" in
-    aliases)
-        # ..      bash-only nav alias (zsh uses a `-g` global alias from `...`
-        #         up; fish uses abbrs and defines no `..`)
-        # libpath POSIX-only ($LD_LIBRARY_PATH; not meaningful on fish/macOS)
-        # rzc     zsh-only (.zcompdump reset + re-source ~/.zshrc)
-        echo ".. libpath rzc"
-        ;;
-    *) echo "" ;;
+        aliases)
+            # ..      bash-only nav alias (zsh uses a `-g` global alias from `...`
+            #         up; fish uses abbrs and defines no `..`)
+            # libpath POSIX-only ($LD_LIBRARY_PATH; not meaningful on fish/macOS)
+            # rzc     zsh-only (.zcompdump reset + re-source ~/.zshrc)
+            echo ".. libpath rzc"
+            ;;
+        *) echo "" ;;
     esac
 }
 
@@ -113,8 +117,16 @@ for entry in "${PAIRS[@]}"; do
     posix="$CONFIG/$posix_rel"
     fish="$CONFIG/$fish_rel"
 
-    if [[ ! -f "$posix" ]]; then print_err "[$label] missing POSIX file: $posix_rel"; fail=1; continue; fi
-    if [[ ! -f "$fish" ]];  then print_err "[$label] missing fish file: $fish_rel";  fail=1; continue; fi
+    if [[ ! -f "$posix" ]]; then
+        print_err "[$label] missing POSIX file: $posix_rel"
+        fail=1
+        continue
+    fi
+    if [[ ! -f "$fish" ]]; then
+        print_err "[$label] missing fish file: $fish_rel"
+        fail=1
+        continue
+    fi
 
     # Allowlisted names are filtered out of *both* sides before diffing.
     allow_re=""
@@ -124,7 +136,7 @@ for entry in "${PAIRS[@]}"; do
     filter() { if [[ -n "$allow_re" ]]; then grep -Ev "^(${allow_re})$"; else cat; fi; }
 
     posix_set="$(posix_names "$posix" | filter | sort -u)"
-    fish_set="$(fish_names "$fish"  | filter | sort -u)"
+    fish_set="$(fish_names "$fish" | filter | sort -u)"
 
     posix_only="$(comm -23 <(printf '%s\n' "$posix_set") <(printf '%s\n' "$fish_set") | grep -v '^$')"
     fish_only="$(comm -13 <(printf '%s\n' "$posix_set") <(printf '%s\n' "$fish_set") | grep -v '^$')"
@@ -133,7 +145,7 @@ for entry in "${PAIRS[@]}"; do
         fail=1
         print_err "[$label] name drift between $posix_rel and $fish_rel"
         [[ -n "$posix_only" ]] && printf '%b\n' "    only in POSIX: ${YELLOW}$(echo $posix_only)${RESET}"
-        [[ -n "$fish_only"  ]] && printf '%b\n' "    only in fish:  ${YELLOW}$(echo $fish_only)${RESET}"
+        [[ -n "$fish_only" ]] && printf '%b\n' "    only in fish:  ${YELLOW}$(echo $fish_only)${RESET}"
     fi
     checked=$((checked + 1))
 done

@@ -58,11 +58,19 @@ relic::_version_ge() {
     [[ "$(printf '%s\n%s\n' "$need" "$have" | sort -V | head -1)" == "$need" ]]
 }
 
+# shellcheck disable=SC2034  # the manifest fields are this function's output;
+# every one is read by callers after it returns.
 relic::load_manifest() {
     local dir="${1:-}"
-    [[ -n "$dir" ]] || { relic::_die "load_manifest: missing dir"; return $?; }
+    [[ -n "$dir" ]] || {
+        relic::_die "load_manifest: missing dir"
+        return $?
+    }
     local manifest="$dir/relic.sh"
-    [[ -f "$manifest" ]] || { relic::_die "no manifest at $manifest"; return $?; }
+    [[ -f "$manifest" ]] || {
+        relic::_die "no manifest at $manifest"
+        return $?
+    }
 
     # Reset known fields so prior-load values don't leak when iterating relics.
     NAME=""
@@ -76,15 +84,27 @@ relic::load_manifest() {
     DOCKER=0
 
     # shellcheck disable=SC1090
-    source "$manifest" || { relic::_die "failed to source $manifest"; return $?; }
+    source "$manifest" || {
+        relic::_die "failed to source $manifest"
+        return $?
+    }
 
-    [[ -n "$NAME" ]]    || { relic::_die "manifest missing NAME: $manifest"; return $?; }
-    [[ -n "$RUNTIME" ]] || { relic::_die "manifest missing RUNTIME: $manifest"; return $?; }
+    [[ -n "$NAME" ]] || {
+        relic::_die "manifest missing NAME: $manifest"
+        return $?
+    }
+    [[ -n "$RUNTIME" ]] || {
+        relic::_die "manifest missing RUNTIME: $manifest"
+        return $?
+    }
 }
 
 relic::check_deps() {
     local dir="${1:-}"
-    [[ -n "$dir" ]] || { relic::_die "check_deps: missing dir"; return $?; }
+    [[ -n "$dir" ]] || {
+        relic::_die "check_deps: missing dir"
+        return $?
+    }
     relic::load_manifest "$dir" || return $?
 
     local fail=0 pkg
@@ -101,7 +121,8 @@ relic::check_deps() {
         case "$RUNTIME" in
             python)
                 if ! command -v python3 >/dev/null 2>&1; then
-                    printf 'relic[%s]: python3 not on PATH\n' "$NAME" >&2; fail=1
+                    printf 'relic[%s]: python3 not on PATH\n' "$NAME" >&2
+                    fail=1
                 else
                     local ver
                     ver="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
@@ -122,7 +143,8 @@ relic::check_deps() {
                 ;;
             rust)
                 if ! command -v rustc >/dev/null 2>&1; then
-                    printf 'relic[%s]: rustc not on PATH\n' "$NAME" >&2; fail=1
+                    printf 'relic[%s]: rustc not on PATH\n' "$NAME" >&2
+                    fail=1
                 else
                     local ver
                     ver="$(rustc --version 2>/dev/null | awk '{print $2}')"
@@ -135,12 +157,14 @@ relic::check_deps() {
                 ;;
             fish)
                 if ! command -v fish >/dev/null 2>&1; then
-                    printf 'relic[%s]: fish not on PATH\n' "$NAME" >&2; fail=1
+                    printf 'relic[%s]: fish not on PATH\n' "$NAME" >&2
+                    fail=1
                 fi
                 ;;
             docker)
                 if ! command -v docker >/dev/null 2>&1; then
-                    printf 'relic[%s]: docker not on PATH\n' "$NAME" >&2; fail=1
+                    printf 'relic[%s]: docker not on PATH\n' "$NAME" >&2
+                    fail=1
                 fi
                 ;;
         esac
@@ -154,7 +178,7 @@ relic::check_deps() {
 # would silently invalidate.
 relic::_cargo_workspace_root() {
     local dir="${1:-}" manifest
-    manifest="$( cd "$dir" 2>/dev/null && cargo locate-project --workspace --message-format plain 2>/dev/null )"
+    manifest="$(cd "$dir" 2>/dev/null && cargo locate-project --workspace --message-format plain 2>/dev/null)"
     [[ -n "$manifest" ]] || return 1
     dirname "$manifest"
 }
@@ -191,18 +215,19 @@ relic::_published_names() {
 relic::_publish_compiled() {
     local dir="${1:-}" root n
     root="$(relic::_cargo_workspace_root "$dir")" || {
-        relic::_die "no cargo workspace above $dir"; return $?
+        relic::_die "no cargo workspace above $dir"
+        return $?
     }
 
     # Unconditionally, not only when the binary is missing: guarding on absence
     # would publish whatever was built last, shipping a source change as a stale
     # binary. cargo is incremental, so an up-to-date tree makes this a no-op.
     printf 'relic[%s]: building\n' "$NAME"
-    ( cd "$dir" && cargo build --release --quiet ) || return $?
+    (cd "$dir" && cargo build --release --quiet) || return $?
 
     local names=()
     while IFS= read -r n; do
-        [[ -n "$n" ]] && names=( "${names[@]}" "$n" )
+        [[ -n "$n" ]] && names=("${names[@]}" "$n")
     done < <(relic::_published_names)
 
     (
@@ -217,10 +242,13 @@ relic::_publish_compiled() {
 
 relic::publish() {
     local dir="${1:-}"
-    [[ -n "$dir" ]] || { relic::_die "publish: missing dir"; return $?; }
+    [[ -n "$dir" ]] || {
+        relic::_die "publish: missing dir"
+        return $?
+    }
 
     if [[ -x "$dir/scripts/publish.sh" ]]; then
-        ( cd "$dir" && ./scripts/publish.sh )
+        (cd "$dir" && ./scripts/publish.sh)
         return $?
     fi
 
@@ -262,12 +290,27 @@ relic::publish() {
     )
 }
 
+# Format and lint one relic's shell. Absent, the relic is unlinted and says so
+# rather than passing quietly — a gate that silently does nothing is worse than
+# no gate, because it also carries the belief that it is on.
+relic::_shell_lint() {
+    local dir="${1:-}" linter="$HOME/.config/bin/check-shell-lint"
+    if [[ ! -x "$linter" ]]; then
+        printf 'relic[%s]: check-shell-lint not found — shell unlinted\n' "$NAME" >&2
+        return 0
+    fi
+    "$linter" "$dir"
+}
+
 relic::test() {
     local dir="${1:-}"
-    [[ -n "$dir" ]] || { relic::_die "test: missing dir"; return $?; }
+    [[ -n "$dir" ]] || {
+        relic::_die "test: missing dir"
+        return $?
+    }
 
     if [[ -x "$dir/scripts/test.sh" ]]; then
-        ( cd "$dir" && ./scripts/test.sh )
+        (cd "$dir" && ./scripts/test.sh)
         return $?
     fi
 
@@ -281,6 +324,14 @@ relic::test() {
         return $?
     fi
 
+    # The bash branch's format-and-lint station, ahead of the suite for the same
+    # reason the rust branch runs fmt first: cheapest gate reports first. Bash
+    # has no type system, so this is the whole of what can be verified
+    # statically. See "Track 2" in ~/.config/reliquary/HARDENING.md.
+    if [[ "$RUNTIME" == "bash" ]]; then
+        relic::_shell_lint "$dir" || return $?
+    fi
+
     local tests_dir="$dir/tests"
     if [[ ! -d "$tests_dir" ]]; then
         printf 'relic[%s]: no tests/ directory; nothing to run\n' "$NAME"
@@ -290,14 +341,14 @@ relic::test() {
     case "$RUNTIME" in
         python)
             if command -v pytest >/dev/null 2>&1; then
-                ( cd "$dir" && pytest tests/ )
+                (cd "$dir" && pytest tests/)
             else
-                ( cd "$dir" && python3 -m unittest discover tests/ )
+                (cd "$dir" && python3 -m unittest discover tests/)
             fi
             ;;
         bash)
             if [[ -x "$tests_dir/run.sh" ]]; then
-                ( cd "$dir" && ./tests/run.sh )
+                (cd "$dir" && ./tests/run.sh)
             else
                 local fail=0 t
                 for t in "$tests_dir"/*.sh; do
@@ -334,7 +385,7 @@ relic::_allow_ratchet() {
 
         have="$(find "$pkgdir" -name '*.rs' -not -path '*/target/*' -not -path '*/fixtures/*' \
             -exec grep -hoE '#!?\[allow\(' {} + 2>/dev/null | wc -l | tr -d ' ')"
-        want="$(sed -n "s/^$pkg[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$baseline" | head -1)"
+        want="$(awk -v p="$pkg" -F' *= *' '$1 == p { gsub(/[^0-9]/, "", $2); print $2; exit }' "$baseline")"
 
         if [[ -z "$want" ]]; then
             printf 'lint ratchet: %s has no baseline in %s\n' "$pkg" "$baseline" >&2
@@ -360,12 +411,13 @@ relic::_allow_ratchet() {
 relic::_test_compiled() {
     local dir="${1:-}" root c
     root="$(relic::_cargo_workspace_root "$dir")" || {
-        relic::_die "no cargo workspace above $dir"; return $?
+        relic::_die "no cargo workspace above $dir"
+        return $?
     }
 
-    local pkgs=( -p "$NAME" )
+    local pkgs=(-p "$NAME")
     while IFS= read -r c; do
-        [[ -n "$c" ]] && pkgs=( "${pkgs[@]}" -p "$c" )
+        [[ -n "$c" ]] && pkgs=("${pkgs[@]}" -p "$c")
     done < <(relic::_shared_crates "$root")
 
     (
@@ -393,10 +445,13 @@ relic::_test_compiled() {
 
 relic::update() {
     local dir="${1:-}"
-    [[ -n "$dir" ]] || { relic::_die "update: missing dir"; return $?; }
+    [[ -n "$dir" ]] || {
+        relic::_die "update: missing dir"
+        return $?
+    }
 
     if [[ -x "$dir/scripts/update.sh" ]]; then
-        ( cd "$dir" && ./scripts/update.sh )
+        (cd "$dir" && ./scripts/update.sh)
         return $?
     fi
 
@@ -405,6 +460,6 @@ relic::update() {
     case "$RUNTIME" in
         # publish builds, so there is nothing to do first.
         rust) relic::publish "$dir" ;;
-        *)    return 0 ;;
+        *) return 0 ;;
     esac
 }

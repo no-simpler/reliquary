@@ -154,9 +154,20 @@ surviving `#[allow]` carries a reason comment, and the count of them is itself a
 
 ## Track 2 — hardened shell
 
-`shellcheck` + `shfmt` over all tracked bash — `*.sh`, `*.bash`, and bash shebangs, vendored
-files excluded — at `-S warning`, against a **committed baseline suppression file** so the gate
-is on from day one rather than after a catch-up phase.
+`shellcheck` + `shfmt` over all tracked bash — `*.sh`, `*.bash`, and bash shebangs; zsh and
+fish are excluded because neither is parseable by the linter, fixtures because lints written
+into one are their point, symlinks because they would lint their target twice.
+
+**Zero findings at `-S warning`, and no baseline of findings.** A finding that is genuinely
+wrong for this codebase is accepted *where it happens*, with an inline disable directive
+carrying its reason — provenance beside the code, the same rule the deviation list follows.
+The **ratchet is the count of those directives**, committed per file: silencing a finding makes
+the finding count fall, so nothing else can see it happen. Identical control to the Rust lane's
+`#[allow]` count, identical equality semantics. One mechanism, two languages.
+
+The predicate that counts a directive must **mirror the tool's own parsing rule** — a directive
+is a comment of its own line. Anything that merely mentions one mid-line, prose included, is
+not a suppression and must not count as one.
 
 Wired into `relic test`'s bash branch and a verification station. **Deliberately not into
 `pre_commit`**, for two reasons that agree:
@@ -186,7 +197,7 @@ not a ceiling — which is what makes it survivable in a codebase under active c
 | --- | --- | --- | --- |
 | coverage | `cargo llvm-cov --json`, per crate | committed per-crate % | any crate drops, or falls under the floor |
 | lint | count of `#[allow(...)]`, per package | committed integer | the count *changes* |
-| shell | `shellcheck` findings | committed suppression file | a finding appears outside it |
+| shell | count of disable directives, per file | committed integer | the count *changes* |
 | perf | timing of the declared hot paths | committed budget | over budget by the stated multiple |
 
 Two calibration rules, both load-bearing:

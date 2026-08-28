@@ -9,6 +9,6 @@
 
 if command -v fzf >/dev/null 2>&1; then
     case "$D__SHELL" in
-    bash | zsh) source <(fzf --"$D__SHELL") ;;
+        bash | zsh) source <(fzf --"$D__SHELL") ;;
     esac
 fi

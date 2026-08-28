@@ -104,20 +104,20 @@ export VISUAL="zed --wait"
 
 # Define the files to source based on the shell type
 case "$D__SHELL" in
-bash)
-    FILES_TO_SOURCE=(
-        "$(brew --prefix)/share/google-cloud-sdk/path.bash.inc"
-    )
-    ;;
-zsh)
-    FILES_TO_SOURCE=(
-        "$(brew --prefix)/share/google-cloud-sdk/path.zsh.inc"
-        "$(brew --prefix)/share/google-cloud-sdk/completion.zsh.inc"
-    )
-    ;;
-*)
-    FILES_TO_SOURCE=()
-    ;;
+    bash)
+        FILES_TO_SOURCE=(
+            "$(brew --prefix)/share/google-cloud-sdk/path.bash.inc"
+        )
+        ;;
+    zsh)
+        FILES_TO_SOURCE=(
+            "$(brew --prefix)/share/google-cloud-sdk/path.zsh.inc"
+            "$(brew --prefix)/share/google-cloud-sdk/completion.zsh.inc"
+        )
+        ;;
+    *)
+        FILES_TO_SOURCE=()
+        ;;
 esac
 
 # Source each file if it exists
@@ -162,6 +162,7 @@ if [ "$D__SHELL" = "zsh" ]; then
     # zsh doesn't word-split unquoted $PATH, so the POSIX loop below would be a
     # no-op here; use the native uniquing of the tied `path` array instead
     # (also keeps first occurrence).
+    # shellcheck disable=SC2034  # `path` is zsh's array tied to PATH
     typeset -U path PATH
 elif [ -n "$PATH" ]; then
     _dedup=""

@@ -16,48 +16,48 @@ fi
 
 # Update package lists and install Git based on the distribution
 case "$DISTRO" in
-debian)
-    echo "Detected Debian-based distribution"
-    sudo apt-get update
-    if ! command -v git &>/dev/null; then
-        echo "Installing Git..."
-        sudo apt-get install -y git
-    else
-        echo "Git is already installed"
-    fi
-    ;;
-redhat)
-    echo "Detected Red Hat-based distribution"
-    sudo yum check-update
-    if ! command -v git &>/dev/null; then
-        echo "Installing Git..."
-        sudo yum install -y git
-    else
-        echo "Git is already installed"
-    fi
-    ;;
-arch)
-    echo "Detected Arch-based distribution"
-    sudo pacman -Sy
-    if ! command -v git &>/dev/null; then
-        echo "Installing Git..."
-        sudo pacman -S --noconfirm git
-    else
-        echo "Git is already installed"
-    fi
-    ;;
-suse)
-    echo "Detected SUSE-based distribution"
-    sudo zypper refresh
-    if ! command -v git &>/dev/null; then
-        echo "Installing Git..."
-        sudo zypper install -y git
-    else
-        echo "Git is already installed"
-    fi
-    ;;
-*)
-    echo "Unsupported Linux distribution: $DISTRO"
-    return 1
-    ;;
+    debian)
+        echo "Detected Debian-based distribution"
+        sudo apt-get update
+        if ! command -v git &>/dev/null; then
+            echo "Installing Git..."
+            sudo apt-get install -y git
+        else
+            echo "Git is already installed"
+        fi
+        ;;
+    redhat)
+        echo "Detected Red Hat-based distribution"
+        sudo yum check-update
+        if ! command -v git &>/dev/null; then
+            echo "Installing Git..."
+            sudo yum install -y git
+        else
+            echo "Git is already installed"
+        fi
+        ;;
+    arch)
+        echo "Detected Arch-based distribution"
+        sudo pacman -Sy
+        if ! command -v git &>/dev/null; then
+            echo "Installing Git..."
+            sudo pacman -S --noconfirm git
+        else
+            echo "Git is already installed"
+        fi
+        ;;
+    suse)
+        echo "Detected SUSE-based distribution"
+        sudo zypper refresh
+        if ! command -v git &>/dev/null; then
+            echo "Installing Git..."
+            sudo zypper install -y git
+        else
+            echo "Git is already installed"
+        fi
+        ;;
+    *)
+        echo "Unsupported Linux distribution: $DISTRO"
+        return 1
+        ;;
 esac

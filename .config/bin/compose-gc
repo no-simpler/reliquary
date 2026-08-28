@@ -53,14 +53,21 @@
 set -o pipefail
 
 # --- Colors (house style, see bin/check-bedrock) ---------------------------
-BOLD="\033[1m"; RED="\033[31m"; GREEN="\033[32m"; DIM="\033[2m"; RESET="\033[0m"
+BOLD="\033[1m"
+RED="\033[31m"
+GREEN="\033[32m"
+DIM="\033[2m"
+RESET="\033[0m"
 
 FAILS=0
 
-ok()   { printf '%b\n' "  ${GREEN}✓${RESET} $1"; }
-fail() { printf '%b\n' "  ${RED}✗${RESET} $1"; FAILS=$((FAILS + 1)); }
+ok() { printf '%b\n' "  ${GREEN}✓${RESET} $1"; }
+fail() {
+    printf '%b\n' "  ${RED}✗${RESET} $1"
+    FAILS=$((FAILS + 1))
+}
 note() { printf '%b\n' "      ${DIM}$1${RESET}"; }
-hdr()  { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}$1${RESET}"; }
+hdr() { printf '%b\n' "${BOLD}==>${RESET} ${BOLD}$1${RESET}"; }
 
 usage() {
     cat <<'USAGE'
@@ -83,23 +90,43 @@ TARGET=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        -n|--dry-run) DRY_RUN=1 ;;
-        -h|--help)    usage; exit 0 ;;
-        down)         SUB="down" ;;
-        -*)           printf '%b\n' "${RED}unknown option: $1${RESET}" >&2; usage >&2; exit 2 ;;
-        *)            if [ -z "$TARGET" ]; then TARGET="$1"; else
-                          printf '%b\n' "${RED}unexpected argument: $1${RESET}" >&2; exit 2
-                      fi ;;
+        -n | --dry-run) DRY_RUN=1 ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        down) SUB="down" ;;
+        -*)
+            printf '%b\n' "${RED}unknown option: $1${RESET}" >&2
+            usage >&2
+            exit 2
+            ;;
+        *) if [ -z "$TARGET" ]; then TARGET="$1"; else
+            printf '%b\n' "${RED}unexpected argument: $1${RESET}" >&2
+            exit 2
+        fi ;;
     esac
     shift
 done
 
-[ "$SUB" = "down" ] && [ -z "$TARGET" ] && { printf '%b\n' "${RED}down needs a worktree path${RESET}" >&2; exit 2; }
-[ -z "$SUB" ] && [ -n "$TARGET" ] && { printf '%b\n' "${RED}unexpected argument: $TARGET${RESET}" >&2; exit 2; }
+[ "$SUB" = "down" ] && [ -z "$TARGET" ] && {
+    printf '%b\n' "${RED}down needs a worktree path${RESET}" >&2
+    exit 2
+}
+[ -z "$SUB" ] && [ -n "$TARGET" ] && {
+    printf '%b\n' "${RED}unexpected argument: $TARGET${RESET}" >&2
+    exit 2
+}
 
 # --- Preconditions ---------------------------------------------------------
-command -v docker >/dev/null 2>&1 || { note "docker not installed — nothing to do"; exit 0; }
-docker ps -q >/dev/null 2>&1      || { note "docker daemon unreachable — nothing to do"; exit 0; }
+command -v docker >/dev/null 2>&1 || {
+    note "docker not installed — nothing to do"
+    exit 0
+}
+docker ps -q >/dev/null 2>&1 || {
+    note "docker daemon unreachable — nothing to do"
+    exit 0
+}
 
 # --- down: teardown of one worktree's stack --------------------------------
 if [ "$SUB" = "down" ]; then
@@ -110,14 +137,17 @@ if [ "$SUB" = "down" ]; then
     out=$(docker compose --project-directory "$TARGET" --profile '*' down -v --remove-orphans 2>&1)
     rc=$?
     case "$out" in
-        *"no configuration file"*|*"Can't find a suitable configuration file"*)
-            note "no compose file at $TARGET — nothing to tear down"; exit 0 ;;
+        *"no configuration file"* | *"Can't find a suitable configuration file"*)
+            note "no compose file at $TARGET — nothing to tear down"
+            exit 0
+            ;;
     esac
     case "$out" in
         *"Resource is still in use"*)
             printf '%s\n' "$out"
             fail "teardown left a resource in use — the reconcile sweep still has work"
-            exit 1 ;;
+            exit 1
+            ;;
     esac
     if [ $rc -ne 0 ]; then
         printf '%s\n' "$out"
@@ -132,27 +162,31 @@ fi
 # --git-common-dir, not --show-toplevel: from inside a linked worktree it still
 # resolves to the main worktree.
 COMMON=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || {
-    note "not inside a git repository — nothing to do"; exit 0
+    note "not inside a git repository — nothing to do"
+    exit 0
 }
 REPO=$(dirname "$COMMON")
-[ -d "$REPO" ] || { note "no main worktree for this repository — nothing to do"; exit 0; }
+[ -d "$REPO" ] || {
+    note "no main worktree for this repository — nothing to do"
+    exit 0
+}
 ROOT=$(dirname "$REPO")
 NAME=$(basename "$REPO")
 
 LIVE=$(git -C "$REPO" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
 
-is_live() {   # a path git still registers, or one that is simply still there
+is_live() { # a path git still registers, or one that is simply still there
     [ -n "$1" ] || return 1
     [ -d "$1" ] && return 0
     [ -n "$LIVE" ] || return 1
     printf '%s\n' "$LIVE" | grep -qxF -- "$1"
 }
 
-label_of() {  # label_of <container-id> <label-key>
+label_of() { # label_of <container-id> <label-key>
     docker inspect --format "{{ index .Config.Labels \"$2\" }}" "$1" 2>/dev/null
 }
 
-reclaim() {   # label-scoped to one dead project
+reclaim() { # label-scoped to one dead project
     local proj="$1" v n
     for v in $(docker volume ls -q --filter "label=com.docker.compose.project=$proj" 2>/dev/null); do
         if [ "$DRY_RUN" -eq 1 ]; then
@@ -185,7 +219,7 @@ for cid in $(docker ps -aq); do
     [ -n "$cf" ] || continue
     d=$(dirname "${cf%%,*}")
     case "$d" in
-        "$REPO"/.claude/worktrees/*|"$ROOT/$NAME"-*) : ;;
+        "$REPO"/.claude/worktrees/* | "$ROOT/$NAME"-*) : ;;
         *) continue ;;
     esac
     is_live "$d" && continue
@@ -204,12 +238,12 @@ done
 MAIN_SIG=$(signature "$NAME")
 if [ -n "$MAIN_SIG" ]; then
     for p in $(docker volume ls --filter "label=com.docker.compose.project" \
-                   --format "{{ .Label \"com.docker.compose.project\" }}" | sort -u); do
-        [ "$p" = "$NAME" ] && continue                 # the main stack itself
+        --format "{{ .Label \"com.docker.compose.project\" }}" | sort -u); do
+        [ "$p" = "$NAME" ] && continue # the main stack itself
         is_live "$REPO/.claude/worktrees/$p" && continue
-        is_live "$ROOT/$p" && continue                 # live sibling checkout or repo
+        is_live "$ROOT/$p" && continue # live sibling checkout or repo
         [ -n "$(docker ps -aq --filter "label=com.docker.compose.project=$p")" ] && continue
-        [ "$(signature "$p")" = "$MAIN_SIG" ] || continue   # foreign shape — not ours to reap
+        [ "$(signature "$p")" = "$MAIN_SIG" ] || continue # foreign shape — not ours to reap
         reclaim "$p"
         SWEPT=$((SWEPT + 1))
         ok "reclaimed orphan volumes from: $p"

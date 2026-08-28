@@ -7,7 +7,7 @@
 ## Creates path using mkdir -p, and, upon success, cd's into it
 #
 mcd() {
-    mkdir -p -- "$1" && cd -- "$1"
+    mkdir -p -- "$1" && cd -- "$1" || return
 }
 
 # Strip default file-completion from mcd/mmd so zsh doesn't try to complete

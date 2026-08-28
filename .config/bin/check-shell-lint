@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+#
+# check-shell-lint — the Track 2 gate over the shell that stays shell.
+#
+# Bash has no type system, so refactors here are unverified by construction.
+# Lint and format are the whole budget; this spends them. See "Track 2" in
+# ~/.config/reliquary/HARDENING.md.
+#
+#   check-shell-lint              every plaintext-tracked bash file
+#   check-shell-lint <path>...    only these files/directories
+#
+# Exit: 0 = clean; 1 = soft (a tool is missing, so a lane went unchecked);
+# 2 = a finding.
+#
+# Three gates, and the third is why there is no baseline file of findings:
+#
+#   1. lint     at -S warning, zero findings tolerated. A finding that is
+#               genuinely wrong for this codebase is accepted where it happens,
+#               with an inline disable directive carrying its reason —
+#               provenance beside the code, not in a register that goes stale.
+#   2. format   one style, mechanically applied, so no diff carries a reindent.
+#   3. ratchet  the count of those disable directives, committed per file. A
+#               suppression is the cheapest repair under a lint you cannot
+#               satisfy, and it is invisible to the other two gates — silencing
+#               a finding makes the finding count fall. Same control as the Rust
+#               lane's #[allow] count, same equality semantics: removing one
+#               means lowering the number in the same commit.
+#
+# Scope note, so the skip is not silent: the population is what
+# `yadm ls-files` reports. Encrypted bash is not in it, and a baseline for it could
+# not live in a public file without naming what the encrypt patterns exist to
+# hide.
+
+set -u
+
+BASELINE="$HOME/.config/reliquary/ratchets/shell-suppressions.toml"
+
+# SC1090/SC1091 are unfollowable sources — a sourced path built at runtime, or
+# one outside the checked tree. Every one of them is deliberate here.
+SC_EXCLUDE="SC1090,SC1091"
+SC_SEVERITY="warning"
+
+# Matches the codebase: four spaces, and case arms indented inside their case.
+SHFMT_STYLE=(-i 4 -ci)
+
+FAILS=0
+WARNS=0
+
+note() { printf '%s\n' "$1"; }
+fail() {
+    printf '%s\n' "$1"
+    FAILS=$((FAILS + 1))
+}
+warn() {
+    printf '%s\n' "$1"
+    WARNS=$((WARNS + 1))
+}
+
+# A file is in scope when it is bash we own. zsh and fish are excluded because
+# neither is parseable by the linter; fixtures are test data, and lints written into
+# one are its point; symlinks would lint their target twice.
+in_scope() {
+    local p="$1"
+    [ -f "$p" ] && [ ! -L "$p" ] || return 1
+    case "$p" in
+        */fixtures/*) return 1 ;;
+        *.zsh | *.fish | *.zshenv | *.zshrc | *.zprofile) return 1 ;;
+        *.sh | *.bash | */.bashrc | */.bash_profile | */.bash_env) return 0 ;;
+    esac
+    head -1 "$p" 2>/dev/null | grep -qE '^#!.*\b(bash|sh)\b'
+}
+
+# With no arguments the population is the tracked tree; with arguments it is
+# exactly what was named, walked if it is a directory.
+enumerate() {
+    if [ "$#" -eq 0 ]; then
+        (cd "$HOME" && yadm ls-files 2>/dev/null) | while IFS= read -r f; do
+            in_scope "$HOME/$f" && printf '%s\n' "$HOME/$f"
+        done
+        return
+    fi
+    local arg p
+    for arg in "$@"; do
+        if [ -d "$arg" ]; then
+            find "$arg" -type f -print | while IFS= read -r p; do
+                in_scope "$p" && printf '%s\n' "$p"
+            done
+        else
+            in_scope "$arg" && printf '%s\n' "$arg"
+        fi
+    done
+}
+
+main() {
+    local files with without
+    files="$(enumerate "$@" | sort -u)"
+    if [ -z "$files" ]; then
+        note "no shell files in scope"
+        return 0
+    fi
+
+    # A file with no shebang is sourced, and shellcheck cannot guess its
+    # dialect — SC2148 would fire on all of them. Naming bash is the answer,
+    # but only for those: forcing it on a `#!/bin/sh` script would lint it as
+    # something it is not.
+    with=""
+    without=""
+    local p
+    while IFS= read -r p; do
+        if head -1 "$p" | grep -q '^#!'; then
+            with="$with$p"$'\n'
+        else
+            without="$without$p"$'\n'
+        fi
+    done <<<"$files"
+
+    local n
+    n="$(printf '%s' "$files" | grep -c .)"
+
+    if command -v shellcheck >/dev/null 2>&1; then
+        local out=""
+        [ -n "$with" ] && out="$out$(printf '%s' "$with" | grep . |
+            xargs shellcheck -S "$SC_SEVERITY" -e "$SC_EXCLUDE" -f gcc 2>&1)"
+        [ -n "$without" ] && out="$out$(printf '%s' "$without" | grep . |
+            xargs shellcheck -s bash -S "$SC_SEVERITY" -e "$SC_EXCLUDE" -f gcc 2>&1)"
+        out="$(printf '%s' "$out" | grep . || true)"
+        if [ -n "$out" ]; then
+            fail "shellcheck: $(printf '%s\n' "$out" | grep -c .) finding(s) in $n file(s)"
+            printf '%s\n' "$out" | sed "s|$HOME/||; s/^/    /"
+        else
+            note "shellcheck: clean over $n file(s)"
+        fi
+    else
+        warn "shellcheck not on PATH — $n file(s) unchecked"
+    fi
+
+    if command -v shfmt >/dev/null 2>&1; then
+        local unformatted=""
+        [ -n "$with" ] && unformatted="$unformatted$(printf '%s' "$with" | grep . |
+            xargs shfmt "${SHFMT_STYLE[@]}" -l 2>/dev/null)"$'\n'
+        [ -n "$without" ] && unformatted="$unformatted$(printf '%s' "$without" | grep . |
+            xargs shfmt -ln bash "${SHFMT_STYLE[@]}" -l 2>/dev/null)"$'\n'
+        unformatted="$(printf '%s' "$unformatted" | grep . || true)"
+        if [ -n "$unformatted" ]; then
+            fail "shfmt: $(printf '%s\n' "$unformatted" | grep -c .) file(s) unformatted"
+            printf '%s\n' "$unformatted" | sed "s|$HOME/||; s/^/    /"
+            note "    fix: shfmt ${SHFMT_STYLE[*]} -w <file>"
+        else
+            note "shfmt: $n file(s) formatted"
+        fi
+    else
+        warn "shfmt not on PATH — formatting unchecked"
+    fi
+
+    suppression_ratchet "$files"
+
+    if [ "$FAILS" -gt 0 ]; then return 2; fi
+    if [ "$WARNS" -gt 0 ]; then return 1; fi
+    return 0
+}
+
+# The count of inline `# shellcheck disable=` directives, per file, against the
+# committed baseline. An equality, not a ceiling: an inequality lets slack
+# accumulate, and slack is suppressions that can be added back unseen.
+#
+# Only runs over the full tracked population — a subset invocation cannot tell
+# a file with no directives from a file that is simply not in the subset.
+suppression_ratchet() {
+    local files="$1"
+    if [ "$SUBSET" = true ]; then return 0; fi
+    if [ ! -f "$BASELINE" ]; then
+        warn "no suppression baseline at ${BASELINE#"$HOME"/}"
+        return 0
+    fi
+
+    local tmp_have tmp_want
+    tmp_have="$(mktemp)"
+    tmp_want="$(mktemp)"
+
+    local p rel c
+    while IFS= read -r p; do
+        # Mirror the linter's own rule: a directive is a comment of its own.
+        # Anything mentioning one mid-line — prose, or this very grep — is not
+        # a suppression and must not count as one.
+        c="$(grep -cE '^[[:space:]]*#[[:space:]]*shellcheck[[:space:]]+disable=' "$p" 2>/dev/null || true)"
+        [ "${c:-0}" -gt 0 ] || continue
+        rel="${p#"$HOME"/}"
+        printf '%s\t%s\n' "$rel" "$c" >>"$tmp_have"
+    done <<<"$files"
+    sort -o "$tmp_have" "$tmp_have" 2>/dev/null || :
+
+    awk -F' *= *' '/^[^#[:space:]]/ {
+        gsub(/^"|"$/, "", $1); gsub(/[^0-9]/, "", $2)
+        if ($1 != "" && $2 != "") printf "%s\t%s\n", $1, $2
+    }' "$BASELINE" | sort >"$tmp_want"
+
+    local drift
+    drift="$(diff "$tmp_want" "$tmp_have" 2>/dev/null | grep '^[<>]' || true)"
+    if [ -n "$drift" ]; then
+        fail "suppression ratchet: baseline does not match the tree"
+        printf '%s\n' "$drift" | sed 's/^</    baseline only:/; s/^>/    tree only:  /'
+        note "    fix the lint, or edit ${BASELINE#"$HOME"/} in the same commit"
+    else
+        note "suppression ratchet: $(grep -c . "$tmp_want" 2>/dev/null || echo 0) file(s) at baseline"
+    fi
+
+    rm -f "$tmp_have" "$tmp_want"
+}
+
+SUBSET=false
+[ "$#" -gt 0 ] && SUBSET=true
+main "$@"

@@ -58,9 +58,7 @@ while IFS= read -r -d '' file; do
 done < <(find "$BREWFILES_DIR" -name 'Brewfile@*' -print0)
 
 # Sort scopes alphanumerically
-IFS=$'\n' sorted_scopes=($(sort <<<"${scopes[*]}"))
-unset IFS
-scopes=("${sorted_scopes[@]}")
+mapfile -t scopes < <(printf '%s\n' "${scopes[@]}" | sort)
 
 # Check if there are any scopes found
 if [ ${#scopes[@]} -eq 0 ]; then

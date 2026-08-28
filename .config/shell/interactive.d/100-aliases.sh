@@ -4,7 +4,9 @@
 
 DEV_DIR="$HOME/Developer"
 SITES_DIR="$HOME/Sites"
+# shellcheck disable=SC2139  # expand now: the guard above already proved the path
 [ -d "$DEV_DIR" ] && alias dvd="cd $DEV_DIR"
+# shellcheck disable=SC2139  # expand now: the guard above already proved the path
 [ -d "$SITES_DIR" ] && alias sts="cd $SITES_DIR"
 
 ##
@@ -13,21 +15,22 @@ SITES_DIR="$HOME/Sites"
 
 ## ls
 case $(uname -s) in
-Darwin)
-    ## macOS ls (BSD):
-    #.  -F  - Add symbolic indication of file types
-    #.  -G  - Colorize output
-    alias ls='ls -FG'
-    ;;
-Linux)
-    ## GNU ls:
-    #.  -F              - Add symbolic indication of file types
-    #.  --color=always  - Colorize output
-    alias ls='ls -F --color=always'
-    ;;
-*) ## Other OS:
-    #.  -F  - Add symbolic indication of file types
-    alias ls='ls -F' ;;
+    Darwin)
+        ## macOS ls (BSD):
+        #.  -F  - Add symbolic indication of file types
+        #.  -G  - Colorize output
+        alias ls='ls -FG'
+        ;;
+    Linux)
+        ## GNU ls:
+        #.  -F              - Add symbolic indication of file types
+        #.  --color=always  - Colorize output
+        alias ls='ls -F --color=always'
+        ;;
+    *) ## Other OS:
+        #.  -F  - Add symbolic indication of file types
+        alias ls='ls -F'
+        ;;
 esac
 
 ## lsa:
@@ -55,18 +58,18 @@ alias rmr='rm -rf'
 ##
 
 case $D__SHELL in
-zsh)
-    alias -g ...='../..'
-    alias -g ....='../../..'
-    alias -g .....='../../../..'
-    alias -g ......='../../../../..'
-    ;;
-bash)
-    alias ..='cd ..'
-    alias ...='cd ../..'
-    alias ....='cd ../../..'
-    alias .....='cd ../../../..'
-    ;;
+    zsh)
+        alias -g ...='../..'
+        alias -g ....='../../..'
+        alias -g .....='../../../..'
+        alias -g ......='../../../../..'
+        ;;
+    bash)
+        alias ..='cd ..'
+        alias ...='cd ../..'
+        alias ....='cd ../../..'
+        alias .....='cd ../../../..'
+        ;;
 esac
 
 alias -- -='cd -'
@@ -85,8 +88,8 @@ alias 9='cd -9'
 ##
 
 case $D__SHELL in
-bash) alias zsh='/usr/bin/env zsh' ;;
-zsh) alias bash='/usr/bin/env bash' ;;
+    bash) alias zsh='/usr/bin/env zsh' ;;
+    zsh) alias bash='/usr/bin/env bash' ;;
 esac
 
 ##
