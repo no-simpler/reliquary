@@ -388,7 +388,7 @@ update_relics() {
     for lane in "$HOME/.config/relics" "$HOME/.config/attic"; do
         [ -d "$lane" ] || continue
         for r in "$lane"/*/; do
-            [ -f "${r}relic.sh" ] || continue
+            relic::has_manifest "${r%/}" || continue
             (cd "$r" && relic::update "$r") || {
                 print_err "  relic update failed: $r"
                 rc=1

@@ -69,7 +69,10 @@ die() {
 
 # ── library loading (lazy) ──────────────────────────────────────────────────
 
+# Idempotent, because discovery needs the library too and every command that
+# touches a relic reaches for it more than once.
 _load_relic_lib() {
+    declare -F relic::has_manifest >/dev/null && return 0
     [[ -f "$RELIC_LIB" ]] || die "relic library not found: $RELIC_LIB"
     # shellcheck disable=SC1090
     source "$RELIC_LIB"
@@ -123,13 +126,12 @@ doctor_orphans() {
 # published (the inverse of an orphan). Emits "<relic>\t<entrypoint>" per gap.
 # Attic-safe: rides on inhouse_relics, which only surfaces readable manifests.
 doctor_unpublished() {
-    local name dir lane ep
-    while IFS=$'\t' read -r name dir lane; do
-        while IFS= read -r ep; do
-            [[ -z "$ep" ]] && continue
+    local name dir lane runtime why eps ep
+    while IFS=$'\037' read -r name dir lane runtime why eps; do
+        for ep in $eps; do
             reg_has "$ep" && continue
             printf '%s\t%s\n' "$name" "$ep"
-        done < <(relic_entrypoints "$dir")
+        done
     done < <(inhouse_relics)
 }
 
@@ -141,16 +143,9 @@ doctor_unpublished() {
 # publishing, and this list is the worklist for getting through them — it empties
 # as each one is either rewritten into the workspace or given its reason.
 doctor_runtime_stance() {
-    local name dir lane runtime why
-    while IFS=$'\t' read -r name dir lane; do
-        runtime="$(relic_runtime "$dir")"
+    local name dir lane runtime why eps
+    while IFS=$'\037' read -r name dir lane runtime why eps; do
         [[ "$runtime" == "rust" ]] && continue
-        why="$(
-            RUNTIME_EXEMPTION=""
-            # shellcheck disable=SC1090
-            source "$dir/relic.sh" 2>/dev/null
-            printf '%s' "${RUNTIME_EXEMPTION:-}"
-        )"
         [[ -n "$why" ]] && continue
         printf '%s\t%s\n' "$name" "$runtime"
     done < <(inhouse_relics)
@@ -172,28 +167,67 @@ doctor_unmanaged() {
 
 # ── discovery ───────────────────────────────────────────────────────────────
 
-# Read RUNTIME from a manifest without leaking globals into our process.
-relic_runtime() {
-    (
-        unset RUNTIME 2>/dev/null
-        source "$1/relic.sh" 2>/dev/null
-        printf '%s' "${RUNTIME:-?}"
-    )
-}
-
-# Emit "<name>\t<dir>\t<lane>" per in-house relic. Attic-safe: a relic is
-# only surfaced when its manifest is readable, so an encrypted/undecrypted
-# attic lane reveals nothing.
+# One row per in-house relic, unit-separated (US, \037):
+#
+#   <name>  <dir>  <lane>  <runtime>  <runtime-exemption>  <entrypoints…>
+#
+# Every manifest in both lanes is read once, together. A reader start costs
+# more than every read after it, and nothing below wants only one field.
+#
+# Attic-safe: a relic is surfaced only when its manifest is readable, so an
+# encrypted attic lane reveals nothing. A manifest that is readable but broken
+# is reported rather than skipped — silence there is how a relic disappears.
+#
+# The last column is space-joined because a published name is a filename on
+# PATH, which is where the constraint that it holds no whitespace already lives.
+#
+# Not tab-separated: tab is IFS whitespace, so `read` collapses an empty
+# interior field and every column after it shifts by one — a relic with no
+# runtime-exemption would hand its entrypoints to the wrong variable. US is the
+# delimiter that exists for this and cannot occur in a path or a published name.
+#
+# Order is asserted here rather than inherited from glob expansion, so it does
+# not turn on which format a manifest happens to be in.
 inhouse_relics() {
-    local lane r name
+    _load_relic_lib
+    local lane r dirs=()
     for lane in "$RELICS_LANE" "$ATTIC_LANE"; do
         [[ -d "$lane" ]] || continue
         for r in "$lane"/*/; do
-            [[ -r "${r}relic.sh" ]] || continue
-            name="$(basename "$r")"
-            printf '%s\t%s\t%s\n' "$name" "${r%/}" "$lane"
+            relic::has_manifest "${r%/}" || continue
+            dirs=(${dirs[@]+"${dirs[@]}"} "${r%/}")
         done
     done
+    [[ ${#dirs[@]} -eq 0 ]] && return 0
+
+    local buffer="" line rank eps
+    while IFS= read -r line; do
+        buffer="$buffer$line"$'\n'
+        [[ "$line" == "__RELIC_END=1" ]] || continue
+        __RELIC_DIR=""
+        __RELIC_ERROR=""
+        NAME=""
+        RUNTIME=""
+        RUNTIME_EXEMPTION=""
+        ENTRYPOINTS=()
+        eval "$buffer"
+        buffer=""
+        if [[ -n "$__RELIC_ERROR" ]]; then
+            warn "$__RELIC_ERROR"
+            continue
+        fi
+        case "$__RELIC_DIR/" in
+            "$RELICS_LANE"/*) rank=1 lane="$RELICS_LANE" ;;
+            "$ATTIC_LANE"/*) rank=2 lane="$ATTIC_LANE" ;;
+            *) continue ;;
+        esac
+        eps="$(entrypoints_of "$__RELIC_DIR" "$RUNTIME" "$NAME" \
+            ${ENTRYPOINTS[@]+"${ENTRYPOINTS[@]}"} | tr '\n' ' ')"
+        printf '%s\037%s\037%s\037%s\037%s\037%s\037%s\n' \
+            "$rank" "$(basename "$__RELIC_DIR")" "$__RELIC_DIR" "$lane" \
+            "${RUNTIME:-?}" "$RUNTIME_EXEMPTION" "${eps% }"
+    done < <(relic::_manifest_read ${dirs[@]+"${dirs[@]}"}) |
+        sort -t$'\037' -k1,1 -k2,2 | cut -d$'\037' -f2-
 }
 
 # Emit "<name>\t<path>" per known external (Stage-3) relic, parsed from the
@@ -220,27 +254,20 @@ external_relics() {
     done <"$GRADUATION"
 }
 
-# The names a relic publishes, one per line. A compiled relic declares them in
-# its manifest, because its artifact does not exist until cargo has run and lands
-# in the workspace target/ rather than beside the source; an interpreted one
-# declares them by filename in entrypoints/, where the file *is* the artifact.
-# Both are read without leaking globals, like relic_runtime.
-relic_entrypoints() {
-    local dir="$1" ep n
-    if [[ "$(relic_runtime "$dir")" == "rust" ]]; then
-        (
-            # Reset rather than unset: `${#ENTRYPOINTS[@]}` on an unset name is
-            # an error under `set -u`, which this CLI runs with.
-            NAME=""
-            ENTRYPOINTS=()
-            # shellcheck disable=SC1090
-            source "$dir/relic.sh" 2>/dev/null
-            if [[ ${#ENTRYPOINTS[@]} -gt 0 ]]; then
-                printf '%s\n' "${ENTRYPOINTS[@]}"
-            elif [[ -n "${NAME:-}" ]]; then
-                printf '%s\n' "$NAME"
-            fi
-        )
+# The names a relic publishes, one per line, from fields a caller already has.
+# A compiled relic declares them in its manifest, because its artifact does not
+# exist until cargo has run and lands in the workspace target/ rather than
+# beside the source; an interpreted one declares them by filename in
+# entrypoints/, where the file *is* the artifact.
+entrypoints_of() {
+    local dir="$1" runtime="$2" name="$3" ep n
+    shift 3
+    if [[ "$runtime" == "rust" ]]; then
+        if [[ $# -gt 0 ]]; then
+            printf '%s\n' "$@"
+        elif [[ -n "$name" ]]; then
+            printf '%s\n' "$name"
+        fi
         return 0
     fi
     [[ -d "$dir/entrypoints" ]] || return 0
@@ -254,9 +281,10 @@ relic_entrypoints() {
 
 find_inhouse_dir() {
     local name="$1" lane d
+    _load_relic_lib
     for lane in "$RELICS_LANE" "$ATTIC_LANE"; do
         d="$lane/$name"
-        [[ -r "$d/relic.sh" ]] && {
+        relic::has_manifest "$d" && {
             printf '%s' "$d"
             return 0
         }
@@ -277,12 +305,13 @@ find_external_path() {
 
 detect_cwd_relic() {
     local cwd="$PWD" lane name n p
+    _load_relic_lib
     for lane in "$RELICS_LANE" "$ATTIC_LANE"; do
         case "$cwd/" in
             "$lane"/*)
                 name="${cwd#"$lane"/}"
                 name="${name%%/*}"
-                [[ -n "$name" && -r "$lane/$name/relic.sh" ]] && {
+                [[ -n "$name" ]] && relic::has_manifest "$lane/$name" && {
                     printf '%s' "$name"
                     return 0
                 }
@@ -302,12 +331,11 @@ detect_cwd_relic() {
 # ── published-state ─────────────────────────────────────────────────────────
 
 inhouse_pubstate() {
-    local dir="$1" total=0 have=0 n
-    while IFS= read -r n; do
-        [[ -z "$n" ]] && continue
+    local total=0 have=0 n
+    for n in "$@"; do
         total=$((total + 1))
         reg_has "$n" && have=$((have + 1))
-    done < <(relic_entrypoints "$dir")
+    done
     if [[ $total -eq 0 ]]; then
         echo "no-entrypoints"
     elif [[ $have -eq 0 ]]; then
@@ -510,26 +538,29 @@ EOF
 # ── commands ────────────────────────────────────────────────────────────────
 
 cmd_list() {
-    local name dir lane rt state any
+    local name dir lane rt why eps state any all
+
+    # One read for both lanes; the sections below are two views of it.
+    all="$(inhouse_relics)"
 
     info "${_c_bold}In-house relics${_c_rst} ${_c_dim}(~/.config/relics)${_c_rst}"
     any=0
-    while IFS=$'\t' read -r name dir lane; do
+    while IFS=$'\037' read -r name dir lane rt why eps; do
         [[ "$lane" == "$RELICS_LANE" ]] || continue
         any=1
-        rt="$(relic_runtime "$dir")"
-        printf '  %-18s %-7s %s\n' "$name" "$rt" "$(state_label "$(inhouse_pubstate "$dir")")"
-    done < <(inhouse_relics)
+        printf '  %-18s %-7s %s\n' "$name" "$rt" \
+            "$(state_label "$(inhouse_pubstate $eps)")"
+    done <<<"$all"
     [[ $any -eq 0 ]] && printf '  %s(none)%s\n' "$_c_dim" "$_c_rst"
 
     local priv
-    priv="$(inhouse_relics | awk -F'\t' -v l="$ATTIC_LANE" '$3==l')"
+    priv="$(printf '%s\n' "$all" | awk -F'\037' -v l="$ATTIC_LANE" '$3==l')"
     if [[ -n "$priv" ]]; then
         info ""
         info "${_c_bold}Private relics${_c_rst} ${_c_dim}(~/.config/attic)${_c_rst}"
-        while IFS=$'\t' read -r name dir lane; do
-            rt="$(relic_runtime "$dir")"
-            printf '  %-18s %-7s %s\n' "$name" "$rt" "$(state_label "$(inhouse_pubstate "$dir")")"
+        while IFS=$'\037' read -r name dir lane rt why eps; do
+            printf '  %-18s %-7s %s\n' "$name" "$rt" \
+                "$(state_label "$(inhouse_pubstate $eps)")"
         done <<<"$priv"
     fi
 
@@ -560,22 +591,26 @@ cmd_status() {
 }
 
 _status_inhouse() {
-    local name="$1" dir="$2" rt n owner out
+    local name="$1" dir="$2" n owner out eps=()
     _load_relic_lib
-    rt="$(relic_runtime "$dir")"
+    relic::load_manifest "$dir" || return 1
+    while IFS= read -r n; do
+        [[ -n "$n" ]] && eps=(${eps[@]+"${eps[@]}"} "$n")
+    done < <(entrypoints_of "$dir" "$RUNTIME" "$NAME" \
+        ${ENTRYPOINTS[@]+"${ENTRYPOINTS[@]}"})
+
     info "${_c_bold}$name${_c_rst} ${_c_dim}$dir${_c_rst}"
     info "  stage:     2 (in-house)"
-    info "  runtime:   $rt"
-    info "  published: $(state_plain "$(inhouse_pubstate "$dir")")"
-    while IFS= read -r n; do
-        [[ -z "$n" ]] && continue
+    info "  runtime:   $RUNTIME"
+    info "  published: $(state_plain "$(inhouse_pubstate ${eps[@]+"${eps[@]}"})")"
+    for n in ${eps[@]+"${eps[@]}"}; do
         if reg_has "$n"; then
             owner="$(reg_owner "$n")"
             info "    - $n → ~/.local/bin/$n${owner:+ ${_c_dim}(owner: $owner)${_c_rst}}"
         else
             info "    - $n → ${_c_dim}not on PATH${_c_rst}"
         fi
-    done < <(relic_entrypoints "$dir")
+    done
     if out="$(relic::check_deps "$dir" 2>&1)"; then
         info "  deps:      ${_c_grn}ok${_c_rst}"
     else

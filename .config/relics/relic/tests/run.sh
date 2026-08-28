@@ -78,11 +78,11 @@ printf 'NAME="pub"\nRUNTIME="bash"\n' >"$RELICS_LANE/pub/relic.sh"
 printf 'NAME="secret"\nRUNTIME="bash"\n' >"$ATTIC_LANE/secret/relic.sh"
 chmod 000 "$ATTIC_LANE/secret/relic.sh" # simulate undecrypted/unreadable
 listing="$(inhouse_relics)"
-check "public relic surfaced" "$(printf '%s\n' "$listing" | awk -F'\t' '$1=="pub"{print "y"}')" "y"
-check "unreadable attic hidden" "$(printf '%s\n' "$listing" | awk -F'\t' '$1=="secret"{print "y"}')" ""
+check "public relic surfaced" "$(printf '%s\n' "$listing" | awk -F'\037' '$1=="pub"{print "y"}')" "y"
+check "unreadable attic hidden" "$(printf '%s\n' "$listing" | awk -F'\037' '$1=="secret"{print "y"}')" ""
 chmod 644 "$ATTIC_LANE/secret/relic.sh"
 listing="$(inhouse_relics)"
-check "readable attic surfaced" "$(printf '%s\n' "$listing" | awk -F'\t' '$1=="secret"{print "y"}')" "y"
+check "readable attic surfaced" "$(printf '%s\n' "$listing" | awk -F'\037' '$1=="secret"{print "y"}')" "y"
 
 # ── state labels ────────────────────────────────────────────────────────────
 check "state_plain published" "$(state_plain published)" "yes"

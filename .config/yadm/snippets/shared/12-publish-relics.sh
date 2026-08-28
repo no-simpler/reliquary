@@ -21,7 +21,7 @@ _publish_lane() {
     [ -d "$lane" ] || return 0
     local r
     for r in "$lane"/*/; do
-        [ -f "${r}relic.sh" ] || continue
+        relic::has_manifest "${r%/}" || continue
         relic::publish "$r" || echo "  publish failed: $r"
     done
 }
