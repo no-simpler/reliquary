@@ -2,12 +2,13 @@
 ## Plugins
 ##
 
-# OMZL::completion.zsh runs its own compinit, and oh-my-zsh's compfix reads this
-# variable at that moment — so it has to be set before zinit sources anything,
-# not beside our own compinit in 030. On an account that did not install
-# Homebrew every such call stops the shell with a y/n question; ours takes -i,
-# and this is the same answer for the ones we do not own.
-ZSH_DISABLE_COMPFIX=true
+# zinit runs compinit itself, from several call sites, and appends this to every
+# one of them. Without it each call stops an account that did not install
+# Homebrew with the insecure-directories question — `compinit -i` in 030 governs
+# only our own call. Must be set before zinit.zsh is sourced, since that is when
+# zinit reads it.
+typeset -gA ZINIT
+ZINIT[COMPINIT_OPTS]=-i
 
 # Install and initialize zinit, if not yet installed
 ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
