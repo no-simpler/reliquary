@@ -9,7 +9,7 @@ use std::fmt::Write as _;
 use std::io::Write;
 
 use anyhow::Result;
-use relic_core::finding::{Finding, Grade, Outcome, Report, Severity};
+use relic_core::finding::{Finding, Grade, Outcome, Report, Severity, StationId};
 use relic_core::fmt::plural;
 use relic_core::ui::Format;
 
@@ -119,7 +119,7 @@ fn human(out: &mut impl Write, reports: &[Report], grade: Grade, color: bool) ->
             Outcome::Ran(findings) => {
                 writeln!(out, "  {}", paint(name, BOLD, color))?;
                 for finding in findings {
-                    human_finding(out, finding, color)?;
+                    human_finding(out, finding, &report.station, color)?;
                 }
             }
         }
@@ -147,15 +147,29 @@ fn human(out: &mut impl Write, reports: &[Report], grade: Grade, color: bool) ->
     Ok(())
 }
 
-fn human_finding(out: &mut impl Write, finding: &Finding, color: bool) -> Result<()> {
+fn human_finding(
+    out: &mut impl Write,
+    finding: &Finding,
+    reported_by: &StationId,
+    color: bool,
+) -> Result<()> {
     let (label, code) = match finding.severity {
         Severity::Broken => ("broken", RED),
         Severity::Soft => ("soft  ", YELLOW),
         Severity::Note => ("note  ", DIM),
     };
+    // A station usually mints its own findings, so the two agree and naming the
+    // author twice would be noise. The registry adapter is the exception: it
+    // reports what other programs said, and which program said it is the first
+    // thing a reader needs.
+    let author = if finding.station == *reported_by {
+        String::new()
+    } else {
+        format!("{} ", paint(&format!("[{}]", finding.station), BOLD, color))
+    };
     writeln!(
         out,
-        "    {}  {}",
+        "    {}  {author}{}",
         paint(label, code, color),
         finding.summary
     )?;
@@ -189,6 +203,11 @@ fn agent(out: &mut impl Write, reports: &[Report], grade: Grade) -> Result<()> {
             Outcome::Ran(findings) if findings.is_empty() => writeln!(out, "ok\t{name}")?,
             Outcome::Ran(findings) => {
                 for finding in findings {
+                    // The finding's own station, not the report's: for every
+                    // built-in station they are the same name, and for the
+                    // registry adapter this is the speaker rather than the
+                    // collector.
+                    let name = finding.station.as_str();
                     let mut line = format!("{}\t{name}\t{}", finding.severity, finding.summary);
                     if let Some(location) = &finding.location {
                         let _ = write!(line, "\tat={location}");

@@ -49,6 +49,40 @@ pub enum Error {
         /// What was run.
         program: String,
     },
+    /// It outlasted the budget it was given and was killed.
+    #[error("{program} did not answer within {}ms", budget.as_millis())]
+    TimedOut {
+        /// What was run.
+        program: String,
+        /// How long it was given.
+        budget: std::time::Duration,
+    },
+}
+
+/// What a tool said, and how it exited — for a caller to whom the exit status
+/// is **data** rather than a verdict.
+///
+/// [`Tool::capture`] is right for a program whose non-zero exit means it
+/// failed, which is most of them. It is wrong for one whose exit status carries
+/// an answer: [`crate::finding::Grade`] is reported as `0`/`1`/`2`, so a health
+/// check that found something exits non-zero *by design*, and a caller reading
+/// that as a failure would discard every report that had anything in it.
+#[derive(Debug, Clone)]
+pub struct Exit {
+    /// Its exit status, or `None` when a signal killed it.
+    pub code: Option<i32>,
+    /// Standard output, verbatim.
+    pub stdout: String,
+    /// Standard error, verbatim.
+    pub stderr: String,
+}
+
+impl Exit {
+    /// Whether it exited zero.
+    #[must_use]
+    pub fn ok(&self) -> bool {
+        self.code == Some(0)
+    }
 }
 
 /// What a tool said.
@@ -162,6 +196,117 @@ impl Tool {
         command
     }
 
+    /// Run it, and kill it if it outlasts `budget`.
+    ///
+    /// The bound is the same rule [`crate::lock`] states for waiting on a file:
+    /// **bound the wait, never the hold.** A relic that asks another program a
+    /// question runs from session hooks and from `up`, where a program that
+    /// never answers is a hang rather than a slow answer — and a caller cannot
+    /// tell the difference by waiting longer.
+    ///
+    /// Both pipes are drained on threads while the wait runs. A child that
+    /// fills a pipe buffer blocks on the write, and a parent that waited
+    /// without reading would time out a program that was answering perfectly
+    /// well.
+    ///
+    /// # Errors
+    ///
+    /// Everything [`Tool::capture`] reports, plus [`Error::TimedOut`] when the
+    /// budget runs out. A timed-out child is killed and reaped, so nothing is
+    /// left running behind the answer.
+    pub fn capture_within(
+        &self,
+        command: &mut Command,
+        budget: std::time::Duration,
+    ) -> Result<Output, Error> {
+        let exit = self.run_within(command, budget)?;
+        if !exit.ok() {
+            return Err(Error::Failed {
+                program: self.name.clone(),
+                code: match exit.code {
+                    Some(code) => code.to_string(),
+                    None => "signal".to_owned(),
+                },
+                stderr: exit.stderr.trim().to_owned(),
+            });
+        }
+        Ok(Output {
+            stdout: exit.stdout,
+            stderr: exit.stderr,
+        })
+    }
+
+    /// Run it within `budget` and report how it exited, without judging that.
+    ///
+    /// See [`Exit`] for when a status is an answer rather than a failure. Both
+    /// streams are decoded lossily: a caller reading a status is reading the
+    /// output for a shape, and one byte that is not text is no reason to lose
+    /// the rest of it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Spawn`] when it could not start and [`Error::TimedOut`] when it
+    /// outlasted the budget. Nothing else — exiting non-zero *is* the answer.
+    pub fn run_within(
+        &self,
+        command: &mut Command,
+        budget: std::time::Duration,
+    ) -> Result<Exit, Error> {
+        let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|source| Error::Spawn {
+                program: self.name.clone(),
+                source,
+            })?;
+
+        // Detached, not scoped. A scope joins before it returns, and after a
+        // timeout these threads may not return at all: killing a shell does not
+        // kill the `sleep` it started, and that grandchild still holds the write
+        // end of the pipe. Nothing portable kills a process this one did not
+        // start, so the readers are left to end when the pipe finally closes,
+        // and the caller is not made to wait for it.
+        let out = std::thread::spawn({
+            let pipe = child.stdout.take();
+            move || drain(pipe)
+        });
+        let err = std::thread::spawn({
+            let pipe = child.stderr.take();
+            move || drain(pipe)
+        });
+        let deadline = std::time::Instant::now() + budget;
+
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Some(status),
+                Ok(None) => {}
+                Err(_) => break None,
+            }
+            if std::time::Instant::now() >= deadline {
+                // Killed and then reaped: a child left unreaped is a zombie,
+                // and a child left running is the side effect this bound exists
+                // to prevent.
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            std::thread::sleep(POLL);
+        };
+
+        let Some(status) = status else {
+            return Err(Error::TimedOut {
+                program: self.name.clone(),
+                budget,
+            });
+        };
+        Ok(Exit {
+            code: status.code(),
+            stdout: String::from_utf8_lossy(&out.join().unwrap_or_default()).into_owned(),
+            stderr: String::from_utf8_lossy(&err.join().unwrap_or_default()).into_owned(),
+        })
+    }
+
     /// Run it and take what it said.
     ///
     /// # Errors
@@ -191,6 +336,25 @@ impl Tool {
     }
 }
 
+/// Everything a pipe holds, or nothing when there was no pipe to read.
+///
+/// A read error is not distinguished from an empty pipe: the caller is about to
+/// judge the child by its exit status, and a half-read stream is reported as
+/// what arrived rather than as a failure of this process.
+fn drain<R: std::io::Read>(pipe: Option<R>) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    if let Some(mut pipe) = pipe {
+        let _ = pipe.read_to_end(&mut buffer);
+    }
+    buffer
+}
+
+/// How often a bounded wait looks at a child that has not finished.
+///
+/// Short enough that a fast program is not held up by the granularity, long
+/// enough that waiting costs no measurable CPU.
+const POLL: std::time::Duration = std::time::Duration::from_millis(5);
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -213,6 +377,110 @@ mod tests {
         assert_eq!(env.get(OsStr::new("LC_ALL")), Some(&Some(OsStr::new("C"))));
         assert_eq!(env.get(OsStr::new("LANG")), Some(&Some(OsStr::new("C"))));
         assert_eq!(env.get(OsStr::new("LANGUAGE")), Some(&None));
+    }
+
+    #[test]
+    fn a_bounded_run_answers_like_an_unbounded_one() {
+        let tool = echo();
+        let mut command = tool.command();
+        command.arg("hello");
+        let answer = tool
+            .capture_within(&mut command, std::time::Duration::from_secs(10))
+            .expect("echo answers");
+        assert_eq!(answer.line(), "hello");
+    }
+
+    #[test]
+    fn a_program_that_never_answers_is_killed_rather_than_waited_on() {
+        let Some(tool) = Tool::find("sleep") else {
+            return;
+        };
+        let mut command = tool.command();
+        command.arg("30");
+        let started = std::time::Instant::now();
+        let error = tool
+            .capture_within(&mut command, std::time::Duration::from_millis(120))
+            .expect_err("a sleeping program does not answer");
+        assert!(
+            matches!(error, Error::TimedOut { .. }),
+            "{error:?} is not a timeout"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "the bound was not honoured"
+        );
+    }
+
+    #[test]
+    fn an_answer_larger_than_a_pipe_buffer_is_not_mistaken_for_a_hang() {
+        let Some(tool) = Tool::find("sh") else {
+            return;
+        };
+        let mut command = tool.command();
+        // Well past the 64 KiB a pipe holds, so a parent that waited without
+        // reading would deadlock and then report a timeout.
+        command.args(["-c", "yes abcdefghij | head -n 40000"]);
+        let answer = tool
+            .capture_within(&mut command, std::time::Duration::from_secs(20))
+            .expect("a large answer is still an answer");
+        assert_eq!(answer.stdout.lines().count(), 40_000);
+    }
+
+    #[test]
+    fn a_bounded_refusal_reports_the_code_and_the_message() {
+        let Some(tool) = Tool::find("sh") else {
+            return;
+        };
+        let mut command = tool.command();
+        command.args(["-c", "echo nope >&2; exit 3"]);
+        let error = tool
+            .capture_within(&mut command, std::time::Duration::from_secs(10))
+            .expect_err("it refused");
+        let Error::Failed { code, stderr, .. } = error else {
+            panic!("expected a refusal");
+        };
+        assert_eq!(code, "3");
+        assert_eq!(stderr, "nope");
+    }
+
+    #[test]
+    fn a_non_zero_exit_is_an_answer_rather_than_a_failure() {
+        let Some(tool) = Tool::find("sh") else {
+            return;
+        };
+        let mut command = tool.command();
+        command.args(["-c", "echo answered; exit 2"]);
+        let exit = tool
+            .run_within(&mut command, std::time::Duration::from_secs(10))
+            .expect("running is not judging");
+        assert_eq!(exit.code, Some(2));
+        assert!(!exit.ok());
+        assert_eq!(
+            exit.stdout.trim(),
+            "answered",
+            "a program whose status carries a verdict still has something to say"
+        );
+    }
+
+    #[test]
+    fn a_grandchild_holding_the_pipe_does_not_extend_the_bound() {
+        let Some(tool) = Tool::find("sh") else {
+            return;
+        };
+        let mut command = tool.command();
+        // Killing the shell leaves `sleep` running with the write end of the
+        // pipe, which is why the readers cannot be joined before returning.
+        command.args(["-c", "sleep 30"]);
+        let started = std::time::Instant::now();
+        let error = tool
+            .run_within(&mut command, std::time::Duration::from_millis(150))
+            .expect_err("it never answered");
+        assert!(matches!(error, Error::TimedOut { .. }), "{error:?}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "waited {:?}, so the reader threads were joined after all",
+            started.elapsed()
+        );
     }
 
     #[test]

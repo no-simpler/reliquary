@@ -182,3 +182,52 @@ tests wrote literal `ghp_…` and `glpat-…` strings into this file, and both t
 retired script and the station reported the tracked source file as holding two
 credentials. They are assembled at runtime now: a scanner whose own fixtures trip
 it teaches the reader that its findings are noise.
+
+## The registry adapter
+
+The one A1 station that checks nothing. A relic knows its own invariants better
+than any central checker could, so this asks rather than tests: it puts
+`<name> doctor --format json` to every name in `~/.local/bin/.reliquary-managed`
+and folds the answers into the one report. That file is the whole interface — a
+Stage-3 relic in its own repository answers on exactly the same terms as one in
+this workspace, and `assay` never reads either.
+
+**Not answering is a fact, not a fault, and it is silent.** Nineteen of the
+twenty-one registered binaries have no `doctor` subcommand; reporting that
+would fill a standing audit with things nobody is going to act on. Two states
+are not silent, because in both something is wrong rather than absent:
+
+- **JSON that is not a report** — it meant to answer and got the shape wrong.
+  Output that is not JSON at all is a program that never meant to answer, and
+  that stays silent. `dewey`'s own `{"checks":…}` shape is the live example.
+- **Still running when the budget expires** — a `Note`, because from outside a
+  program a hang and slow work are the same fact: this one could not be judged.
+
+| decision | why |
+| --- | --- |
+| Probe every registered name; do not require an opt-in declaration | it is what the design locked ("a registered binary with no `doctor` subcommand is a skip, not a finding"), and it needs no coordination with repositories this one does not own. Checked rather than assumed, 2026-08-28: of the eleven binaries this workspace does not own, ten have no `doctor` at all and the eleventh — halo's `dewey` — has one whose own test is `test_doctor_reports_and_never_writes`, and which refuses `--format json` with a usage error. Nothing is mutated by asking |
+| A **2-second** budget, not a generous one | a health report is data the program already holds, and a binary without the subcommand refuses in milliseconds. `ske doctor` measures 20.3 s and never speaks the protocol anyway, so a budget wide enough to sit through it would put twenty seconds onto every standing audit to learn nothing — which is how a station gets switched off |
+| The probes run at once | twenty-one process starts, several of them interpreters. Serially that is seconds on the path `yadm update` and the dream pre-pass both take. Order is restored afterwards, because a report that reshuffles between runs cannot be diffed |
+| A report is refused unless its station is the binary's name or a name under it (`docket`, `docket-git`) | findings are minted through a `StationId` locally so a station cannot stamp another's name on its own report. Across a process boundary that cannot be enforced, only checked, and this is the check |
+| A registered name that is not on `PATH` is silent here | registered-and-absent is real drift and it is `relic doctor`'s finding to report. This station only collects, and A1 introduces no new checks |
+
+**Found by building it, and both were silent failures:**
+
+- **The exit status is the answer's grade, not a verdict on whether there was
+  an answer.** `Grade` is reported as `0`/`1`/`2`, so a speaker that found
+  something exits non-zero *by contract* — and the first draft used
+  `Tool::capture`'s reading, which discards stdout on a non-zero exit. It would
+  have collected only from speakers that had nothing to say. `relic_core::tool`
+  grew `run_within` and `Exit` for exactly this: a caller to whom the status is
+  data.
+- **Killing a shell does not kill what the shell started.** The bounded wait
+  drained both pipes on scoped threads, and a scope joins before it returns — so
+  a `sh` that had spawned `sleep 30` was killed at the deadline while its
+  grandchild kept the write end of the pipe open, and the "bounded" wait ran the
+  full thirty seconds. Nothing portable kills a process this one did not start,
+  so the readers are detached and left to end on their own.
+
+The renderer now names a finding's own station when it differs from the report's.
+For all five built-in stations the two are the same name and nothing changed;
+here it is the difference between "the registry said so" and knowing which
+binary did.
