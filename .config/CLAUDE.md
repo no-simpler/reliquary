@@ -110,7 +110,6 @@ Pre/post hooks: `~/.pre.{zsh,sh}` and `~/.post.{zsh,sh}` are sourced if present 
 Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `bbs` - interactive Brewfile scope selector (applies `Brewfile@<scope>` files)
 - `gh` - shadows Homebrew's `gh` (same PATH trick as `yadm-wrapper`); exports `GH_CONFIG_DIR` to the benefactor profile when the *physical* cwd is under `~/Developer/benefactor/`, else leaves the personal default. See "Two GitHub identities" below
-- `pb` - lists personal bin executables, shows which are yadm-managed
 - `pm` - print message: typed, coloured terminal output (notice/info/success/warning/error), the interactive counterpart to the bootstrap's `util/00-print.sh`
 - `timeout` - GNU-style `timeout(1)` shim, so scripts can rely on it being present
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm, relics, relic build cache); writes timestamp to `~/.local/state/up/last_upped_at`
@@ -138,7 +137,7 @@ Sanctioned sidesteps: a meta-project may bypass the helper for advanced cases (t
 
 Personal CLI utils have a three-stage lifecycle. A **relic** is a personal tool the author keeps:
 
-- **Stage 1 — one-shot util**: single file in `~/.config/bin/` (status quo; `bbs`, `pb`, `up`, etc.).
+- **Stage 1 — one-shot util**: single file in `~/.config/bin/` (status quo; `bbs`, `up`, etc.).
 - **Stage 2 — in-house relic**: directory at `~/.config/relics/<name>/`, yadm-tracked, with a manifest (`relic.toml`) and optional `src/`, `tests/`, `scripts/`. Published onto PATH via the shared lib. The `relic` CLI itself is the first Stage-2 relic.
 - **Stage 3 — external relic**: independent repo at `~/Developer/<name>/` (`bb`, `halo` today). The dependency is strictly **unidirectional** (relic → reliquary, via `install-on-path.sh`). Reliquary's "known external relics" list in `GRADUATION.md` is a best-effort convenience, not authoritative; it can also discover registrants via the registry's owner column, but doesn't chase this exhaustively.
 

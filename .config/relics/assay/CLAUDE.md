@@ -321,12 +321,63 @@ live machine the day it lands.
 | station | state |
 | --- | --- |
 | `perf-budgets` | **built** |
+| `path` | **built** — and `bin/pb` is retired with it |
 | harness permission rules | to build — and it retires `halo`'s `settings_lint.py` one dream cycle later |
 | harness hook wiring | to build |
 | `~/.claude` skill and plugin health | to build |
-| `$PATH` sanity | to build; it and the registry adapter are the whole of `bin/pb`, which is deleted rather than ported |
 | git-identity separation | to build — the three mechanisms that must all be right |
 | manifest ↔ installed drift | to build, for the cargo and npm lanes |
+
+## The `path` station
+
+Not "does a shell start clean" — that is `shell-startup`, which asks three shells
+what they end up with. This asks whether a search path of this *shape* is safe to
+resolve through, and whether the two publish lanes are reachable at all. The two do
+not overlap: `shell-startup` owns duplicate entries, because it can see three
+shells' paths and this station only ever sees one; this owns the shape of the one it
+was handed, which is the path the calling process actually got — and a nested
+non-interactive tool shell has been observed to inherit a different order from the
+interactive shell that configured it.
+
+| finding | grade | why |
+| --- | --- | --- |
+| An empty entry | `Broken` | a stray, leading or doubled `:` means the working directory, so whoever writes into the directory you happen to be in chooses which program runs |
+| A relative entry | `Broken` | same class: it names a different directory from every directory |
+| A world-writable directory | `Broken` | anyone can plant a binary that wins |
+| A lane that does not exist, or is off the path | `Broken` | it is a publish target; nothing installed into it can be, and nothing already there is reachable |
+| `~/.config/bin` behind Homebrew's `bin` | `Broken` | the lane exists to shadow Homebrew's `yadm` and `gh`. Behind it, bare `yadm` is Homebrew's — no wrapper subcommands, and `yadm encrypt` stops recording the archive's hash — and `gh` loses the benefactor profile. A guard disarmed, which is what `Broken` means |
+| A file in a lane with no execute bit | `Soft` | it is meant to be a program, and the failure reads as never installed |
+| Entries that are not directories | **one `Note`** | see below |
+
+**Dead entries are one note, and never a verdict.** Graded, they would redden every
+run of an ordinary macOS: `path_helper` contributes three `cryptexd` bootstrap
+directories that exist only sometimes, and a plugin harness contributes
+version-stamped ones that come and go. None is this machine's to fix, and a verdict
+nobody can clear where it fires is how a gate gets switched off. Still worth saying,
+because one of them usually *is* ours — a stale `fish_user_paths` entry naming a
+renamed formula was the first thing it found — so: one line with the count, the names
+one level down, the way `shell-startup` reports duplicates.
+
+**A missing lane is reported once.** It is both a dead entry and an unreachable
+publish target; the lane check owns it, because it is the one that says something
+useful. Two findings for one absence is how a report gets read twice and acted on
+once. Pinned by `a_lane_that_does_not_exist_is_broken_because_nothing_can_publish_into_it`.
+
+**Homebrew is resolved, not hardcoded** — the path entry that holds a `brew` — so the
+check works on Apple silicon, on Intel, and says nothing at all on a machine that has
+no Homebrew to order against.
+
+## Retired, not ported: `bin/pb`
+
+Its inventory half — every personal-bin executable, coloured by whether yadm manages
+it — was already two other stations' answer: `yadm-coverage` for `~/.config/bin`, the
+registry adapter for `~/.local/bin`. Printing a list of things that are fine is
+inventory, not verification, which is the same reason `bedrock` and `relic-cache`
+stopped printing theirs.
+
+What was left was its three warnings, and those are checks: a lane that does not
+exist, a lane off `$PATH`, and a file in one that is not executable. All three are
+above, graded rather than printed.
 
 ## The `perf-budgets` station
 

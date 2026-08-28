@@ -22,6 +22,7 @@ pub fn roster() -> Vec<Box<dyn Station>> {
         Box::new(crate::stations::shell_startup::ShellStartup::default()),
         Box::new(crate::stations::relic_cache::RelicCache::default()),
         Box::new(crate::stations::yadm_coverage::YadmCoverage::default()),
+        Box::new(crate::stations::path::SearchPath::default()),
         Box::new(crate::stations::perf_budgets::PerfBudgets::default()),
         Box::new(crate::stations::registry::RegistryAdapter::default()),
     ]

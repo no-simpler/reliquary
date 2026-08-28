@@ -13,7 +13,7 @@ environments).
 
 | Stage | Where it lives                    | Status                          | Examples              |
 |-------|-----------------------------------|---------------------------------|-----------------------|
-| 1     | `~/.config/bin/<name>`            | one-shot util, yadm-tracked     | `bbs`, `pb`, `up`     |
+| 1     | `~/.config/bin/<name>`            | one-shot util, yadm-tracked     | `bbs`, `up`, `mm`     |
 | 2     | `~/.config/relics/<name>/`        | in-house relic, yadm-tracked    | `relic`, `ernest`, `docket` |
 | 3     | `~/Developer/<name>/`             | external relic, own git repo    | `bb`, `halo`          |
 
