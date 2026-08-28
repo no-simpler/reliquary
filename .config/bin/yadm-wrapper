@@ -387,20 +387,23 @@ _doctor_run() {
     #     sweeps it, but a machine that has not run `up` in a while, or that lacks
     #     cargo-sweep, would balloon silently — so it is reported here. Never a
     #     failure: the whole tree is regenerable by a rebuild.
+    #     Both lanes: each relic lane is its own cargo workspace with its own
+    #     target/, and a cache reported for one says nothing about the other.
     _doctor_head "relic build cache"
-    local relic_target="$HOME/.config/relics/target"
-    if [ ! -d "$relic_target" ]; then
-        _doctor_skip "nothing built yet"
-    else
-        local tkb tmib
+    local lane relic_target tkb tmib any=0
+    for lane in "$HOME/.config/relics" "$HOME/.config/attic"; do
+        relic_target="$lane/target"
+        [ -d "$relic_target" ] || continue
+        any=1
         tkb=$(du -sk "$relic_target" 2>/dev/null | awk '{print $1}')
         tmib=$((${tkb:-0} / 1024))
         if [ "${tkb:-0}" -lt 4194304 ]; then
-            _doctor_ok "${tmib} MiB"
+            _doctor_ok "${tmib} MiB in ${lane/#$HOME/~}"
         else
-            _doctor_warn "${tmib} MiB — run 'up', or 'cargo sweep --time 30' in ~/.config/relics"
+            _doctor_warn "${tmib} MiB in ${lane/#$HOME/~} — run 'up', or 'cargo sweep --time 30' there"
         fi
-    fi
+    done
+    [ "$any" -eq 0 ] && _doctor_skip "nothing built yet"
 
     # 6c. Tracking coverage. yadm's whitelist plus the encrypt lane means a file
     #     that nobody has decided about is indistinguishable from one nobody has

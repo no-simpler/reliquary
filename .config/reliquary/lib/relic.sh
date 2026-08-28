@@ -433,15 +433,15 @@ relic::_allow_ratchet() {
 # by nothing: a path dependency outside the workspace is linted by no one, which
 # is the whole reason the lane is a workspace.
 relic::_test_compiled() {
-    local dir="${1:-}" root c
+    local dir="${1:-}" root c shared
     root="$(relic::_cargo_workspace_root "$dir")" || {
         relic::_die "no cargo workspace above $dir"
         return $?
     }
 
-    local pkgs=(-p "$NAME")
+    local pkgs=(-p "$NAME") shared=0
     while IFS= read -r c; do
-        [[ -n "$c" ]] && pkgs=("${pkgs[@]}" -p "$c")
+        [[ -n "$c" ]] && pkgs=("${pkgs[@]}" -p "$c") && shared=1
     done < <(relic::_shared_crates "$root")
 
     (
@@ -461,9 +461,50 @@ relic::_test_compiled() {
         cargo clippy "${pkgs[@]}" --all-targets --all-features || exit $?
 
         if command -v cargo-nextest >/dev/null 2>&1; then
-            exec cargo nextest run "${pkgs[@]}"
+            cargo nextest run "${pkgs[@]}"
+        else
+            cargo test "${pkgs[@]}"
         fi
-        exec cargo test "${pkgs[@]}"
+    ) || return $?
+
+    [[ $shared -eq 1 ]] && relic::_test_attic_lane
+}
+
+# The reverse cross-lane gate.
+#
+# A shared crate is covered from each of its public dependents by the `-p` set
+# above. Its *private* dependents are covered by nothing: that is the workspace
+# property a lane boundary cannot carry, and the encrypted lane is a second
+# workspace precisely because a member's name and version land in a lockfile.
+# So when a public relic's run covered a shared crate, run the attic lane's own
+# format, lints and suite as well.
+#
+# Silent no-op when the attic is absent or holds no member — the pattern the
+# publish snippet, `up` and `relic list` already use. It names no attic relic:
+# it references only the lane, which is already public knowledge. A failure
+# prints attic names to the terminal; that is local, and must never be
+# redirected into a tracked file.
+relic::_test_attic_lane() {
+    local attic="$HOME/.config/attic" manifest populated=0
+    [[ -r "$attic/Cargo.toml" ]] || return 0
+    for manifest in "$attic"/*/Cargo.toml; do
+        [[ -r "$manifest" ]] && populated=1
+    done
+    # cargo refuses a memberless virtual workspace, so an ungated step would
+    # fail every public relic's tests until the lane holds its first member.
+    [[ $populated -eq 1 ]] || return 0
+
+    printf 'relic[%s]: shared crate changed — gating the private lane\n' "$NAME"
+    (
+        cd "$attic" || exit $?
+        cargo fmt --all --check || exit $?
+        cargo clippy --workspace --all-targets --all-features || exit $?
+        # An untested private relic is its own `relic test`'s finding, not a
+        # reason to fail the public relic that triggered this step.
+        if command -v cargo-nextest >/dev/null 2>&1; then
+            exec cargo nextest run --workspace --no-tests=pass
+        fi
+        exec cargo test --workspace
     )
 }
 
