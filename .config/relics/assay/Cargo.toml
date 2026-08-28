@@ -28,6 +28,9 @@ regex = "1.13.1"
 toml = "1.1.4"
 serde.workspace = true
 serde_json.workspace = true
+# A budgeted path may need its stdin, and a literal cannot be handed to a child
+# through a pipe nobody is left to write into.
+tempfile.workspace = true
 relic-core = { path = "../crates/relic-core" }
 # The identity guard, as a library. `warden` owns the definition and the test;
 # a second implementation of either is how two consumers of one definition come

@@ -232,10 +232,12 @@ For all five built-in stations the two are the same name and nothing changed;
 here it is the difference between "the registry said so" and knowing which
 binary did.
 
-## A2 — what `yadm doctor` still owns, and what is left to take
+## A2 — what `yadm doctor` kept, and what it gave up
 
-`_doctor_run` has ten sections. Six are already stations; the inventory, so the
-remaining work is a list rather than a rediscovery:
+`_doctor_run` had ten sections. It is a thin caller now: it runs `assay` once and
+folds the exit status into its own tally, reading nothing of the report, because a
+caller that greps output is a second parser of a format nobody promised to keep.
+Where each section went:
 
 | section | fate |
 | --- | --- |
@@ -309,3 +311,45 @@ and diffing against the script's own `enumerate` — and both grade `ok`.
 | `shfmt` output is intersected with the population | `shfmt` has no `-0`, so a path holding a newline would arrive as two lines naming nothing. A line that is not a file the station handed over is said out loud rather than guessed at | `a_formatter_naming_something_it_was_not_given_says_so` |
 | No subset mode | the script took paths and then had to disable the ratchet for them, because a subset cannot tell a file with no directives from a file it was not asked about. A station always runs over the whole population, so the special case disappears. `relic test`'s bash branch therefore runs the whole population too — a superset gate, ~3 s over 63 files, whose every finding is true | — |
 | The tools are shimmed in tests, and their contract is pinned against captured output | a test that shells out to the machine's `shellcheck` answers for that machine's version. The station's logic and the tool's format are two facts, pinned separately | `the_json1_shape_is_the_one_shellcheck_emits` |
+
+## A3 — the stations that are new
+
+Nothing here has a retired script behind it, so nothing here has a golden master.
+Each is a behaviour change, pinned by its own tests and by what it finds on the
+live machine the day it lands.
+
+| station | state |
+| --- | --- |
+| `perf-budgets` | **built** |
+| harness permission rules | to build — and it retires `halo`'s `settings_lint.py` one dream cycle later |
+| harness hook wiring | to build |
+| `~/.claude` skill and plugin health | to build |
+| `$PATH` sanity | to build; it and the registry adapter are the whole of `bin/pb`, which is deleted rather than ported |
+| git-identity separation | to build — the three mechanisms that must all be right |
+| manifest ↔ installed drift | to build, for the cargo and npm lanes |
+
+## The `perf-budgets` station
+
+The fourth ratchet, and the one that guards this programme's own claims. It reads
+`reliquary/ratchets/perf-budgets.toml` and times what the file names.
+
+| decision | why |
+| --- | --- |
+| `--deep` only | it spends the time it measures. A full deep run is ~3 minutes on this machine, most of it one path. Inside an ordinary `yadm doctor` that lands on the dream pre-pass, and the first thing anyone does about a three-minute pre-pass is stop running it |
+| `Soft`, never `Broken` | a slow machine is degraded and entirely reproducible from the repo, which is the definition |
+| One run, no warm-up, no statistics | a smoke alarm, not a benchmark suite. The tolerance is ×3, so what is detected is a path that changed kind — not one that drifted by a fraction |
+| `command` is argv, not a command line | there is no shell, so nothing splits, quotes or globs. A first element carrying a `/` is a path under the home being checked, which is how a hook that is not on `$PATH` is named |
+| A path is bounded at `budget × tolerance × 2`, floor 1 s | without a bound a pathological path holds the run open for as long as it likes. Twice the reporting threshold, so a finding still carries a real number wherever a number would tell anyone anything; past that, "over N" is the whole of what a smoke alarm has to say. The floor is because process startup alone is a few ms and `ske-prompt`'s budget is 10 |
+| Exit status is ignored | the clock is what is being read. `yadm doctor --quiet` exits 1 on a degraded machine, which is not a failure to time |
+| `timed = false` is silent | a recorded decision, in the same sense as a line in `yadm/unmanaged`: the reason sits beside it in the file, and a note repeated on every run is inventory rather than verification |
+| A program the machine does not have is a `Note` | one item that could not be judged, which is what `Note` is. The other eleven paths still have answers |
+| `stdin` is fed from a temporary file | `modes.py` refuses an empty stdin, and a timing taken from a program that refused is a timing of the refusal. A pipe would need somebody left to write into it |
+
+**The recursion is real and it terminates.** `yadm doctor --quiet` is a budgeted path
+and `yadm doctor` runs `assay` — but without `--deep`, so the inner run skips this
+station. Depth two, and the number is honest for the same reason: it is what the path
+costs today, `assay` included, which is most of what it now is.
+
+**It found a live regression on its first run**: `ske doctor` at 80.6 s against a
+budget of 20.3 s recorded one day earlier — 4×, past the tolerance. Migration ④ is
+what fixes it; until then the ratchet is the only thing that says so out loud.

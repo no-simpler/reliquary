@@ -14,30 +14,45 @@
 # the ratchet, and it is why the numbers are captured before the migrations
 # start moving them.
 #
-# Measured on this machine, wall clock, otherwise idle, best of three.
+# Measured on this machine, wall clock, otherwise idle, best of three. The
+# station takes one run per path — a smoke alarm does not need statistics.
+#
+# `command` is **argv, not a command line**: there is no shell, so nothing
+# splits, quotes or globs. A first element carrying a `/` is a path under $HOME,
+# which is how a hook that is not on $PATH is named; a bare name is resolved
+# against $PATH.
+#
+# Only **side-effect-free** commands belong here. The station runs them, so an
+# entry that writes anything writes it on every deep run.
+#
+# `timed = false` is a recorded decision, in the same sense as a line in
+# `yadm/unmanaged`: the path is budgeted but cannot be run standalone, the reason
+# sits in its `note`, and the station passes over it without a word.
 
 tolerance = 3
 
 # ── every commit, in front of a Touch ID prompt ──────────────────────────────
 [[path]]
 name = "pre-commit-guard"
-command = "yadm/hooks/pre_commit"
+command = ["yadm/hooks/pre_commit"]
 budget_ms = 3000
 measured = "2026-08-28"
-note = """Not directly runnable — it needs a staged commit. 2-4s, of which 1.64s is
-`file` probes alone: ~600 forks over every tracked file, because it scans the whole
-tree rather than the staged set."""
+timed = false
+note = """Not runnable standalone — it needs a staged commit, and running it against
+one would be a side effect. The number is the retired bash hook's: 2-4s, of which
+1.64s is `file` probes alone, ~600 forks over every tracked file because it scanned
+the whole tree rather than the staged set. `warden` replaced it at 7ms."""
 
 # ── every session start ──────────────────────────────────────────────────────
 [[path]]
 name = "nexus-verify-hook"
-command = "nexus verify --hook"
+command = ["nexus", "verify", "--hook"]
 budget_ms = 1830
 measured = "2026-08-27"
 
 [[path]]
 name = "docket-announce-hook"
-command = "docket announce --hook"
+command = ["docket", "announce", "--hook"]
 budget_ms = 30
 measured = "2026-08-27"
 note = "The Rust reference point: what a session-start hook costs when it is a binary."
@@ -45,21 +60,22 @@ note = "The Rust reference point: what a session-start hook costs when it is a b
 # ── every interactive shell, prompt, or prompt render ────────────────────────
 [[path]]
 name = "yadm-check"
-command = "yadm check"
+command = ["yadm", "check"]
 budget_ms = 190
 measured = "2026-08-28"
 note = "The SHA-256 it exists to compute is 11ms of that."
 
 [[path]]
 name = "modes-expander"
-command = ".claude/hooks/modes.py"
+command = [".claude/hooks/modes.py"]
+stdin = "{}"
 budget_ms = 26
 measured = "2026-08-27"
 note = "rglob per token, so the cost is O(tree) — the scaling is the argument, not the 26ms."
 
 [[path]]
 name = "ske-prompt"
-command = "ske-prompt"
+command = ["ske-prompt"]
 budget_ms = 10
 measured = "2026-08-27"
 
@@ -70,40 +86,42 @@ measured = "2026-08-27"
 # of these commands makes exactly one.
 [[path]]
 name = "relic-list"
-command = "relic list"
+command = ["relic", "list"]
 budget_ms = 320
 measured = "2026-08-28"
 
 [[path]]
 name = "relic-doctor"
-command = "relic doctor"
+command = ["relic", "doctor"]
 budget_ms = 385
 measured = "2026-08-28"
 
 [[path]]
 name = "relic-status"
-command = "relic status"
+command = ["relic", "status"]
 budget_ms = 220
 measured = "2026-08-28"
 
 # ── every `yadm update` and every dream pre-pass ─────────────────────────────
 [[path]]
 name = "yadm-doctor-quiet"
-command = "yadm doctor --quiet"
+command = ["yadm", "doctor", "--quiet"]
 budget_ms = 30410
 measured = "2026-08-28"
-note = "98% CPU-bound. The station that times this cannot be one of its own sections."
+note = """98% CPU-bound. Timing it re-enters `assay`, which is now most of what it
+is — without `--deep`, so the inner run skips this station and the recursion stops at
+depth two. The number is honest for the same reason: it is what the path costs."""
 
 [[path]]
 name = "ske-doctor"
-command = "ske doctor"
+command = ["ske", "doctor"]
 budget_ms = 20300
 measured = "2026-08-27"
 note = "Two thirds of yadm doctor's total, and the single largest item in it."
 
 [[path]]
 name = "shell-lint"
-command = "assay shell-lint"
+command = ["assay", "shell-lint"]
 budget_ms = 2920
 measured = "2026-08-29"
 note = """
