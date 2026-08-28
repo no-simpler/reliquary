@@ -19,6 +19,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "assay",
     "crates/*",
     "decruft",
     "docket",

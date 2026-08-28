@@ -12,7 +12,9 @@
 //! the same tmp-then-rename by hand and both had the same collision in it.
 //!
 //! [`ui`] and [`fmt`] are the platform half: one answer to "who is reading this"
-//! and one spelling for the quantities that answer reports.
+//! and one spelling for the quantities that answer reports. [`finding`] is the
+//! same move for verification: the machine's checks live in several programs, and
+//! this is the only thing they agree on.
 //!
 //! Paths are [`camino::Utf8Path`]. A relic's paths are program data — keys it
 //! compares, stores and prints — and `to_string_lossy` maps two directories onto
@@ -26,6 +28,7 @@
 // modules. Here `pub` is the API every relic writes against.
 #![deny(clippy::must_use_candidate)]
 
+pub mod finding;
 pub mod fmt;
 pub mod fs;
 pub mod git;
