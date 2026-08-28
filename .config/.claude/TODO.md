@@ -10,21 +10,21 @@ Single live queue for Reliquary work.
 
 ## Bedrock — Linux/WSL install path
 
-Bedrock verification (`bin/check-bedrock`) is cross-platform and already runs (and fails loud) on
+Bedrock verification (`assay bedrock`) is cross-platform and already runs (and fails loud) on
 Linux, but **installation** is macOS/Brewfile-only. Add a Linux install path: distro packages for
 bash/python3/git/curl, the curl installer (or distro pkg) for uv, docker engine for docker. Wire it
 into the `linux/` bootstrap snippets. Until then, a fresh Linux box reports bedrock incomplete by
 design. See `reliquary/BEDROCK.md`.
 
-## Bedrock — Brewfile ↔ check-bedrock parity guard (optional)
+## Bedrock — Brewfile ↔ member-roster parity guard (optional)
 
-Consider a small guard (parallel to `check-shell-parity`) asserting that every `# bedrock`-tagged
-line in `brew/Brewfile` has a matching member in `check-bedrock`'s `MEMBERS`, and vice-versa, so the
-install list and the contract can't silently diverge.
+Consider a small guard asserting that every `# bedrock`-tagged line in `brew/Brewfile` has a
+matching entry in the `bedrock` station's `MEMBERS`, and vice-versa, so the install list and the
+contract can't silently diverge.
 
 **`cargo` is a deliberate exemption** — rustup owns it, so it is a member with no Brewfile tag. Any
-such guard needs an exemption list from the outset, not a special case bolted on later. Note this
-belongs in `assay` as a station rather than as a fourth `check-*` script; see docket spec 7d1m.
+such guard needs an exemption list from the outset, not a special case bolted on later. It belongs
+in `assay` as a station; see docket spec 7d1m.
 
 ## Bedrock — revisit "uv owns python3" (only if needed)
 

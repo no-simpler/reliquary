@@ -2,8 +2,8 @@
 //!
 //! The verdict comes **last** in every human-facing block, because that is how a
 //! terminal block is read: from the bottom up, with the remedy above the line
-//! that grades it. `check-bedrock` and `yadm doctor` already print that way, and
-//! A2 replaces them without moving anyone's eye.
+//! that grades it. The retired checkers and `yadm doctor` printed that way too, so
+//! subsuming them moved nobody's eye.
 
 use std::fmt::Write as _;
 use std::io::Write;

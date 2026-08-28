@@ -102,8 +102,12 @@ measured = "2026-08-27"
 note = "Two thirds of yadm doctor's total, and the single largest item in it."
 
 [[path]]
-name = "check-shell-lint"
-command = "check-shell-lint"
-budget_ms = 4160
-measured = "2026-08-28"
-note = "Two linter startups over the whole tracked bash population."
+name = "shell-lint"
+command = "assay shell-lint"
+budget_ms = 2920
+measured = "2026-08-29"
+note = """
+Two linter startups over the whole tracked bash population, which is the cost —
+the station adds ~30 ms to it. `relic test`'s bash branch pays this too, because
+the ratchet has no subset mode.
+"""

@@ -1,6 +1,6 @@
 # Paths deliberately kept out of BOTH lanes — the machine-readable half of
 # ~/.config/CLAUDE.md → "Deliberately not tracked (audited)", which keeps the
-# reasoning in prose. bin/check-yadm-coverage reads this file; anything under a
+# reasoning in prose. assay's yadm-coverage station reads this file; anything under a
 # scanned root that is neither tracked, nor matched by yadm/encrypt, nor inside
 # a pruned runtime directory, nor listed here is reported as undecided.
 #

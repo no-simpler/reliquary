@@ -103,15 +103,15 @@ own absence is only a warning: another toolchain still builds, it just loses the
 |---------|-------|
 | **Install** (macOS) | base `brew/Brewfile` — members tagged with a trailing `# bedrock` marker. `git`, `bash`, `curl`, `python`, `uv`, `just` + the `orbstack` cask. Applied by `yadm/snippets/macos/02-brewfile.sh`; bash is front-run by `macos/02-bash.sh`. **`cargo` is the exception**: rustup owns it, installed by `yadm/snippets/shared/11-rustup.sh`, and carries no `# bedrock` tag. |
 | **Install** (Linux/WSL) | **not yet implemented** — see the TODO queue. Verification already runs and fails loud there. |
-| **Verify** | `bin/check-bedrock` — cross-platform, side-effect-free, offline. Presence + version/sub-API probes + a shadow/duplicate scan. Exit `0` satisfied / `1` warnings / `2` incomplete. |
-| **Enforce** | `yadm doctor` runs `check-bedrock` (so the dream pre-pass and `yadm update --quiet` both cover it); `yadm/snippets/shared/98-bedrock.sh` re-asserts it loudly at the end of bootstrap. |
+| **Verify** | `assay bedrock` — cross-platform, side-effect-free, offline. Presence + version/sub-API probes + a shadow/duplicate scan. Exit `0` satisfied / `1` warnings / `2` incomplete. |
+| **Enforce** | `yadm doctor` runs `assay` (so the dream pre-pass and `yadm update --quiet` both cover it); `yadm/snippets/shared/98-bedrock.sh` re-asserts it loudly at the end of bootstrap. |
 | **Contract** (for other repos) | this doc + the "Bedrock" section in `~/.config/CLAUDE.md`. |
 
 ### Minimize shadows and duplicates
 The goal is **one system-wide install per member** with clean PATH wiring. macOS ships copies that
 cannot be expunged (`/bin/bash`, `/usr/bin/python3`, `/usr/bin/git`, `/usr/bin/curl`); bedrock
 deliberately *shadows* them by putting Homebrew ahead on PATH (asserted last by
-`shell/env.d/999-path.sh`). `check-bedrock` treats those known OS-baseline copies as expected, but
+`shell/env.d/999-path.sh`). The station treats those known OS-baseline copies as expected, but
 **warns** about any *other* extra copy on PATH, or when Homebrew provides a member that isn't the
 one winning — surfacing real drift without pretending the unexpungeable copies are problems.
 
@@ -127,8 +127,8 @@ the 3.2-safe authoring rule is simpler and robust.)
 ## Evolving bedrock
 
 To add a member:
-1. Add it to `MEMBERS` in `bin/check-bedrock`, with a `check_<name>` sub-API probe if it has one and
-   an `expected_extra` entry if the OS ships a shadowable copy.
+1. Add it to `MEMBERS` in `relics/assay/src/stations/bedrock.rs`, with a sub-API probe if it has one
+   and an `expected_extra` entry if the OS ships a shadowable copy.
 2. Give it an install path: the base `brew/Brewfile` with a `# bedrock` marker for anything brew
    ships, or a bootstrap snippet where an upstream installer is the better owner (as with
    rustup). Either way, note which lane in the member table. Linux install remains a TODO.

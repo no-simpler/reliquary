@@ -52,7 +52,7 @@
 
 set -o pipefail
 
-# --- Colors (house style, see bin/check-bedrock) ---------------------------
+# --- Colors (house style) --------------------------------------------------
 BOLD="\033[1m"
 RED="\033[31m"
 GREEN="\033[32m"

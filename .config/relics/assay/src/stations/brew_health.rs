@@ -539,7 +539,7 @@ fn bare(name: &str) -> String {
 /// account, every one of them declared in a scope that was not there.
 ///
 /// Membership is derived by expanding the pattern list, never by decrypting —
-/// the route `check-yadm-coverage` already takes. A pattern carrying a glob is
+/// the same route the `yadm-coverage` station takes. A pattern carrying a glob is
 /// skipped: it cannot prove a particular file absent.
 fn absent_scopes(cx: &Context) -> Vec<String> {
     let Ok(text) = fs_err::read_to_string(cx.at(ENCRYPT)) else {

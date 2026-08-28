@@ -166,7 +166,7 @@ update_brew() {
     # replacement, and extends the same check to the Brewfiles so a declaration
     # that stopped resolving surfaces here instead of on the next machine's
     # bootstrap. Advisory too — `yadm doctor` is what holds it to a verdict.
-    command -v check-brew-health &>/dev/null && check-brew-health || true
+    command -v assay &>/dev/null && assay brew-health || true
     return "$rc"
 }
 

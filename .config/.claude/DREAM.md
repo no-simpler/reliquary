@@ -43,14 +43,12 @@ archive-vs-disk `verify` — run it deliberately, not in the unattended pre-pass
 When doctor reports parity drift it names the lagging file and the missing names. Adjudicate each:
 add the missing definition to the lagging shell (translating syntax — `alias NAME=val` ↔
 `alias NAME val` / `abbr --add NAME val`; `name() {…}` ↔ `function name … end`), or, if the
-divergence is intentional and permanent, add the name to that pair's allowlist inside
-`check-shell-parity` with a one-line reason.
+divergence is intentional and permanent, record it in `shell/parity.toml` with a one-line
+reason.
 
 **Extension policy:** a new scriptable check is a **station** in `assay`, the aggregator
-`yadm doctor` will call — never prose here, and never new check *logic* inside the wrapper's
-bash `doctor()`. Until `assay` lands, a check goes in as a standalone `bin/check-*` script that
-`doctor()` merely registers (name, exit 0/1/2, output indented verbatim), and it is absorbed as
-a station later. See `~/.config/reliquary/HARDENING.md`. The pre-pass is the reliable floor;
+`yadm doctor` calls — never prose here, and never check *logic* inside the wrapper's bash
+`doctor()`, which is now a thin caller. See `~/.config/reliquary/HARDENING.md`. The pre-pass is the reliable floor;
 the passes below are the judgment layer it cannot replace.
 
 ## The read IS the pass

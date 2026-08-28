@@ -61,9 +61,8 @@ impl fmt::Display for Severity {
 
 /// The verdict over a set of findings, and the process exit that carries it.
 ///
-/// `0`/`1`/`2` is what `check-bedrock` and `check-brew-health` already agreed on
-/// separately; it is the convention here because two of the surfaces being
-/// subsumed had converged on it unprompted.
+/// `0`/`1`/`2` is the convention two of the retired checkers had converged on
+/// separately and unprompted, which is why it is the one here.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Grade {

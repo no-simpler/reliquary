@@ -1,6 +1,6 @@
 # Packages installed on request that are deliberately declared in no Brewfile.
 #
-# `bin/check-brew-health` reads this file, so a decision recorded here stops
+# `assay`'s `brew-health` station reads this file, so a decision recorded here stops
 # resurfacing — the same role `yadm/unmanaged` plays for tracking coverage. A
 # name listed here is one that must NOT be reproduced on the next machine; a
 # package that should be is declared in a Brewfile instead, and a package that is

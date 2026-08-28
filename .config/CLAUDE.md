@@ -24,7 +24,7 @@ the relic lane builds from source).
 - **Install:** base `brew/Brewfile`, members tagged `# bedrock` (macOS only for now; Linux is a TODO).
   `cargo` is the one exception — rustup owns it, installed by `yadm/snippets/shared/11-rustup.sh`,
   untagged. The install mechanism is per-member; the guarantee is uniform.
-- **Verify:** `bin/check-bedrock` (cross-platform, offline, side-effect-free; exit 0/1/2).
+- **Verify:** `assay bedrock` (cross-platform, offline, side-effect-free; exit 0/1/2).
 - **Enforce:** wired into `yadm doctor` (so the dream pre-pass and `yadm update` cover it) and re-asserted
   at the end of bootstrap (`yadm/snippets/shared/98-bedrock.sh`).
 - **Bootstrap caveat:** snippets are sourced into the running (stock 3.2) bash, which the early
@@ -41,7 +41,7 @@ The `yadm-wrapper` script (see below) tracks archive SHA256 in `~/.local/state/y
 
 **Convention:** Encryption patterns in `encrypt` are intentionally obfuscated — they should not reveal what they protect. When adding new patterns, use opaque names that don't hint at content. Do not describe or document the contents of encrypted files in any tracked file (including this one). Future sessions can read encrypted file contents locally after decryption. The same convention governs `~/.config/yadm/unmanaged` (see "Deliberately not tracked" below): a path kept out of both lanes still gets a reason, and the reason must not name what the path is for.
 
-**The identity guard.** What may never reach the public plaintext tree is defined once, as data, in `~/.config/yadm/hooks/identity-guard.toml` — encrypted, because the definition names what it protects. `identity-guard.py` beside it is the only reader and the only place its parts compose; a second composer is how two consumers of one definition come to disagree. Two consumers read it through that: `hooks/pre_commit` refuses a commit whose tracked files trip it, and `bin/check-yadm-coverage` runs the same test backwards, treating a hit on an *untracked* file as positive evidence that it belongs in the encrypt lane. Never restate that definition anywhere else, and never inline it into a public file. It is unavailable before the first `yadm decrypt`; both consumers say so rather than silently passing, and both assert the pattern is non-empty before using it — an empty regex matches every line, which would accuse every file instead of failing.
+**The identity guard.** What may never reach the public plaintext tree is defined once, as data, in `~/.config/yadm/hooks/identity-guard.toml` — encrypted, because the definition names what it protects. `identity-guard.py` beside it is the only reader and the only place its parts compose; a second composer is how two consumers of one definition come to disagree. Two consumers read it through that: `warden` refuses a commit whose staged files trip it, and `assay`'s `yadm-coverage` station runs the same test backwards over the whole tree, treating a hit on an *untracked* file as positive evidence that it belongs in the encrypt lane. Never restate that definition anywhere else, and never inline it into a public file. It is unavailable before the first `yadm decrypt`; both consumers say so rather than silently passing, and both assert the pattern is non-empty before using it — an empty regex matches every line, which would accuse every file instead of failing.
 
 ## yadm operations
 
@@ -114,11 +114,7 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `pm` - print message: typed, coloured terminal output (notice/info/success/warning/error), the interactive counterpart to the bootstrap's `util/00-print.sh`
 - `timeout` - GNU-style `timeout(1)` shim, so scripts can rely on it being present
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm, relics, relic build cache); writes timestamp to `~/.local/state/up/last_upped_at`
-- `check-shell-parity` - detects POSIX↔fish alias/abbr/function name drift across the paired `shell/interactive.d/*.sh` ↔ `fish/conf.d/*.fish` files; exits non-zero on drift (run by the dream procedure in `~/.config/.claude/DREAM.md`)
-- `check-brew-health` - detects Homebrew rot in both directions: installed formulae/casks deprecated or disabled upstream (warn), kegs orphaned by a formula's removal, Brewfile entries that no longer resolve (fail), and packages installed **on request** that are declared in no Brewfile (warn) — the drift that only surfaces on a restore, since the tool is on `$PATH` until then. Dependencies are excluded, so only what was asked for counts; a deliberate exception is recorded in `brew/undeclared` (same role as `yadm/unmanaged`). Tap-aware, offline, side-effect-free; exit 0/1/2 like `check-bedrock`. Wired into `yadm doctor` and, advisory-only, into `up`
 - `compose-gc` - reclaims Docker Compose state left behind by dead git worktrees of the current repo, sweeping by label (no compose file needed) across both worktree layouts; `down <path>` is the profile-complete teardown of one stack. `-n` dry-runs. Used by the `transplant-worktrees` skill as its single Docker surface
-- `check-md-shell-blocks` - validates the auto-executed ```! blocks in Claude Code skills/slash commands: they are statically analysed with no prompt path, so an inline program is always denied and takes the whole invocation with it. Checks Claude Code's brace-with-quote prefilter, demands a single simple command, and verifies `allowed-tools`/settings.json coverage. Read-only, exit 0/1/2; wired into `yadm doctor`
-- `check-yadm-coverage` - reports paths nobody has decided about: every path under `~/.config`, `~/.claude`, `~/.ssh`, `~/.github`, `~/.local/bin` and `$HOME`'s own dotfiles must be plaintext-tracked, matched by an encrypt pattern, inside a pruned runtime dir, or declared in `yadm/unmanaged`. Also catches both-lanes-at-once, missing managed paths, dead encrypt patterns, undecided files anywhere beneath a directory something is already managed from (R5 — which is how a whole new untracked subdirectory gets caught, not just a stray file beside tracked ones), loose credential shapes, and unreachable-object bloat in the yadm object DB. Sockets and fifos are skipped: git cannot hold them, so they are never a decision. Derives archive membership by expanding `yadm/encrypt`, never by decrypting — offline, side-effect-free, Touch-ID-free; exit 0/1/2. Wired into `yadm doctor`
 - `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt; tries `ske read` first, falls back to `op read` (never hard-depend — it decrypts the attic `ske` lives in)
 - `ske-prompt` - prints the open `ske` Touch ID window for the oh-my-posh right prompt; silent when closed (`sh`, not bash: `$BASH_ENV` would cost ~230ms per render)
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below); also reachable as `yadm` via the `~/.config/bin/yadm` symlink (shadows brew's yadm — see "Path availability")
@@ -232,6 +228,29 @@ deleted. `-n` dry-runs.
 **The binary is the single source of truth for its own surface** — `decruft --help`. Its
 `CLAUDE.md` carries the deviations from the shell script it replaced, each naming the test
 that pins it.
+
+### Machine verification (`assay`)
+
+Every check that answers "is this machine still the one the repo describes" — one roster
+of stations over one finding type. Public relic (`~/.config/relics/assay/`, Rust).
+
+An **aggregator**, not a tool that absorbs everything. A station lives here only when
+nothing else owns the check; a relic that knows its own invariants keeps them and answers
+`doctor --format json`, which the registry adapter collects. The dependency direction never
+reverses — `assay` reads a published protocol, never another repository's source.
+
+`yadm doctor` is a thin caller: it runs `assay` and folds the exit status into its own,
+keeping only the two archive checks that are genuinely dotfile-specific. `up` calls the
+`brew-health` station, bootstrap's `98-bedrock.sh` calls `bedrock`, and `relic test`'s bash
+branch calls `shell-lint`. Adding a check means adding a **station**, not extending the
+wrapper's bash — `.claude/DREAM.md` says the same.
+
+Detect-only, offline and side-effect-free unless `--deep`; exit `0`/`1`/`2` graded from the
+findings, `3` when `assay` itself could not run.
+
+**The binary is the single source of truth for its own surface** — `assay --help`, and
+`assay --list` for the roster. Its `CLAUDE.md` carries the station contract, what was taken
+from prior art and what deliberately was not, and one deviation table per retired script.
 
 ### Commit guard (`warden`)
 
@@ -382,12 +401,12 @@ so every later snippet on a machine that already had it ran against the inherite
 - `Brewfile` - base (always applied during bootstrap)
 - `Brewfile@<scope>` - optional scopes applied interactively via `bbs`
 - Some scoped files are tracked publicly, others are encrypted (see `~/.config/yadm/encrypt`)
-- `undeclared` - request-installed packages deliberately declared nowhere, one `<name>  # reason` per line; read by `check-brew-health`
+- `undeclared` - request-installed packages deliberately declared nowhere, one `<name>  # reason` per line; read by `assay`'s `brew-health` station
 - `Brewfile*.lock.json` - **deliberately not tracked** (never `yadm add`-ed; yadm's whitelist keeps them out by default — no gitignore needed). Homebrew is rolling-release, so pinned bottle SHAs expire and aren't reinstallable, while the lock churns on every `brew upgrade`. The Brewfiles are the source of truth (track-latest intent); locks are regenerated locally by `brew bundle`/`bbs`.
 
 **When a formula disappears upstream, look for a cask before dropping the tool.** homebrew-core carries only OSI-licensed software, so a relicensing upstream gets the formula deprecated and then deleted, and homebrew-cask picks up the vendor's prebuilt binary. `tap_migrations.json` in homebrew-core records the redirect. `sentry-cli` is the worked example: it relicensed to FSL-1.1-MIT at 2.58.3, so both benefactor Brewfiles declare `cask "sentry-cli"`. A cask entry keeps automatic updates — `up`'s `brew upgrade --cask --force` pass covers it — so this stays inside Homebrew rather than falling back to the npm or cargo manifest lanes. Casks ship only the binary, so any shell completions the formula used to install must be regenerated into the tracked completion dirs (`zsh/completion/`, `fish/completions/`).
 
-`bin/check-brew-health` guards the whole class: it fails on an entry that stopped resolving and warns on one that is deprecated, so this is caught in `yadm doctor` rather than on the next machine's bootstrap.
+`assay`'s `brew-health` station guards the whole class: it fails on an entry that stopped resolving and warns on one that is deprecated, so this is caught in `yadm doctor` rather than on the next machine's bootstrap.
 
 ### Non-brew package manifests
 
@@ -430,7 +449,7 @@ Naming follows from the plugin shape: a private skill is addressed `attic:<name>
 skills-dir plugin's `commands/modes/`, so `+<name>` is identical whichever lane the file sits in.
 
 Enforcement runs both ways and is already wired into `yadm doctor`. A private file left in the
-public lane trips `check-yadm-coverage`'s R4 (the `pre_commit` identity guard, run backwards) and
+public lane trips the `yadm-coverage` station's R4 (the `pre_commit` identity guard, run backwards) and
 fails. A public file that lands inside `attic/` is merely over-protected — and if it is also
 `yadm add`-ed, R1 (a path in both lanes) fails. Nothing is tracked publicly *and* archived. The
 public lane still needs one `yadm add` per file, because that is what plaintext tracking is; R5
@@ -471,7 +490,7 @@ a single file rather than globbing the directory.
 
 ### Deliberately not tracked (audited)
 
-**`~/.config/yadm/unmanaged` is the authoritative list** — one line per path or glob, with the reason. `bin/check-yadm-coverage` reads it, so a decision recorded there is a decision that stops resurfacing; anything under a scanned root that is in neither lane and not declared is reported as undecided. Add to that file first; this section carries only the entries whose reasoning needs more than a line.
+**`~/.config/yadm/unmanaged` is the authoritative list** — one line per path or glob, with the reason. `assay`'s `yadm-coverage` station reads it, so a decision recorded there is a decision that stops resurfacing; anything under a scanned root that is in neither lane and not declared is reported as undecided. Add to that file first; this section carries only the entries whose reasoning needs more than a line.
 
 The shape of the judgment: these were reviewed and **intentionally excluded** — neither plaintext-tracked nor encrypted. All are regenerated by their tool's normal auth/setup flow on a new machine, so the sync value is low and the leak/footgun risk is not worth it:
 

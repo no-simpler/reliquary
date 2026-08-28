@@ -37,7 +37,7 @@ tracked set — evidence for the ordering, not targets.
 ### Tier 1 — the headline is not honest without these
 
 - **fish** — 14 tracked files, but structurally *half* the shell corpus:
-  `check-shell-parity` pairs every `shell/interactive.d/*.sh` with a
+  `assay`'s `shell-parity` station pairs every `shell/interactive.d/*.sh` with a
   `fish/conf.d/*.fish`, so measuring only the POSIX half is a systematic blind
   spot rather than a small one.
 - **zsh** — 4 `.zsh` plus `.zshrc` / `.zshenv` / `.zprofile`, the primary

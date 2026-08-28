@@ -3,7 +3,7 @@
 # Docker's CLI plugins are per-user state, not machine state: the app ships them
 # inside its bundle and links them into ~/.docker/cli-plugins the first time it
 # runs *for that account*. Bedrock requires the full docker API, so an account
-# that has never launched the app fails `check-bedrock` on `docker compose` and
+# that has never launched the app fails the `bedrock` station on `docker compose` and
 # `docker buildx` while the CLI itself is present and on PATH.
 #
 # bash-3.2-safe; no sudo; idempotent — an existing link of any provenance is

@@ -261,9 +261,11 @@ relic::mutants ~/.config/relics/<name>     # rust only — mutation testing
 **Fast loop, slow gate.** `test` is the loop and must stay fast, because agents route
 around slow commands: format, then lint, then the suite. `cover` and `mutants` are
 separate, deliberate invocations run at wave boundaries. The bash branch of `test`
-runs `check-shell-lint` first for the same reason the rust branch runs `fmt` first —
+runs `assay shell-lint` first for the same reason the rust branch runs `fmt` first —
 cheapest station reports first, and bash has nothing else that can be verified
-statically.
+statically. It runs over the whole tracked bash population, not the one relic: the
+station's suppression ratchet is an equality, and a subset cannot tell a file with no
+directives from one it was not asked about.
 
 For `rust` the defaults are the whole story, so no Rust relic carries a
 `scripts/publish.sh` or `scripts/test.sh`: publish builds then installs from the
