@@ -62,3 +62,4 @@
 .claude/history.jsonl	agent prompt history
 .config/fish/fish_variables	fish universal variables, written by the shell
 .config/zsh/.zcompdump	completion cache, rebuilt by compinit
+.config/zsh/.zsh_sessions/*	per-session shell state, written by zsh
