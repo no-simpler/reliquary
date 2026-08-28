@@ -295,6 +295,27 @@ declared() {
         sort -u
 }
 
+# The declared tap holding $2 as a file, or nothing. $1 is "formula"/"cask".
+#
+# A tap checkout is a directory of .rb files, so this answers from the
+# filesystem — no `brew` call to refuse, and nothing human-facing to parse.
+tap_provides() {
+    local kind="$1" n="$2" t user repo dir
+    for t in $(declared tap); do
+        user="${t%%/*}"
+        repo="${t#*/}"
+        dir="$TAPS_ROOT/$user/homebrew-$repo"
+        [ -d "$dir" ] || continue
+        case "$kind" in
+            formula) [ -f "$dir/Formula/$n.rb" ] || [ -f "$dir/$n.rb" ] || continue ;;
+            cask) [ -f "$dir/Casks/$n.rb" ] || continue ;;
+        esac
+        echo "$t"
+        return 0
+    done
+    return 1
+}
+
 # Report every name in $2 ($1 = "formula"/"cask") that brew cannot resolve.
 # A batch `brew info` settles the healthy case in one call; it aborts on the
 # first unknown name without naming it, so the slow per-name pass runs only when
@@ -316,7 +337,15 @@ check_declared() {
     [ -n "$missing" ] || return 0
 
     for n in $missing; do
-        if [ "$UNTAPPED" = "1" ]; then
+        local holder
+        if holder="$(tap_provides "$kind" "$n")"; then
+            # The tap holds it; brew simply refuses to *load* it until the tap
+            # is trusted, and at this call site that refusal is indistinguishable
+            # from the name not existing. It is how `clc` graded as a rotted
+            # declaration on a machine that had never run `brew trust`.
+            note "Brewfile declares $kind \"$n\", which tap $holder provides but brew may not load until it is trusted"
+            note "  brew trust --$kind $holder/$n"
+        elif [ "$UNTAPPED" = "1" ]; then
             # A tap the Brewfiles declare is not installed here, so this name may
             # be perfectly valid on a machine that has run bootstrap.
             warn "Brewfile declares $kind \"$n\", which does not resolve — but a declared tap is missing here, so this may be a false alarm"
@@ -368,13 +397,41 @@ fi
 # `brew/undeclared` is where that decision is recorded so it stops resurfacing,
 # exactly as `yadm/unmanaged` records a path nobody manages.
 UNDECLARED_FILE="$BREW_DIR/undeclared"
+ENCRYPT_FILE="$HOME/.config/yadm/encrypt"
+
+# Brewfile scopes the encrypt list names which are not on disk.
+#
+# Before `yadm decrypt` they are simply absent, so what they declare is unknown
+# — and every package they hold reads here as declared nowhere. Nine were, on a
+# fresh account. Membership is derived by expanding the pattern list, never by
+# decrypting, the way check-yadm-coverage does it; a pattern carrying a glob is
+# skipped, because it cannot prove a particular file absent.
+absent_scopes() {
+    [ -r "$ENCRYPT_FILE" ] || return 0
+    sed -E 's/#.*//' "$ENCRYPT_FILE" | awk 'NF {print $1}' | while IFS= read -r p; do
+        case "$p" in
+            '!'*) continue ;;
+            .config/brew/Brewfile*) ;;
+            *) continue ;;
+        esac
+        case "$p" in *[\*\?\[]*) continue ;; esac
+        [ -e "$HOME/$p" ] || echo "$p"
+    done
+}
 
 # Names in a newline-separated list, tap prefixes dropped so `user/tap/name` and
 # `name` compare equal — a Brewfile may spell either.
 bare_names() { sed -E 's|.*/||' | sed -E 's/[[:space:]]+$//' | sort -u; }
 
+ABSENT_SCOPES="$(absent_scopes)"
+
 if [ -z "$brewfiles" ]; then
     : # already reported above
+elif [ -n "$ABSENT_SCOPES" ]; then
+    # Check 5 compares what is installed against what the Brewfiles declare, so
+    # it is only answerable once every Brewfile is readable.
+    note "$(printf '%s\n' "$ABSENT_SCOPES" | wc -l | tr -d ' ') encrypted Brewfile scope(s) are not on disk, so what they declare cannot be read — skipping the undeclared-package check"
+    printf '%s\n' "$ABSENT_SCOPES" | while IFS= read -r s; do note "  $s"; done
 else
     declared_all="$({
         declared brew

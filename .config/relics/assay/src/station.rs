@@ -5,6 +5,9 @@ use camino::{Utf8Path, Utf8PathBuf};
 
 use relic_core::finding::{Outcome, StationId};
 
+/// Where the system lists the shells that may serve as login shells.
+const DEFAULT_SHELLS: &str = "/etc/shells";
+
 /// One check.
 ///
 /// A station reports; it never grades, never exits, and never decides what a
@@ -45,6 +48,10 @@ pub struct Context {
     /// The search path, in order. Injected rather than read, so a station that
     /// resolves a program is testable against a directory a test built.
     path: Vec<Utf8PathBuf>,
+    /// Where the system lists the shells that may serve as login shells.
+    /// Injected for the same reason as `path`: a station that read the real
+    /// `/etc/shells` would answer for the machine the test runs on.
+    shells: Utf8PathBuf,
     /// Whether checks that cost the network, a passphrase or real time may run.
     /// Off by default: `assay` is detect-only, offline and side-effect-free
     /// until asked otherwise.
@@ -61,6 +68,7 @@ impl Context {
         Self {
             home: home.into(),
             path,
+            shells: Utf8PathBuf::from(DEFAULT_SHELLS),
             deep: false,
         }
     }
@@ -68,6 +76,19 @@ impl Context {
     /// The search path, in the order it is searched.
     pub fn path(&self) -> &[Utf8PathBuf] {
         &self.path
+    }
+
+    /// Where permissible login shells are listed.
+    pub fn shells(&self) -> &Utf8Path {
+        &self.shells
+    }
+
+    /// Point the login-shell check at another file, for a test that must not
+    /// answer for the machine it runs on.
+    #[must_use]
+    pub fn with_shells(mut self, shells: impl Into<Utf8PathBuf>) -> Self {
+        self.shells = shells.into();
+        self
     }
 
     /// The search path this process inherited, for the binary to hand over.

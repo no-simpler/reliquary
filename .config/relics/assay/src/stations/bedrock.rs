@@ -147,6 +147,11 @@ impl Probe<'_> {
     fn soft(&self, text: &str) -> Finding {
         self.station.soft(Summary::lossy(text))
     }
+
+    /// Worth reading, does not grade — for what the probe could not determine.
+    fn note(&self, text: &str) -> Finding {
+        self.station.note(Summary::lossy(text))
+    }
 }
 
 /// Every finding the bedrock has to offer.
@@ -261,7 +266,7 @@ fn bash(probe: &Probe<'_>) -> Vec<Finding> {
         .next()
         .and_then(|head| head.parse::<u32>().ok());
     match major {
-        Some(major) if major >= 5 => Vec::new(),
+        Some(major) if major >= 5 => login_shell(probe),
         _ => vec![
             probe
                 .broken(&format!(
@@ -272,17 +277,85 @@ fn bash(probe: &Probe<'_>) -> Vec<Finding> {
     }
 }
 
-fn python3(probe: &Probe<'_>) -> Vec<Finding> {
-    if probe
-        .ask(&["-c", "import sys; print(sys.version_info[0])"])
-        .is_none()
-    {
-        return vec![probe.broken(&format!("python3: {} failed to run", probe.winner))];
+/// Whether the modern bash that won PATH may also serve as a login shell.
+///
+/// `macos/02-bash.sh` appends it to `/etc/shells`, and until now nothing
+/// checked that the registration took — on this machine it had not. Soft rather
+/// than broken: what bedrock guarantees is presence and PATH access, and
+/// login-shell registration is neither.
+///
+/// A file that could not be read is a note, not silence and not a warning. It
+/// says nothing about what is in it, and reporting "absent" from an unreadable
+/// file is the failure this station exists to stop making.
+fn login_shell(probe: &Probe<'_>) -> Vec<Finding> {
+    let shells = probe.cx.shells();
+    let Ok(listed) = fs_err::read_to_string(shells) else {
+        return vec![probe.note(&format!(
+            "bash: {shells} could not be read, so login-shell registration is unknown"
+        ))];
+    };
+
+    let winner = probe.winner.as_str();
+    if listed.lines().any(|line| line.trim() == winner) {
+        return Vec::new();
     }
+
+    vec![
+        probe
+            .soft(&format!(
+                "bash: {winner} is absent from {shells}, so it cannot be a login shell"
+            ))
+            .fixed_by(FixHint::lossy(&format!(
+                "sudo sh -c 'echo {winner} >> {shells}'"
+            ))),
+    ]
+}
+
+/// The floor `reliquary/lib/manifest.py` needs: `tomllib` arrived in 3.11, and
+/// every relic publish reads a manifest through it.
+///
+/// A floor is not the minor-pin `BEDROCK.md` forbids. It names the version
+/// below which Reliquary's own code cannot run, which is why macOS's 3.9.6 at
+/// `/usr/bin/python3` graded green here while every publish failed.
+const PYTHON_FLOOR: (u32, u32) = (3, 11);
+
+fn python3(probe: &Probe<'_>) -> Vec<Finding> {
+    let Some(version) = probe.ask(&["-c", "import sys; print('%d.%d' % sys.version_info[:2])"])
+    else {
+        return vec![probe.broken(&format!("python3: {} failed to run", probe.winner))];
+    };
+
+    let Some(found) = version_pair(&version) else {
+        return vec![probe.note(&format!(
+            "python3: {} reported a version this cannot read, \"{version}\"",
+            probe.winner
+        ))];
+    };
+
+    if found < PYTHON_FLOOR {
+        let (major, minor) = PYTHON_FLOOR;
+        return vec![
+            probe
+                .broken(&format!(
+                    "python3 on PATH is {version}, and the manifest reader needs \
+                     {major}.{minor} for tomllib"
+                ))
+                .fixed_by(FixHint::lossy(probe.member.fix)),
+        ];
+    }
+
     if probe.accepts(&["-m", "pip", "--version"]) {
         return Vec::new();
     }
     vec![probe.soft("python3: `python3 -m pip` is unavailable, so ensurepip is missing")]
+}
+
+/// `major.minor` out of a version line, or nothing when it is not that shape.
+fn version_pair(version: &str) -> Option<(u32, u32)> {
+    let mut parts = version.trim().split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
 }
 
 fn uv(probe: &Probe<'_>) -> Vec<Finding> {
@@ -371,6 +444,7 @@ mod tests {
     struct Machine {
         _keep: tempfile::TempDir,
         bin: Utf8PathBuf,
+        shells: Utf8PathBuf,
     }
 
     impl Machine {
@@ -381,8 +455,14 @@ mod tests {
             let bin = root.join("bin");
             fs_err::create_dir_all(&bin).expect("created");
 
+            // The login-shell list this machine answers for. Written rather
+            // than inherited, so the suite does not depend on what /etc/shells
+            // happens to hold where it runs.
+            let shells = root.join("shells");
+            fs_err::write(&shells, format!("/bin/sh\n{}\n", bin.join("bash"))).expect("written");
+
             fake(&bin, "bash", "echo 5.3.0");
-            fake(&bin, "python3", "exit 0");
+            fake(&bin, "python3", "[ \"$1\" = \"-c\" ] && echo 3.13; exit 0");
             fake(&bin, "uv", "exit 0");
             fake(&bin, "uvx", "exit 0");
             fake(&bin, "docker", "exit 0");
@@ -393,11 +473,21 @@ mod tests {
             fake(&bin, "rustc", "exit 0");
             fake(&bin, "rustup", "exit 0");
 
-            Self { _keep: keep, bin }
+            Self {
+                _keep: keep,
+                bin,
+                shells,
+            }
         }
 
         fn cx(&self) -> Context {
-            Context::new("/nowhere", vec![self.bin.clone()])
+            self.cx_over(vec![self.bin.clone()])
+        }
+
+        /// A context over another search path, still answering for this
+        /// machine's login-shell list rather than the host's.
+        fn cx_over(&self, path: Vec<Utf8PathBuf>) -> Context {
+            Context::new("/nowhere", path).with_shells(self.shells.clone())
         }
 
         fn findings(&self) -> Vec<Finding> {
@@ -424,6 +514,106 @@ mod tests {
             .iter()
             .filter(|f| f.severity == relic_core::finding::Severity::Soft)
             .count()
+    }
+
+    fn note(findings: &[Finding]) -> usize {
+        findings
+            .iter()
+            .filter(|f| f.severity == relic_core::finding::Severity::Note)
+            .count()
+    }
+
+    /// The floor exists because `reliquary/lib/manifest.py` imports `tomllib`,
+    /// and every relic publish reads a manifest through it. macOS's 3.9.6
+    /// graded green while every publish failed.
+    #[test]
+    fn a_python_below_the_tomllib_floor_is_broken() {
+        let machine = Machine::whole();
+        fake(
+            &machine.bin,
+            "python3",
+            "[ \"$1\" = \"-c\" ] && echo 3.9; exit 0",
+        );
+        let findings = machine.findings();
+        assert_eq!((broken(&findings), soft(&findings)), (1, 0));
+        assert!(
+            findings
+                .first()
+                .is_some_and(|f| f.summary.as_str().contains("tomllib")),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn the_floor_admits_the_version_that_carries_tomllib() {
+        let machine = Machine::whole();
+        fake(
+            &machine.bin,
+            "python3",
+            "[ \"$1\" = \"-c\" ] && echo 3.11; exit 0",
+        );
+        assert!(machine.findings().is_empty());
+    }
+
+    /// A version nobody can parse is not a version below the floor. Grading it
+    /// `Broken` would accuse a working interpreter of being an old one.
+    #[test]
+    fn a_python_version_that_cannot_be_read_is_a_note() {
+        let machine = Machine::whole();
+        fake(
+            &machine.bin,
+            "python3",
+            "[ \"$1\" = \"-c\" ] && echo unknowable; exit 0",
+        );
+        let findings = machine.findings();
+        assert_eq!(
+            (broken(&findings), soft(&findings), note(&findings)),
+            (0, 0, 1)
+        );
+    }
+
+    /// `macos/02-bash.sh` registers modern bash in /etc/shells and nothing
+    /// checked that it took. On the machine this was written for, it had not.
+    #[test]
+    fn a_bash_absent_from_the_login_shell_list_is_soft() {
+        let machine = Machine::whole();
+        fs_err::write(&machine.shells, "/bin/sh\n/bin/bash\n").expect("written");
+        let findings = machine.findings();
+        assert_eq!((broken(&findings), soft(&findings)), (0, 1));
+        assert!(
+            findings
+                .first()
+                .is_some_and(|f| f.summary.as_str().contains("login shell")),
+            "{findings:?}"
+        );
+    }
+
+    /// `/bin/bash` is a prefix of no entry here, but a substring match would
+    /// find it inside another line. The comparison is whole-line.
+    #[test]
+    fn a_login_shell_entry_matches_the_whole_line_only() {
+        let machine = Machine::whole();
+        let disguised = format!("/bin/sh\n# {}\n", machine.bin.join("bash"));
+        fs_err::write(&machine.shells, disguised).expect("written");
+        assert_eq!(soft(&machine.findings()), 1);
+    }
+
+    /// A list that could not be read says nothing about what is in it.
+    #[test]
+    fn an_unreadable_login_shell_list_is_a_note_not_an_absence() {
+        let machine = Machine::whole();
+        fs_err::remove_file(&machine.shells).expect("removed");
+        let findings = machine.findings();
+        assert_eq!(
+            (broken(&findings), soft(&findings), note(&findings)),
+            (0, 0, 1)
+        );
+        assert!(
+            findings
+                .first()
+                .is_some_and(|f| f.summary.as_str().contains("unknown")),
+            "{findings:?}"
+        );
     }
 
     #[test]
@@ -497,7 +687,7 @@ mod tests {
         fake(
             &machine.bin,
             "python3",
-            "[ \"$1\" = \"-m\" ] && exit 1; exit 0",
+            "[ \"$1\" = \"-m\" ] && exit 1; echo 3.13; exit 0",
         );
         let findings = machine.findings();
         assert_eq!((broken(&findings), soft(&findings)), (0, 1));
@@ -528,10 +718,7 @@ mod tests {
     #[test]
     fn the_os_baseline_behind_the_winner_is_not_drift() {
         let machine = Machine::whole();
-        let cx = Context::new(
-            "/nowhere",
-            vec![machine.bin.clone(), Utf8PathBuf::from("/bin")],
-        );
+        let cx = machine.cx_over(vec![machine.bin.clone(), Utf8PathBuf::from("/bin")]);
         // /bin/bash is on the real machine and is the one expected extra.
         let findings = examine(&StationId::from_static("bedrock"), &cx);
         assert!(
@@ -549,7 +736,7 @@ mod tests {
         fs_err::create_dir_all(&other).expect("created");
         fake(&other, "just", "exit 0");
 
-        let cx = Context::new("/nowhere", vec![machine.bin.clone(), other]);
+        let cx = machine.cx_over(vec![machine.bin.clone(), other]);
         let findings = examine(&StationId::from_static("bedrock"), &cx);
         assert_eq!((broken(&findings), soft(&findings)), (0, 1));
         assert!(
@@ -567,7 +754,7 @@ mod tests {
         fs_err::create_dir_all(&linked).expect("created");
         std::os::unix::fs::symlink(machine.bin.join("just"), linked.join("just")).expect("linked");
 
-        let cx = Context::new("/nowhere", vec![machine.bin.clone(), linked]);
+        let cx = machine.cx_over(vec![machine.bin.clone(), linked]);
         assert!(examine(&StationId::from_static("bedrock"), &cx).is_empty());
     }
 }

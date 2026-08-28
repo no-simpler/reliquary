@@ -338,7 +338,7 @@ is more expensive than duplication — a real risk for **domain** code. It is no
 **platform** code, where the second consumer exists by construction: every relic needs colour
 resolution, atomic writes, locking, subprocess capability.
 
-## Four house rules
+## Five house rules
 
 Each is the class behind a defect found in this repo, not a preference.
 
@@ -359,7 +359,20 @@ and id generation testable at all.
 or absolute paths in default output. It is what keeps snapshots stable and diffs reviewable,
 and it costs nothing as a rule from the first relic rather than a retrofit after the tenth.
 
-**4 — Retirement is a separate commit from replacement.** Never delete a script in the commit
+**4 — "Cannot determine" is never reported as a determinate answer.** A check that could not
+read its input, a tool that refused to answer, a lane that is still encrypted — none of these
+is evidence about the thing being checked, and grading one as a verdict accuses the subject of
+the checker's own blindness. Say so instead: `Severity::Note` where the contract has one, a
+loud refusal where the answer was load-bearing, never silence and never a warning. Seven
+sightings so far, in seven files: an empty regex matching every line because a rename left the
+definition blank; `git --cached` outside a repository, where git's complaint is about the flag;
+a crashed manifest reader reported as "manifest missing name"; an untrusted Homebrew tap read
+as a deleted formula; an encrypted Brewfile scope read as an undeclared package; a `sudo` that
+failed reported as "launch daemon loaded"; and a guarded fast path that skipped its own
+postcondition along with the work. The last is the general form: **a branch that declines to do
+something must still leave true what the other branch would have made true.**
+
+**5 — Retirement is a separate commit from replacement.** Never delete a script in the commit
 that lands its port. `git revert` of the retirement is the rollback, and once the script is gone
 there is no other one: `install-on-path.sh` overwrites in place and keeps no previous binary.
 

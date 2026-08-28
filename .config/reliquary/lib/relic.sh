@@ -105,8 +105,18 @@ relic::load_manifest() {
     }
 
     __RELIC_ERROR=""
-    local record
+    local record rc
     record="$(relic::_manifest_read "$dir")"
+    rc=$?
+    # A reader that died says nothing about the manifest. Letting its silence
+    # fall through blames the data for the parser's fault: the record is empty,
+    # so NAME is unset, and the caller reports "manifest missing name" — or,
+    # where the caller runs under `set -u`, dies on an unbound variable. One
+    # cause, two errors, neither of them true.
+    [[ $rc -eq 0 ]] || {
+        relic::_die "manifest reader failed (exit $rc): $manifest"
+        return $?
+    }
     eval "$record"
 
     [[ -z "$__RELIC_ERROR" ]] || {

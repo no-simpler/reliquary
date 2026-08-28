@@ -105,16 +105,38 @@ check_bash() {
         fail "bash — '$w' did not run as bash"
     elif [ "$major" -ge 5 ] 2>/dev/null; then
         ok "bash $ver — $w"
+        # `macos/02-bash.sh` registers modern bash in /etc/shells so it can be
+        # a login shell, and nothing until now checked that the registration
+        # took. On this machine it had not: /etc/shells listed only /bin/bash.
+        # A warn, not a fail — login-shell registration is not what bedrock
+        # guarantees, which is presence and PATH access.
+        if ! grep -qxF "$w" /etc/shells 2>/dev/null; then
+            warn "bash: '$w' is absent from /etc/shells, so it cannot be a login shell"
+            note "sudo sh -c 'echo $w >> /etc/shells'"
+        fi
     else
         fail "bash on PATH is $ver (need >=5) — $w; install modern bash and fix PATH order"
     fi
 }
 
 check_python3() {
-    local w="$1" ver
+    local w="$1" ver major minor
     ver="$("$w" -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null)"
     if [ -z "$ver" ]; then
         fail "python3 — '$w' failed to run"
+        return
+    fi
+    # A floor, not a pin. BEDROCK.md bars minor-pinning the interpreter; it does
+    # not bar naming the version below which Reliquary's own code cannot run.
+    # reliquary/lib/manifest.py needs tomllib (3.11+) and every relic publish
+    # goes through it, so a 3.9 winner is a broken machine rather than a
+    # preference — which is exactly what graded green here while every publish
+    # failed.
+    major="${ver%%.*}"
+    minor="${ver#*.}"
+    minor="${minor%%.*}"
+    if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 11 ]; }; then
+        fail "python3 is $ver (need >=3.11 for tomllib) — $w; install modern python and fix PATH order"
         return
     fi
     ok "python3 $ver — $w"

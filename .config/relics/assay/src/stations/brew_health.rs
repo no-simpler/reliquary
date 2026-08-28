@@ -11,11 +11,12 @@
 //! install receipts and Homebrew's local API cache, so it is offline on any
 //! machine that has run `brew update` once.
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use anyhow::{Context as _, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use relic_core::finding::{Finding, FixHint, Location, Outcome, StationId, Summary};
+use relic_core::finding::{Detail, Finding, FixHint, Location, Outcome, StationId, Summary};
 use relic_core::tool::Tool;
 use serde::Deserialize;
 
@@ -28,6 +29,9 @@ const BREW_DIR: &str = ".config/brew";
 /// Where a deliberate exception to check five is recorded — the same role
 /// `yadm/unmanaged` plays for a path nobody manages.
 const UNDECLARED: &str = ".config/brew/undeclared";
+
+/// Where yadm lists the paths that ride the encrypted archive.
+const ENCRYPT: &str = ".config/yadm/encrypt";
 
 /// The station.
 pub struct BrewHealth {
@@ -526,6 +530,76 @@ fn bare(name: &str) -> String {
     name.rsplit('/').next().unwrap_or(name).trim().to_owned()
 }
 
+/// Brewfile scopes the encrypt list names which are not on disk.
+///
+/// Some scopes ride the encrypted archive, and before `yadm decrypt` they are
+/// simply absent. What they declare is then unknown — so "installed on request
+/// and declared in no Brewfile" would be an accusation drawn from files this
+/// machine cannot read. Nine packages were reported that way on a fresh
+/// account, every one of them declared in a scope that was not there.
+///
+/// Membership is derived by expanding the pattern list, never by decrypting —
+/// the route `check-yadm-coverage` already takes. A pattern carrying a glob is
+/// skipped: it cannot prove a particular file absent.
+fn absent_scopes(cx: &Context) -> Vec<String> {
+    let Ok(text) = fs_err::read_to_string(cx.at(ENCRYPT)) else {
+        return Vec::new();
+    };
+
+    let prefix = format!("{BREW_DIR}/Brewfile");
+    let mut absent: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with('!'))
+        .filter(|line| line.starts_with(&prefix))
+        .filter(|line| !line.contains(['*', '?', '[']))
+        .filter(|line| !cx.at(line).exists())
+        .map(str::to_owned)
+        .collect();
+    absent.sort();
+    absent.dedup();
+    absent
+}
+
+/// What a tap holds, and whether brew may load from it.
+#[derive(Deserialize)]
+struct TapInfo {
+    installed: bool,
+    trusted: bool,
+    formula_names: Vec<String>,
+    cask_tokens: Vec<String>,
+}
+
+/// The bare names an installed-but-untrusted tap provides, each mapped to its
+/// tap.
+///
+/// brew refuses to *load* a formula from an untrusted tap, and at the call site
+/// that refusal is indistinguishable from the name not existing — which is how
+/// `clc` was graded "no longer resolves to any formula" on a machine that had
+/// simply never run `brew trust`. The tap's own listing answers what brew
+/// declined to: `formula_names` and `cask_tokens` are directory metadata rather
+/// than formula evaluation, so they are readable either way.
+fn untrusted_offerings(brew: &Brew, taps: &[String]) -> BTreeMap<String, String> {
+    let mut offered = BTreeMap::new();
+    for tap in taps {
+        let Some(raw) = brew.ask(&["tap-info", "--json", tap]) else {
+            continue;
+        };
+        let Ok(infos) = serde_json::from_str::<Vec<TapInfo>>(&raw) else {
+            continue;
+        };
+        for info in infos {
+            if !info.installed || info.trusted {
+                continue;
+            }
+            for name in info.formula_names.iter().chain(&info.cask_tokens) {
+                offered.insert(bare(name), tap.clone());
+            }
+        }
+    }
+    offered
+}
+
 /// The Brewfiles present on disk.
 ///
 /// Only what is there is read: the encrypted scopes may not be decrypted on this
@@ -587,12 +661,17 @@ fn declarations(station: &StationId, cx: &Context, brew: &Brew) -> Vec<Finding> 
         }
     }
 
+    // A name an installed tap holds but brew may not load resolves fine; the
+    // refusal is about trust, not existence.
+    let untrusted = untrusted_offerings(brew, &declared.taps);
+
     findings.extend(unresolvable(
         station,
         brew,
         Kind::Formula,
         &declared.formulae,
         untapped,
+        &untrusted,
     ));
     findings.extend(unresolvable(
         station,
@@ -600,8 +679,26 @@ fn declarations(station: &StationId, cx: &Context, brew: &Brew) -> Vec<Finding> 
         Kind::Cask,
         &declared.casks,
         untapped,
+        &untrusted,
     ));
-    findings.extend(undeclared(station, cx, brew, &declared));
+
+    // Check five compares what is installed against what the Brewfiles declare,
+    // so it is only answerable once every Brewfile is readable.
+    let absent = absent_scopes(cx);
+    if absent.is_empty() {
+        findings.extend(undeclared(station, cx, brew, &declared));
+    } else {
+        let mut note = station.note(Summary::lossy(&format!(
+            "{} encrypted Brewfile scope(s) are not on disk, so what they declare cannot be \
+             read — the undeclared-package check is skipped rather than guessed",
+            absent.len()
+        )));
+        if let Some(detail) = Detail::new(absent.join("\n")) {
+            note = note.detailed(detail);
+        }
+        findings.push(note);
+    }
+
     findings
 }
 
@@ -616,6 +713,7 @@ fn unresolvable(
     kind: Kind,
     names: &[String],
     untapped: bool,
+    untrusted: &BTreeMap<String, String>,
 ) -> Vec<Finding> {
     if names.is_empty() {
         return Vec::new();
@@ -632,6 +730,17 @@ fn unresolvable(
         .iter()
         .filter(|name| !brew.accepts(&["info", flag, "--json=v2", name]))
         .map(|name| {
+            if let Some(tap) = untrusted.get(&bare(name)) {
+                // The tap holds it; brew merely will not load it unmodified by
+                // a trust decision. That is a thing to do, not a rotted
+                // declaration.
+                return station
+                    .note(Summary::lossy(&format!(
+                        "the Brewfiles declare {kind} \"{name}\", which tap {tap} provides but \
+                         brew may not load until the tap is trusted"
+                    )))
+                    .fixed_by(FixHint::lossy(&format!("brew trust --{kind} {tap}/{name}")));
+            }
             if untapped {
                 // A tap the Brewfiles declare is missing here, so the name may
                 // be perfectly valid on a machine that has run bootstrap.
@@ -765,6 +874,11 @@ case "$1" in
         for n in "$@"; do grep -qxF -- "$n" "{data}/resolvable" || exit 1; done
         exit 0;;
     esac;;
+  tap-info)
+    shift 2
+    f=$(echo "$1" | tr / -)
+    if [ -f "{data}/tapinfo-$f" ]; then cat "{data}/tapinfo-$f"; exit 0; fi
+    exit 1;;
 esac
 exit 1
 "#
@@ -801,6 +915,33 @@ exit 1
                     .join(format!("homebrew-{repo}")),
             )
             .expect("created");
+            self
+        }
+
+        /// What `brew tap-info --json` answers for one tap.
+        fn tap_info(&self, tap: &str, trusted: bool, formulae: &[&str]) -> &Self {
+            let names = formulae
+                .iter()
+                .map(|name| format!("\"{tap}/{name}\""))
+                .collect::<Vec<_>>()
+                .join(",");
+            let json = format!(
+                r#"[{{"installed":true,"trusted":{trusted},"formula_names":[{names}],"cask_tokens":[]}}]"#
+            );
+            fs_err::write(
+                self.data()
+                    .join(format!("tapinfo-{}", tap.replace('/', "-"))),
+                json,
+            )
+            .expect("written");
+            self
+        }
+
+        /// The encrypt list this machine answers for.
+        fn encrypt(&self, text: &str) -> &Self {
+            let path = self.home.join(ENCRYPT);
+            fs_err::create_dir_all(path.parent().expect("a parent")).expect("created");
+            fs_err::write(path, text).expect("written");
             self
         }
 
@@ -857,6 +998,81 @@ exit 1
         let machine = Machine::new();
         fs_err::remove_file(machine.bin.join("brew")).expect("removed");
         assert!(matches!(machine.outcome(), Outcome::Skipped(_)));
+    }
+
+    /// brew refuses to *load* a formula from an untrusted tap, and at the call
+    /// site that refusal looks exactly like the name not existing. `clc` was
+    /// graded a rotted declaration on a machine that had simply never trusted
+    /// the tap.
+    #[test]
+    fn a_name_an_untrusted_tap_provides_is_a_note_not_a_rotted_declaration() {
+        let machine = Machine::new();
+        machine.brewfile("Brewfile", "tap \"no-simpler/tap\"\nbrew \"clc\"\n");
+        machine.tap("no-simpler/tap");
+        machine.tap_info("no-simpler/tap", false, &["clc"]);
+        let findings = machine.findings();
+        assert_eq!(counts(&findings), (0, 0, 1));
+        assert!(
+            findings
+                .first()
+                .is_some_and(|f| f.summary.as_str().contains("trusted")),
+            "{findings:?}"
+        );
+    }
+
+    /// The escape hatch is narrow: a trusted tap that genuinely does not hold
+    /// the name is still a rotted declaration.
+    #[test]
+    fn a_trusted_tap_still_fails_a_name_it_does_not_hold() {
+        let machine = Machine::new();
+        machine.brewfile("Brewfile", "tap \"no-simpler/tap\"\nbrew \"gone\"\n");
+        machine.tap("no-simpler/tap");
+        machine.tap_info("no-simpler/tap", true, &["clc"]);
+        let findings = machine.findings();
+        assert_eq!(counts(&findings), (1, 0, 0));
+    }
+
+    /// Check five compares what is installed against what the Brewfiles
+    /// declare, so a scope that is still encrypted makes it unanswerable. Nine
+    /// packages were accused on a fresh account, every one declared in a scope
+    /// that was not on disk.
+    #[test]
+    fn an_absent_encrypted_scope_skips_the_undeclared_check() {
+        let machine = Machine::new();
+        machine.brewfile("Brewfile", EMPTY_BREWFILE);
+        machine.encrypt(".config/brew/Brewfile@private\n");
+        machine.file("leaves", "stray\n");
+        let findings = machine.findings();
+        assert_eq!(counts(&findings), (0, 0, 1));
+        assert!(
+            !machine
+                .summaries()
+                .iter()
+                .any(|s| s.contains("installed on request")),
+            "{:?}",
+            machine.summaries()
+        );
+    }
+
+    /// The skip is about absence, not about the lane existing. Every named
+    /// scope present means check five can answer as before.
+    #[test]
+    fn a_present_encrypted_scope_does_not_skip_the_undeclared_check() {
+        let machine = Machine::new();
+        machine.brewfile("Brewfile", EMPTY_BREWFILE);
+        machine.brewfile("Brewfile@private", EMPTY_BREWFILE);
+        machine.encrypt(".config/brew/Brewfile@private\n");
+        machine.file("leaves", "stray\n");
+        let findings = machine.findings();
+        assert_eq!(counts(&findings), (0, 1, 0));
+        assert!(
+            machine
+                .summaries()
+                .iter()
+                .any(|s| s.contains("stray is installed on request")),
+            "{:?}",
+            machine.summaries()
+        );
     }
 
     #[test]

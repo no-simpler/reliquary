@@ -29,6 +29,20 @@ arrays. `12-publish-relics.sh` is sourced into stock macOS bash.
 import os
 import shlex
 import sys
+
+# `tomllib` is 3.11+. macOS ships 3.9.6 at /usr/bin/python3, so any bootstrap
+# that has not put Homebrew's python ahead of it arrives here — and a bare
+# import raises ModuleNotFoundError, whose traceback reads as a broken relic
+# rather than as the wrong interpreter. Name the interpreter and the remedy,
+# above the import, so the message survives the version that cannot run it.
+if sys.version_info < (3, 11):
+    _found = ".".join(str(part) for part in sys.version_info[:3])
+    sys.exit(
+        f"relic: the manifest reader needs python >= 3.11 for tomllib; this is "
+        f"{_found} at {sys.executable}. Put Homebrew's python3 ahead of "
+        f"/usr/bin on PATH."
+    )
+
 import tomllib
 
 STRINGS = {

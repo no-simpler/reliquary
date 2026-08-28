@@ -2,26 +2,41 @@
 
 print_bold -ad "Applying tilde-switch"
 
-# Create ~/.tilde-switch script if it does not already exist
-if [ ! -f "$HOME/.tilde-switch" ]; then
-    echo "Creating $HOME/.tilde-switch script..."
-    cat <<'EOF' >"$HOME/.tilde-switch"
-#!/bin/bash
-sudo hidutil property --set '{"UserKeyMapping":[
+TILDE_PLIST="/Library/LaunchDaemons/org.custom.tilde-switch.plist"
+TILDE_HIDUTIL='{"UserKeyMapping":[
     {"HIDKeyboardModifierMappingSrc":0x700000035,"HIDKeyboardModifierMappingDst":0x700000035},
     {"HIDKeyboardModifierMappingSrc":0x700000064,"HIDKeyboardModifierMappingDst":0x700000035}
 ]}'
+
+# Create ~/.tilde-switch script if it does not already exist
+if [ ! -f "$HOME/.tilde-switch" ]; then
+    cat <<EOF >"$HOME/.tilde-switch"
+#!/bin/bash
+sudo hidutil property --set '$TILDE_HIDUTIL'
 EOF
     chmod +x "$HOME/.tilde-switch"
-    echo "$HOME/.tilde-switch script created and made executable."
+    print_success "Created $HOME/.tilde-switch"
 else
-    echo "$HOME/.tilde-switch script already exists. Skipping creation."
+    print_info "$HOME/.tilde-switch already exists. Skipping."
 fi
 
-# Create /Library/LaunchDaemons/org.custom.tilde-switch.plist if it does not already exist
-if [ ! -f "/Library/LaunchDaemons/org.custom.tilde-switch.plist" ]; then
-    echo "Creating /Library/LaunchDaemons/org.custom.tilde-switch.plist..."
-    sudo /usr/bin/env bash -c "cat > /Library/LaunchDaemons/org.custom.tilde-switch.plist" <<EOF
+# The daemon is the machine-global half, and it is RunAtLoad — so once the plist
+# is in place it loads on every boot and there is nothing left to do. Test for
+# the plist and stop there.
+#
+# The previous version asked `sudo launchctl list` instead, so a fully
+# configured machine paid three password prompts for a no-op; and it printed
+# "Launch daemon loaded" and "Tilde-switch logic executed" whether or not the
+# sudo commands behind them had succeeded. From an account without sudo rights
+# it claimed success three times having done nothing at all.
+if [ -f "$TILDE_PLIST" ]; then
+    print_info "$TILDE_PLIST already exists. Skipping."
+    return
+fi
+
+print_bold "Creating $TILDE_PLIST..."
+TILDE_TMP="$(mktemp -t tilde-switch)"
+cat <<EOF >"$TILDE_TMP"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -37,24 +52,26 @@ if [ ! -f "/Library/LaunchDaemons/org.custom.tilde-switch.plist" ]; then
   </dict>
 </plist>
 EOF
-    echo "/Library/LaunchDaemons/org.custom.tilde-switch.plist created."
+
+if sudo install -m 644 -o root -g wheel "$TILDE_TMP" "$TILDE_PLIST"; then
+    rm -f "$TILDE_TMP"
+    print_success "Created $TILDE_PLIST"
 else
-    echo "/Library/LaunchDaemons/org.custom.tilde-switch.plist already exists. Skipping creation."
+    rm -f "$TILDE_TMP"
+    print_error -ad "Could not write $TILDE_PLIST (needs admin rights); tilde-switch not configured"
+    return
 fi
 
-# Load the launch daemon if it is not already loaded
-if ! sudo launchctl list | grep -q "org.custom.tilde-switch"; then
-    echo "Loading the launch daemon org.custom.tilde-switch..."
-    sudo launchctl load -w -- /Library/LaunchDaemons/org.custom.tilde-switch.plist
-    echo "Launch daemon org.custom.tilde-switch loaded."
-
-    # Execute tilde-switch now, so that it is in effect immediately
-    echo "Executing tilde-switch logic for current session..."
-    sudo hidutil property --set '{"UserKeyMapping":[
-        {"HIDKeyboardModifierMappingSrc":0x700000035,"HIDKeyboardModifierMappingDst":0x700000035},
-        {"HIDKeyboardModifierMappingSrc":0x700000064,"HIDKeyboardModifierMappingDst":0x700000035}
-    ]}'
-    echo "Tilde-switch logic executed."
+print_bold "Loading the launch daemon org.custom.tilde-switch..."
+if sudo launchctl load -w -- "$TILDE_PLIST"; then
+    print_success "Launch daemon loaded"
 else
-    echo "Launch daemon org.custom.tilde-switch is already loaded. Skipping load."
+    print_error -ad "Could not load the launch daemon; the mapping applies at next boot"
+fi
+
+print_bold "Applying the key mapping to the current session..."
+if sudo hidutil property --set "$TILDE_HIDUTIL" >/dev/null; then
+    print_success "Key mapping applied"
+else
+    print_error -ad "Could not apply the key mapping now; it applies at next boot"
 fi
