@@ -45,6 +45,16 @@ setopt hist_verify              # show command with history expansion to user be
 FPATH="$HOME/.config/zsh/completion:$FPATH"
 autoload -Uz compinit && compinit -i
 
+# gcloud's completion include, and not from env.d: it runs a bare `compinit` of
+# its own whenever the completion system is not up yet, which in the always-on
+# tier it never is. That call asks the insecure-directories question on any
+# account that did not install Homebrew — before .zshrc has run a line, so no
+# amount of care here could have reached it. Sourced after compinit, its guard
+# (`$+functions[compdef]`) is satisfied and it only registers completers.
+_gcloud_completion="${HOMEBREW_PREFIX:-/opt/homebrew}/share/google-cloud-sdk/completion.zsh.inc"
+[ -f "$_gcloud_completion" ] && source "$_gcloud_completion"
+unset _gcloud_completion
+
 # Replace tab completion with fzf
 zstyle ':completion:*' menu no
 zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls --color $realpath'

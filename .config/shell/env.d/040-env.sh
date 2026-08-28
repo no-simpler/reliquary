@@ -110,9 +110,11 @@ case "$D__SHELL" in
         )
         ;;
     zsh)
+        # PATH only. completion.zsh.inc initializes the completion system and
+        # belongs to the interactive tier — see interactive.d/030-config.zsh.
+        # bash and fish source only their path.*.inc; this keeps that symmetry.
         FILES_TO_SOURCE=(
             "$(brew --prefix)/share/google-cloud-sdk/path.zsh.inc"
-            "$(brew --prefix)/share/google-cloud-sdk/completion.zsh.inc"
         )
         ;;
     *)
