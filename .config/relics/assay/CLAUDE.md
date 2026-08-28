@@ -109,3 +109,37 @@ Parity verified against the live machine, and against fixture machines — a fak
 | Brewfiles are parsed by splitting on the first quoted field, not by `grep`+`sed` per keyword | one pass over each file instead of three, and a line's keyword decides its lane instead of three patterns that can disagree | `every_scope_is_read_not_only_the_base` |
 | A replacement hint is a `fix`, not a separate `NOTE` line | it is what to do about the finding it follows, which is the field that already means that | `a_deprecated_package_is_soft_and_carries_its_deadline` |
 | No `HOMEBREW_NO_AUTO_UPDATE` export into the caller's environment | it is set per invocation instead, so the station cannot change what runs after it | the `Brew::command` constructor, which is the only way a `brew` runs here |
+
+## Rebuilt, not ported: `bin/check-shell-parity`
+
+The one A1 station with no golden master, because the design settled that
+absorbing the awk scanner would carry its defects forward. Three it had, and two
+of them were live in the tracked files:
+
+| defect | what it did | pinned by |
+| --- | --- | --- |
+| It scanned every field of every line for the token `alias` | the comment "…so no alias is needed for the wrapper." defined a phantom alias named `is`. It passed only because the fish twin carries the same sentence, so the phantom cancelled on both sides | `prose_in_a_comment_defines_nothing` |
+| It split nothing on quotes | `alias gl="glfr -10 \| less -R"` read as a body of `"glfr -10`. Invisible while only names were compared; every one of those aliases reported a false body divergence the moment they were | `a_separator_inside_quotes_does_not_end_the_statement` |
+| It knew only `NAME()` | `080-check.sh` writes `function check_yadm_wrapper()`, so its function read as fish-only. The pair was not in the hardcoded list, so nothing ever noticed | `posix_functions_are_found_in_all_three_spellings` |
+
+What the station does that the checker could not:
+
+- **Pairs are discovered by stem**, across `shell/env.d`, `shell/interactive.d`
+  and `fish/conf.d`, so a new paired file is covered without an edit. The six
+  hardcoded pairs missed three that exist.
+- **Bodies are compared** after normalising the dialects away — quotes, spacing,
+  and the leading backslash POSIX uses to bypass alias expansion. That is how
+  `gu` was found meaning `&>/dev/null` on one side and `2>/dev/null` on the
+  other, which the checker's own header conceded it could never see.
+- **A name defined more than once has no body to compare.** `ls` has three POSIX
+  definitions, one per platform; which is live depends on the machine, so
+  `Body::Conditional` says so rather than picking the last one read.
+- **The decisions are data**, in `shell/parity.toml`: `allow` for a name that
+  belongs to one dialect, `diverge` for one that means the same thing and cannot
+  be spelled the same way, `unpaired` for a file that stands alone and why.
+  Without an entry, an unpaired file that defines names is a finding — so a twin
+  that gets deleted is loud, which is what the hardcoded pair list bought and
+  auto-discovery would otherwise have given away.
+- **An absent side is a skip**, not a hard failure. The checker's pair list named
+  an encrypt-lane file, so it failed on any machine before the first
+  `yadm decrypt`.

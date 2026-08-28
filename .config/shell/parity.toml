@@ -1,0 +1,48 @@
+# What `assay shell-parity` is told rather than left to guess.
+#
+# The POSIX files under shell/ and the fish files under fish/conf.d/ define the
+# same aliases, abbreviations and functions twice, by hand. The station pairs
+# them by filename stem and reports every difference; this file is where a
+# difference that is deliberate gets recorded once instead of being rediscovered
+# every run — the shape yadm/unmanaged and brew/undeclared already use.
+#
+# Nothing here silences a class. Each entry names one thing.
+
+# Names defined on one side only, keyed by the pair's stem.
+[allow]
+"100-aliases" = [
+    # zsh reaches these with a `-g` global alias from `...` up; fish uses
+    # abbreviations and defines no `..` of its own.
+    "..",
+    # $LD_LIBRARY_PATH, which is not meaningful under fish on macOS.
+    "libpath",
+    # A .zcompdump reset and a re-source of ~/.zshrc. zsh has no fish analogue.
+    "rzc",
+    # Escapes into the other shell. Under bash and zsh the name already runs the
+    # shell, so an alias would shadow rather than help.
+    "bash",
+    "zsh",
+]
+
+# Names that mean the same thing and cannot be spelled the same way, keyed by
+# the pair's stem. A name here is exempt from the body comparison and still
+# has to exist on both sides.
+[diverge]
+"100-aliases" = [
+    # Directory history: zsh's `cd -N` against fish's `prevd N`.
+    "1", "2", "3", "4", "5", "6", "7", "8", "9",
+    # zsh takes a bare path as a `cd`; fish does not.
+    "......",
+    # Splitting a colon-separated variable: parameter expansion against
+    # `string join`.
+    "lpath",
+    "lmanpath",
+]
+
+# Files with no counterpart, and why. Without an entry a file that defines
+# names and stands alone is a finding, so a twin that gets deleted is loud.
+# Keys are home-relative, the same spelling a finding prints.
+[unpaired]
+".config/fish/conf.d/050-prompt.fish" = "the POSIX prompt is per-shell (050-prompt.bash, 050-prompt.zsh) and has no .sh form to pair with"
+".config/fish/conf.d/fzf.fish" = "fzf ships this; the POSIX side is 060-fzf.sh, which sources fzf's own files and defines nothing"
+".config/fish/conf.d/sdk.fish" = "sdkman's fish shim, which has no counterpart because sdkman speaks POSIX natively"

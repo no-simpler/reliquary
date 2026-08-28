@@ -24,6 +24,7 @@ clap.workspace = true
 fs-err.workspace = true
 ignore = "0.4.25"
 regex = "1.13.1"
+toml = "1.1.4"
 serde.workspace = true
 serde_json.workspace = true
 relic-core = { path = "../crates/relic-core" }
