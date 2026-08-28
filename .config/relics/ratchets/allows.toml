@@ -1,0 +1,21 @@
+# The lint ratchet: `#[allow]` and `#![allow]` attributes, counted per package.
+#
+# See "Track 3 — the verification ratchet" in ~/.config/reliquary/HARDENING.md.
+# A ratchet is not a ceiling. You can always move a number; you just cannot move
+# it silently — raising one is an edit in the same commit as the suppression it
+# accounts for, which puts it in a diff someone reads.
+#
+# It exists because a suppression is the cheapest repair an agent reaches for
+# under a lint it cannot satisfy, and it is invisible in every other measure:
+# an `#[allow]` makes the warning count fall.
+#
+# Population: `*.rs` under the package, excluding `target/` and any `fixtures/`
+# directory — a fixture is test data, and lints written into one are its point.
+# Enforced by `relic test` over the whole workspace, not just the relic named.
+#
+# Every surviving attribute carries a reason comment.
+
+docket = 0
+ernest = 8
+midden = 0
+relic-core = 0

@@ -15,3 +15,6 @@ path = "src/lib.rs"
 # and a shared crate that pulled in dependencies would push them onto every
 # relic that wants a project key.
 [dependencies]
+
+[lints]
+workspace = true

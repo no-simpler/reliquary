@@ -115,11 +115,24 @@ own, where an unknown key is a typo worth failing on. Likewise exhaustive matchi
 **our** enums; an upstream `#[non_exhaustive]` type forces a wildcard and that is correct.
 
 **Enforced, not aspirational.** One `[workspace.lints]` table per workspace root plus
-`lints.workspace = true` in every member, and `relic test` already runs
-`clippy --all-targets --all-features -- -D warnings`. A selected lint is therefore
-non-bypassable the same way `cargo build` is. Written as a table entry, never a per-crate
-attribute — those drift between members, and `#[deny(missing_docs)]` is not the inner attribute
-a crate root needs.
+`lints.workspace = true` in every member. A selected lint is then non-bypassable the same way
+`cargo build` is. Written as a table entry, never a per-crate attribute — those drift between
+members.
+
+Two cargo constraints shape this, and neither is optional:
+
+- **The table is the only lint policy; `relic test` passes no `-D warnings`.** A command-line
+  group flag outranks every table entry and collapses `warn` and `deny` into one level, which
+  makes a transitional worklist impossible to express. So the groups that flag used to deny
+  are named in the table at `deny` — `clippy::all`, and rustc's `deprecated`,
+  `future_incompatible`, `nonstandard_style`, `unused` — and the transitional lints sit at
+  `warn` beside them. Policy in a committed file can be ratcheted; policy in an invocation has
+  one setting. A group carries a lower `priority` than the specific lints that override it.
+- **`lints.workspace = true` is exclusive of every other entry in a package's `[lints]`
+  table**, so a deliberately per-crate lint has no table form at all. `missing_docs` is the
+  case: it belongs on platform crates and is noise on binaries, so it lives as a crate-root
+  `#![deny(missing_docs)]` in each platform crate. That is not the drift the rule warns about —
+  it is one line, in the one place, for the one lint cargo cannot express.
 
 Baseline `clippy::pedantic`, plus the `restriction` lints that map onto the rules above:
 `wildcard_enum_match_arm`, `match_wildcard_for_single_variants`, `as_conversions`,
@@ -172,7 +185,7 @@ not a ceiling — which is what makes it survivable in a codebase under active c
 | ratchet | measurement | baseline | fails when |
 | --- | --- | --- | --- |
 | coverage | `cargo llvm-cov --json`, per crate | committed per-crate % | any crate drops, or falls under the floor |
-| lint | count of `#[allow(...)]` | committed integer | the count rises |
+| lint | count of `#[allow(...)]`, per package | committed integer | the count *changes* |
 | shell | `shellcheck` findings | committed suppression file | a finding appears outside it |
 | perf | timing of the declared hot paths | committed budget | over budget by the stated multiple |
 
@@ -183,6 +196,15 @@ Two calibration rules, both load-bearing:
   off is worth less than no gate**, because it also carries the belief that it is on.
 - **A baseline computed on the fly is not a ratchet**, it is a moving target. It must be
   committed, and moving it must be an edit.
+
+**A baseline lives with what it measures**, so a subsystem that relocates carries its ratchets
+with it: the workspace's coverage and lint baselines under `relics/ratchets/`, the shell and
+whole-surface ones under `reliquary/ratchets/`.
+
+**The lint ratchet is an equality, not a ceiling** — a count that *falls* fails too, and the
+repair is to lower the baseline in the same commit. An inequality lets slack accumulate: five
+suppressions removed and never accounted for is five that can be added back unseen. The
+ergonomics are `insta`'s — a changed measurement fails until it is accepted.
 
 ### Coverage, and what it is worth
 

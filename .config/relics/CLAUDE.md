@@ -32,6 +32,20 @@ second consumer by construction and move in on sight. An item ladder or a prose
 metric waits for a second relic to actually need it. See the reuse ladder in
 `~/.config/reliquary/HARDENING.md`.
 
+## Lint policy and ratchets live at the lane root
+
+`[workspace.lints]` in `Cargo.toml` is the **only** lint policy — `relic test`
+passes no `-D warnings`, because a command-line group flag outranks every table
+entry and collapses `warn` and `deny` into one level. The groups that flag used to
+deny are named in the table at `deny`; the typed-domain lints sit at `warn` until
+their code is rewritten. `clippy.toml` carries the test carve-outs, without which
+the restriction lints fire on every test file and get suppressed module-wide.
+
+`ratchets/` holds the committed baselines a subsystem carries with it if the lane
+ever moves. `allows.toml` counts `#[allow]` per package and `relic test` enforces
+it across the whole workspace — as an **equality**, so removing a suppression also
+means lowering the number. See "Track 3" in `~/.config/reliquary/HARDENING.md`.
+
 Rust relics carry no `scripts/publish.sh` and no `scripts/test.sh` — the rust
 branch of `~/.config/reliquary/lib/relic.sh` is the whole story, and it publishes
 manifest-declared names out of the workspace `target/release/` rather than through

@@ -58,3 +58,47 @@ strip = true
 # readable, which is the only thing debuginfo is for in a CLI relic.
 [profile.dev]
 debug = "line-tables-only"
+
+# The typed-domain standard, enforced. See ~/.config/reliquary/HARDENING.md.
+#
+# One table over every member (`lints.workspace = true`), because per-crate
+# attributes drift. It is also the *only* lint policy: `relic test` deliberately
+# does not pass `-D warnings`, because a command-line group flag outranks every
+# table entry and would collapse `warn` and `deny` into one level. Policy that
+# lives in a committed file is policy you can ratchet; policy in an invocation
+# flag is policy with one setting.
+#
+# A group carries a lower `priority` than the specific lints that override it.
+
+# What `-D warnings` denied before the table existed. Unchanged in strength.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+deprecated = "deny"
+future_incompatible = { level = "deny", priority = -1 }
+nonstandard_style = { level = "deny", priority = -1 }
+unused = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -2 }
+
+# The typed-domain worklist. `warn` now, `deny` at W3 exit once the retro-fit
+# onto the platform layer has rewritten most of what fires. Landing a dozen
+# lints hot buys a wall of failures and a matching wall of #[allow].
+pedantic = { level = "warn", priority = -1 }
+
+# Opaque representations stop at the I/O boundary.
+as_conversions = "warn"
+indexing_slicing = "warn"
+string_slice = "warn"
+str_to_string = "warn"
+
+# A `_ =>` on our own enum is how a new variant gets silently mishandled.
+wildcard_enum_match_arm = "warn"
+match_wildcard_for_single_variants = "warn"
+
+# Errors are values. Test carve-outs live in clippy.toml, never in a #![allow].
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"

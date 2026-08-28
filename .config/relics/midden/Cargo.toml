@@ -30,3 +30,6 @@ supports-color.workspace = true
 [dev-dependencies]
 jiff.workspace = true
 serde_json.workspace = true
+
+[lints]
+workspace = true

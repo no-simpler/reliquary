@@ -1,0 +1,9 @@
+# Without these, the restriction lints in [workspace.lints.clippy] fire on every
+# test file, and the cheapest repair is a module-level #![allow] that also
+# disarms the lint for the production code beside it. A restriction lint that
+# has to be suppressed to write a test is a lint that will be suppressed
+# everywhere.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

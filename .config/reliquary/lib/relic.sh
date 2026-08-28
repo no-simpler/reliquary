@@ -314,6 +314,44 @@ relic::test() {
     esac
 }
 
+# The lint ratchet. A suppression is the cheapest repair an agent reaches for
+# under a lint it cannot satisfy, and it is invisible in every other measure —
+# an #[allow] makes the warning count fall. So the count is committed, and
+# raising it is an edit in the same commit as the suppression it accounts for.
+#
+# Checked over the whole workspace on every `relic test`, not just the relic
+# named: a suppression slipped into a package nobody tested is exactly the one
+# a per-relic check would miss.
+relic::_allow_ratchet() {
+    local root="${1:-}" baseline="${1:-}/ratchets/allows.toml"
+    [[ -f "$baseline" ]] || return 0
+
+    local fail=0 pkgdir pkg have want
+    for pkgdir in "$root"/*/ "$root"/crates/*/; do
+        [[ -f "$pkgdir/Cargo.toml" ]] || continue
+        pkg="$(sed -n 's/^name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$pkgdir/Cargo.toml" | head -1)"
+        [[ -n "$pkg" ]] || continue
+
+        have="$(find "$pkgdir" -name '*.rs' -not -path '*/target/*' -not -path '*/fixtures/*' \
+            -exec grep -hoE '#!?\[allow\(' {} + 2>/dev/null | wc -l | tr -d ' ')"
+        want="$(sed -n "s/^$pkg[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$baseline" | head -1)"
+
+        if [[ -z "$want" ]]; then
+            printf 'lint ratchet: %s has no baseline in %s\n' "$pkg" "$baseline" >&2
+            fail=1
+        elif [[ "$have" -gt "$want" ]]; then
+            printf 'lint ratchet: %s has %s allow attributes, baseline %s\n' "$pkg" "$have" "$want" >&2
+            printf '  fix the lint, or raise the baseline in the same commit as the suppression\n' >&2
+            fail=1
+        elif [[ "$have" -lt "$want" ]]; then
+            printf 'lint ratchet: %s is down to %s allow attributes (baseline %s) — lower it in %s\n' \
+                "$pkg" "$have" "$want" "$baseline" >&2
+            fail=1
+        fi
+    done
+    return "$fail"
+}
+
 # The gate for a compiled relic: format, lint, suite — fail-fast in ascending
 # cost, so the cheapest station reports first. Every shared crate is included, so
 # code that moved into crates/ is covered from each of its dependents rather than
@@ -338,7 +376,13 @@ relic::_test_compiled() {
             exit 1
         fi
 
-        cargo clippy "${pkgs[@]}" --all-targets --all-features -- -D warnings || exit $?
+        relic::_allow_ratchet "$root" || exit $?
+
+        # No `-D warnings`: a command-line group flag outranks every entry in
+        # [workspace.lints] and collapses `warn` and `deny` into one level. The
+        # table denies what this flag used to, and carries the transitional
+        # lints at `warn` — policy in a committed file, not in an invocation.
+        cargo clippy "${pkgs[@]}" --all-targets --all-features || exit $?
 
         if command -v cargo-nextest >/dev/null 2>&1; then
             exec cargo nextest run "${pkgs[@]}"
