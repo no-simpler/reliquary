@@ -1,0 +1,6 @@
+---
+source: ernest/tests/render.rs
+expression: rendered
+---
+prose density  54.5%   (prose 272 / base 499 chars)
+  docs prose 183 chars — 88.4% of source code

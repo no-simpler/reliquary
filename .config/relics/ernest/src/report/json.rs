@@ -17,8 +17,7 @@ struct Stamp {
 }
 
 pub fn load(path: &Path) -> Result<Report> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading snapshot {}", path.display()))?;
+    let text = fs_err::read_to_string(path)?;
     // The version is read on its own first: a snapshot from another schema
     // should be told what is wrong with it, not fail on a field that schema
     // never had.

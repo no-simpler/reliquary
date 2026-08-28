@@ -1,0 +1,5 @@
+---
+source: ernest/tests/render.rs
+expression: rendered
+---
+54.5

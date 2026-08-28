@@ -281,7 +281,7 @@ pub fn run(
                 path: candidate.path.display().to_string(),
                 reason: reason.to_string(),
             };
-            let bytes = std::fs::read(&candidate.path).map_err(|_| fail("unreadable"))?;
+            let bytes = fs_err::read(&candidate.path).map_err(|_| fail("unreadable"))?;
             // Byte offsets from tree-sitter are only char boundaries in valid
             // UTF-8, and a file that is not text is not prose either.
             let src = String::from_utf8(bytes).map_err(|_| fail("not utf-8"))?;

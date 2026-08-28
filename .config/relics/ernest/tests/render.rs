@@ -9,8 +9,9 @@
 //! time a format lands, so snapshots over it would churn on changes that are
 //! not about rendering and drown the diff someone is meant to read.
 //!
-//! Regenerate after a deliberate change: `ERNEST_BLESS=1 cargo test --test
-//! render`, then **read the diff**. A blessed wrong answer is still wrong.
+//! Accept a deliberate change with `cargo insta review`, which shows one diff per
+//! case and takes them one at a time. Read each — an accepted wrong answer is
+//! still wrong.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -53,18 +54,7 @@ fn well_formed(case: &str, rendered: &str) {
 
 fn check(case: &str, rendered: &str) {
     well_formed(case, rendered);
-    let expected = manifest().join(format!("tests/render/expected/{case}.expected.txt"));
-    if std::env::var_os("ERNEST_BLESS").is_some() {
-        std::fs::write(&expected, rendered).expect("writes expectation");
-        return;
-    }
-    let want = std::fs::read_to_string(&expected).unwrap_or_else(|_| {
-        panic!(
-            "missing {} — run ERNEST_BLESS=1 cargo test --test render",
-            expected.display()
-        )
-    });
-    assert_eq!(want, rendered, "{case}");
+    insta::assert_snapshot!(case, rendered);
 }
 
 const TREE: &str = "tests/render/tree";

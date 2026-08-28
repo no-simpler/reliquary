@@ -81,7 +81,7 @@ fn basename(path: &str) -> &str {
 /// string: this runs against every extensionless file, binaries included.
 fn first_line(path: &Path) -> Option<String> {
     let mut buffer = [0u8; PEEK];
-    let read = std::fs::File::open(path).ok()?.read(&mut buffer).ok()?;
+    let read = fs_err::File::open(path).ok()?.read(&mut buffer).ok()?;
     let head = &buffer[..read];
     let end = head.iter().position(|b| *b == b'\n').unwrap_or(read);
     std::str::from_utf8(&head[..end]).ok().map(str::to_owned)
@@ -215,19 +215,19 @@ mod tests {
     #[test]
     fn an_extensionless_script_is_found_by_its_shebang() {
         let dir = std::env::temp_dir().join("ernest-detect");
-        std::fs::create_dir_all(&dir).unwrap();
+        fs_err::create_dir_all(&dir).unwrap();
 
         let script = dir.join("tool");
-        std::fs::write(&script, "#!/usr/bin/env bash\nset -euo pipefail\n").unwrap();
+        fs_err::write(&script, "#!/usr/bin/env bash\nset -euo pipefail\n").unwrap();
         assert_eq!(profile_for(&script).map(|p| p.language), Some("shell"));
 
         // An interpreter no profile claims, and a file with no shebang at all.
         let other = dir.join("other");
-        std::fs::write(&other, "#!/usr/bin/env ruby\nputs 1\n").unwrap();
+        fs_err::write(&other, "#!/usr/bin/env ruby\nputs 1\n").unwrap();
         assert!(profile_for(&other).is_none());
 
         let plain = dir.join("plain");
-        std::fs::write(&plain, "just text\n").unwrap();
+        fs_err::write(&plain, "just text\n").unwrap();
         assert!(profile_for(&plain).is_none());
     }
 
@@ -235,10 +235,10 @@ mod tests {
     #[test]
     fn an_extension_is_never_second_guessed() {
         let dir = std::env::temp_dir().join("ernest-detect");
-        std::fs::create_dir_all(&dir).unwrap();
+        fs_err::create_dir_all(&dir).unwrap();
 
         let decoy = dir.join("notes.txt");
-        std::fs::write(&decoy, "#!/usr/bin/env bash\n").unwrap();
+        fs_err::write(&decoy, "#!/usr/bin/env bash\n").unwrap();
         assert!(profile_for(&decoy).is_none());
     }
 }

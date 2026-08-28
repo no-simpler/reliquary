@@ -1,0 +1,13 @@
+---
+source: ernest/tests/golden.rs
+expression: counts
+input_file: ernest/tests/fixtures/css/adversarial.css
+---
+{
+  "prose_chars": 468,
+  "code_chars": 275,
+  "ignored_chars": 96,
+  "prose_lines": 13,
+  "code_lines": 18,
+  "ignored_lines": 3
+}

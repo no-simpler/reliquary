@@ -1,12 +1,13 @@
 //! Golden fixtures.
 //!
-//! Each fixture pairs with an `.expected.json` holding its counts. The exact
-//! semantics of each rule are pinned by the unit tests in `src/analyze`; these
-//! guard the rules working together, and are what an added format must not
-//! quietly disturb.
+//! Each fixture pairs with a snapshot of its counts. The exact semantics of each
+//! rule are pinned by the unit tests in `src/analyze`; these guard the rules
+//! working together, and are what an added format must not quietly disturb.
 //!
-//! Regenerate after a deliberate change: `ERNEST_BLESS=1 cargo test --test golden`.
-//! Read the diff before committing it — a blessed wrong answer is still wrong.
+//! Accept a deliberate change with `cargo insta review`, which shows one diff per
+//! fixture and takes them one at a time. Read each — an accepted wrong answer is
+//! still wrong. `insta::glob!` names snapshots after the fixture path and reports
+//! every drifted fixture in one run rather than stopping at the first.
 
 use std::path::{Path, PathBuf};
 
@@ -47,41 +48,10 @@ fn measure(path: &Path) -> (&'static Profile, String, Counts) {
 
 #[test]
 fn fixtures_match_their_expected_counts() {
-    let bless = std::env::var_os("ERNEST_BLESS").is_some();
-    let mut failures = Vec::new();
-
-    for path in fixtures() {
-        let (_, _, counts) = measure(&path);
-        let expected_path = path.with_extension(format!(
-            "{}.expected.json",
-            path.extension().unwrap().to_str().unwrap()
-        ));
-
-        if bless {
-            std::fs::write(
-                &expected_path,
-                serde_json::to_string_pretty(&counts).expect("serialises") + "\n",
-            )
-            .expect("writes expectation");
-            continue;
-        }
-
-        let text = std::fs::read_to_string(&expected_path).unwrap_or_else(|_| {
-            panic!(
-                "missing {} — run ERNEST_BLESS=1 cargo test --test golden",
-                expected_path.display()
-            )
-        });
-        let expected: Counts = serde_json::from_str(&text).expect("expectation parses");
-        if expected != counts {
-            failures.push(format!(
-                "{}\n  expected {expected:?}\n  measured {counts:?}",
-                path.display()
-            ));
-        }
-    }
-
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    insta::glob!("fixtures/*/*", |path| {
+        let (_, _, counts) = measure(path);
+        insta::assert_json_snapshot!(counts);
+    });
 }
 
 /// Every non-whitespace character belongs to exactly one class. This holds

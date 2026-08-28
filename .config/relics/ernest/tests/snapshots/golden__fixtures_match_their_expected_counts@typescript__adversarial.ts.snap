@@ -1,0 +1,13 @@
+---
+source: ernest/tests/golden.rs
+expression: counts
+input_file: ernest/tests/fixtures/typescript/adversarial.ts
+---
+{
+  "prose_chars": 307,
+  "code_chars": 700,
+  "ignored_chars": 100,
+  "prose_lines": 11,
+  "code_lines": 27,
+  "ignored_lines": 3
+}

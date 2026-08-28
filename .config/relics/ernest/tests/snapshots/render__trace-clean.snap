@@ -1,0 +1,21 @@
+---
+source: ernest/tests/render.rs
+expression: rendered
+---
+prose density  54.5%   (prose 272 / base 499 chars)
+  docs prose 183 chars — 88.4% of source code
+
+  language  unread  measured  error nodes  missing nodes
+  markdown       0         2            0              0
+  php            0         2            0              0
+  yaml           0         1            0              0
+
+  diagnostic   path                             reason
+  unsupported  tests/render/tree/package.json   no profile claims this extension
+  unsupported  tests/render/tree/tsconfig.json  no profile claims this extension
+
+  5 files measured, 2 unsupported (json 2)
+  measuring tests/render/tree
+  --scope local — locally-excluded files included, gitignored files not
+  no file defeated its grammar
+  --by file|section|cohort|language, --top N, --json

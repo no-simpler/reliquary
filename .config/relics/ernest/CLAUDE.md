@@ -309,6 +309,16 @@ against the working tree, plus the untracked files beside it. Merge-base
 which is the very thing the measure-edit-measure loop weighs. Its value must be
 attached (`--changed=main`), because a bare path follows it.
 
+git is invoked through `relic_core::tool::Tool` and deliberately **not** through
+`relic_core::git::Git`. `Git` strips the ambient `GIT_*` environment, and here
+that environment is the answer: `GIT_DIR` and `GIT_WORK_TREE` must work by
+themselves, or `--changed` would mean something other than what `git diff` means
+in the same directory — which is the whole point of delegating. What `Tool`
+supplies is the rest, and one piece of it is load-bearing: the `C` locale. The
+one failure ernest explains rather than relays is recognised by matching git's
+own `not a git repository`, and under a translated locale that match would
+silently fail and take the yadm hint with it.
+
 A ranking scope is recorded in the snapshot. Without that, a scoped `files` is
 indistinguishable from a smaller repository, and `ernest diff` across a scoped
 and an unscoped snapshot bills every out-of-scope file as a full-weight
@@ -346,8 +356,8 @@ second.
   which lines appear may change in any release. That is git's porcelain
   convention, and it buys the same thing: freedom to keep making the default
   output better without breaking a caller, because a caller parsing it was told
-  not to. `tests/render/expected/` is what stops that freedom becoming drift —
-  every change to the text is a blessed diff someone read.
+  not to. The render snapshots are what stop that freedom becoming drift — every
+  change to the text is a diff someone accepted.
 
 Output carries no colour, on purpose. The primary reader pays for every ANSI byte
 and gains nothing from one, and a palette conditional on a TTY would make the
@@ -502,10 +512,11 @@ The render trees are frozen deliberately. `tests/fixtures/` grows every time a
 format lands, so snapshots over it would churn on changes that are not about
 rendering and drown the diff someone is meant to read.
 
-Regenerate expectations after a deliberate change with
-`ERNEST_BLESS=1 cargo test --test golden` and
-`ERNEST_BLESS=1 cargo test --test render`, then **read the diff** — a blessed
-wrong answer is still wrong.
+Both suites are `insta` snapshots. Accept a deliberate change with `cargo insta
+review`, which shows one diff at a time and takes them one at a time — read each,
+because an accepted wrong answer is still wrong. The golden suite runs under
+`insta::glob!`, so a change that moves several fixtures reports all of them in one
+run instead of stopping at the first.
 
 ## Known imprecisions
 

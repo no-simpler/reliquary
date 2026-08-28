@@ -1,4 +1,0 @@
-prose density  75.3% -> 74.7%   (-0.6 pp,  prose -4 chars)
-  docs prose 6 -> 118 chars — 15.0% -> 295.0% of source code
-
-  per-section movement needs both snapshots taken with --by section

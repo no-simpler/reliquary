@@ -16,9 +16,12 @@ name = "ernest"
 path = "src/main.rs"
 
 [dependencies]
+relic-core = { path = "../crates/relic-core" }
+
 anyhow.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
+fs-err.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
@@ -39,6 +42,10 @@ tree-sitter-toml-ng = "0.7.0"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-xml = "0.7.0"
 tree-sitter-yaml = "0.7.2"
+
+# Snapshot review, replacing two hand-rolled `ERNEST_BLESS` harnesses.
+[dev-dependencies]
+insta.workspace = true
 
 [lints]
 workspace = true

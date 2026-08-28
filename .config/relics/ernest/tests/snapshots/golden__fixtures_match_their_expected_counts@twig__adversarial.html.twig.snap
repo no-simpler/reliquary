@@ -1,0 +1,13 @@
+---
+source: ernest/tests/golden.rs
+expression: counts
+input_file: ernest/tests/fixtures/twig/adversarial.html.twig
+---
+{
+  "prose_chars": 287,
+  "code_chars": 589,
+  "ignored_chars": 56,
+  "prose_lines": 9,
+  "code_lines": 22,
+  "ignored_lines": 2
+}

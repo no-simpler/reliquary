@@ -25,4 +25,5 @@ cargo-update          # `up`'s `cargo install-update -a`
 cargo-sweep           # `up`'s build-cache step, and what holds target/ under its ceiling
 
 # Occasional, by hand.
+cargo-insta           # `cargo insta review`: accept ernest's snapshot diffs one at a time
 cargo-expand          # read what a derive actually generated; this lane is derive-heavy

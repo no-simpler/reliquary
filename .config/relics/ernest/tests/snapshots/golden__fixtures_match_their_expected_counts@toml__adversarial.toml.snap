@@ -1,0 +1,13 @@
+---
+source: ernest/tests/golden.rs
+expression: counts
+input_file: ernest/tests/fixtures/toml/adversarial.toml
+---
+{
+  "prose_chars": 199,
+  "code_chars": 393,
+  "ignored_chars": 47,
+  "prose_lines": 6,
+  "code_lines": 26,
+  "ignored_lines": 1
+}

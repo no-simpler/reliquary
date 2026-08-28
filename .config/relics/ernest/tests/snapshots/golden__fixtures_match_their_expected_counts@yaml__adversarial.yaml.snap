@@ -1,0 +1,13 @@
+---
+source: ernest/tests/golden.rs
+expression: counts
+input_file: ernest/tests/fixtures/yaml/adversarial.yaml
+---
+{
+  "prose_chars": 51,
+  "code_chars": 159,
+  "ignored_chars": 49,
+  "prose_lines": 2,
+  "code_lines": 11,
+  "ignored_lines": 3
+}

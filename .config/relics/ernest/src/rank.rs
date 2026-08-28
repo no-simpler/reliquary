@@ -11,7 +11,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result, bail};
 use ignore::overrides::{Override, OverrideBuilder};
@@ -128,6 +128,8 @@ fn normalize(path: &Path) -> Option<PathBuf> {
 /// Asking git what changed, rather than reimplementing it — the same delegation
 /// `.gitignore` already gets.
 mod git {
+    use relic_core::tool::Tool;
+
     use super::*;
 
     /// Paths differing from `reference`, plus the untracked files beside them.
@@ -195,35 +197,45 @@ mod git {
         Ok(from.join(cdup.trim_end_matches(['\n', '\r'])))
     }
 
-    /// The environment is inherited untouched, so `GIT_DIR` and `GIT_WORK_TREE`
-    /// work by themselves. ernest never sets them and never sniffs for yadm:
-    /// that would be guessing at git's job, and would make `--changed` mean
-    /// something other than what `git diff` means in the same directory.
-    fn run(from: &Path, args: &[&str]) -> Result<String> {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(from)
-            .args(args)
-            .output()
-            .context("--changed needs git on PATH")?;
+    /// One PATH resolution per process, whatever asks.
+    fn tool() -> Result<&'static Tool> {
+        static FOUND: OnceLock<Option<Tool>> = OnceLock::new();
+        FOUND
+            .get_or_init(|| Tool::find("git"))
+            .as_ref()
+            .context("--changed needs git on PATH")
+    }
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stderr = stderr.trim();
+    /// `relic_core::tool::Tool`, deliberately **not** `relic_core::git::Git`:
+    /// `Git` strips the ambient `GIT_*` environment, and here that environment
+    /// is the answer. `GIT_DIR` and `GIT_WORK_TREE` must work by themselves —
+    /// ernest never sets them and never sniffs for yadm, because that would be
+    /// guessing at git's job and would make `--changed` mean something other
+    /// than what `git diff` means in the same directory.
+    ///
+    /// What `Tool` supplies is the rest: the `C` locale the `not a git
+    /// repository` test below depends on, a closed stdin, and typed failure.
+    fn run(from: &Path, args: &[&str]) -> Result<String> {
+        let tool = tool()?;
+        let mut command = tool.command();
+        command.arg("-C").arg(from).args(args);
+
+        match tool.capture(&mut command) {
+            Ok(output) => Ok(output.stdout),
             // The one failure worth explaining rather than relaying: this crate
             // lives in a yadm tree — work tree `$HOME`, git dir elsewhere, no
             // `.git` anywhere up the path — so the error is otherwise baffling in
             // exactly the repository ernest was written in.
-            if stderr.contains("not a git repository") {
+            Err(relic_core::tool::Error::Failed { ref stderr, .. })
+                if stderr.contains("not a git repository") =>
+            {
                 bail!(
                     "--changed needs a git repository; {} is not in one\n       \
                      a yadm-managed tree needs GIT_DIR and GIT_WORK_TREE set, or `yadm enter`",
                     from.display()
                 );
             }
-            bail!("git {}: {stderr}", args.join(" "));
+            Err(e) => Err(e).with_context(|| format!("git {}", args.join(" "))),
         }
-
-        String::from_utf8(output.stdout).context("git wrote a path that is not utf-8")
     }
 }
