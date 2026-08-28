@@ -277,6 +277,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "decruft"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "camino",
+ "clap",
+ "fs-err",
+ "ignore",
+ "predicates",
+ "relic-core",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "defmt"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

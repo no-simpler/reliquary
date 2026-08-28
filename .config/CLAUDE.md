@@ -116,7 +116,6 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm, relics, relic build cache); writes timestamp to `~/.local/state/up/last_upped_at`
 - `check-shell-parity` - detects POSIX↔fish alias/abbr/function name drift across the paired `shell/interactive.d/*.sh` ↔ `fish/conf.d/*.fish` files; exits non-zero on drift (run by the dream procedure in `~/.config/.claude/DREAM.md`)
 - `check-brew-health` - detects Homebrew rot in both directions: installed formulae/casks deprecated or disabled upstream (warn), kegs orphaned by a formula's removal, Brewfile entries that no longer resolve (fail), and packages installed **on request** that are declared in no Brewfile (warn) — the drift that only surfaces on a restore, since the tool is on `$PATH` until then. Dependencies are excluded, so only what was asked for counts; a deliberate exception is recorded in `brew/undeclared` (same role as `yadm/unmanaged`). Tap-aware, offline, side-effect-free; exit 0/1/2 like `check-bedrock`. Wired into `yadm doctor` and, advisory-only, into `up`
-- `decruft` - removes inert OS metadata and interpreter caches from browsable git repos under `$HOME` and from the XDG data dir. In repos `git clean -Xdn` is the oracle, so per-repo unignores are respected and tracked files are never touched. Editor swap/backup files stay (live crash-recovery state); dependency and build trees stay (expensive to rebuild). `-n` dry-runs
 - `compose-gc` - reclaims Docker Compose state left behind by dead git worktrees of the current repo, sweeping by label (no compose file needed) across both worktree layouts; `down <path>` is the profile-complete teardown of one stack. `-n` dry-runs. Used by the `transplant-worktrees` skill as its single Docker surface
 - `check-md-shell-blocks` - validates the auto-executed ```! blocks in Claude Code skills/slash commands: they are statically analysed with no prompt path, so an inline program is always denied and takes the whole invocation with it. Checks Claude Code's brace-with-quote prefilter, demands a single simple command, and verifies `allowed-tools`/settings.json coverage. Read-only, exit 0/1/2; wired into `yadm doctor`
 - `check-yadm-coverage` - reports paths nobody has decided about: every path under `~/.config`, `~/.claude`, `~/.ssh`, `~/.github`, `~/.local/bin` and `$HOME`'s own dotfiles must be plaintext-tracked, matched by an encrypt pattern, inside a pruned runtime dir, or declared in `yadm/unmanaged`. Also catches both-lanes-at-once, missing managed paths, dead encrypt patterns, undecided files anywhere beneath a directory something is already managed from (R5 — which is how a whole new untracked subdirectory gets caught, not just a stray file beside tracked ones), loose credential shapes, and unreachable-object bloat in the yadm object DB. Sockets and fifos are skipped: git cannot hold them, so they are never a decision. Derives archive membership by expanding `yadm/encrypt`, never by decrypting — offline, side-effect-free, Touch-ID-free; exit 0/1/2. Wired into `yadm doctor`
@@ -214,6 +213,25 @@ relic's `scripts/update.sh`, which `up` already invokes.
 **The binary is the single source of truth for its own surface** — reference in `midden --help` and
 `midden help`, doctrine in `midden guide`. Do not restate either here or anywhere else; the relic's
 `CLAUDE.md` records why.
+
+### Cruft sweep (`decruft`)
+
+Removes inert OS metadata and interpreter caches. Public relic
+(`~/.config/relics/decruft/`, Rust); `up` runs it as a step.
+
+Two lanes, because "may this be deleted?" has two best answers. Inside a git repository the
+**repository** answers — only ignored, untracked paths are candidates, so a per-repository
+unignore is respected and a tracked file is never a candidate. Outside one (the XDG data dir)
+there is nobody to ask, so the answer is by name and the set of names is small.
+
+Editor swap and lock files stay: gitignored keeps them out of commits, but a live one is
+crash-recovery state. Dependency and build trees stay — inert, but expensive to rebuild.
+Vendored interpreter trees are skipped whole. A directory left empty is reported, never
+deleted. `-n` dry-runs.
+
+**The binary is the single source of truth for its own surface** — `decruft --help`. Its
+`CLAUDE.md` carries the deviations from the shell script it replaced, each naming the test
+that pins it.
 
 ### Commit guard (`warden`)
 

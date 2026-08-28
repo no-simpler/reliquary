@@ -1,0 +1,12 @@
+# Manifest for the `decruft` CLI — Stage-2 in-house relic.
+# See ~/.config/reliquary/GRADUATION.md for the full schema.
+
+[relic]
+name = "decruft"
+description = "Remove inert OS metadata and interpreter caches, without touching anything a tool would miss."
+runtime = "rust"
+min-runtime-version = "1.89" # floor, never a pin — the workspace's rust-version
+brew-deps = []               # rustup owns the toolchain
+external-deps = [
+    "git (each repository's own answer for what is ignored and untracked; without it a repository is walked but nothing in it is removed)",
+]
