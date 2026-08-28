@@ -323,10 +323,10 @@ live machine the day it lands.
 | `perf-budgets` | **built** |
 | `path` | **built** — and `bin/pb` is retired with it |
 | `git-identity` | **built** |
+| `manifest-drift` | **built** |
 | harness permission rules | to build — and it retires `halo`'s `settings_lint.py` one dream cycle later |
 | harness hook wiring | to build |
 | `~/.claude` skill and plugin health | to build |
-| manifest ↔ installed drift | to build, for the cargo and npm lanes |
 
 ## The `path` station
 
@@ -406,6 +406,45 @@ authenticates as, and only a real repository operation proves organisation SSO
 access. Both want the network and one wants a credential, so neither belongs in a
 detect-only standing audit. This proves the wiring is present and separate; whether
 it is *correct* is the network's answer.
+
+## The `manifest-drift` station
+
+`cargo/crates.txt` and `npm/globals.txt` are committed manifests restored at
+bootstrap and refreshed by `up`. Neither the restore nor the refresh ever *compares*
+them to the machine — bootstrap installs what is missing and runs once, `up` upgrades
+what is already there — so drift is silent in both directions and only surfaces on
+the next machine, which is the worst place to find it.
+
+Both directions are `Soft`, and they are different failures. **Declared and not
+installed**: this machine lacks a tool the repo says it has, because a manifest entry
+added while a machine is running is never installed by `up`. **Installed and declared
+nowhere**: the machine has a tool the next one will not — the same drift `brew-health`
+reports for request-installed packages, and the same grade.
+
+**Cargo is asked for its data, not its output, and specifically for the `v1` ledger.**
+`cargo install --list` is a human-facing listing with no `--json`. Cargo keeps two
+ledgers, and building this found them disagreeing: on 2026-08-29 `~/.cargo/.crates2.json`
+was missing an entry `~/.cargo/.crates.toml` carried, and `cargo install --list` agreed
+with the older file. **An oracle that under-reports what is installed manufactures
+"declared and not installed" findings out of nothing**, so the ledger to read is the
+one the tooling itself believes. Both are cargo's internal formats, so the obligation
+that comes with reading one applies: a ledger that will not parse is a `Broken` finding
+naming the file, pinned by
+`a_ledger_that_cannot_be_parsed_is_said_out_loud_and_never_read_as_an_empty_lane`.
+
+**A manifest that declares nothing is refused**, for the reason the `yadm-coverage`
+station refuses an empty pathspec: an empty declaration would report every installed
+package as undeclared, which is the opposite of what it means.
+
+**Two structural exemptions, hardcoded with reasons**: `cargo-binstall`, because
+bootstrap installs it in order to install everything else and a manifest declaring its
+own installer would be circular; and `npm`, because `npm ls -g` always lists npm. Both
+are properties of the tools rather than decisions about this machine — a judgement call
+about a *package* belongs in the manifest, the way `brew/undeclared` carries brew's.
+Exemptions are per-lane and do not leak across, which is its own test.
+
+**npm's exit status is not its answer**: `npm ls` exits non-zero on an unmet peer
+dependency while still printing the tree it was asked for.
 
 ## Retired, not ported: `bin/pb`
 
