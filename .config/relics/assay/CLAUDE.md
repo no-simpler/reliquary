@@ -325,8 +325,8 @@ live machine the day it lands.
 | `git-identity` | **built** |
 | `manifest-drift` | **built** |
 | `hook-wiring` | **built** |
+| `claude-plugins` | **built** |
 | harness permission rules | to build — and it retires `halo`'s `settings_lint.py` one dream cycle later |
-| `~/.claude` skill and plugin health | to build |
 
 ## The `path` station
 
@@ -480,6 +480,35 @@ word is a flag rather than a script. Three tests pin exactly that much.
 **Two files in the hook directory are data, not hooks.** yadm runs a hook named after
 one of its commands; the identity guard's definition and its reader sit beside them and
 are read by `warden`. An execute bit on either would be wrong rather than missing.
+
+## The `claude-plugins` station
+
+`~/.claude/skills/` is a plugin auto-load root, not a skills folder: Claude Code adopts
+every non-dot entry as a local plugin, with no install step and no `enabledPlugins`
+entry. **The absence of an install step is what makes this a station** — there is
+nothing to fail. A plugin that carries nothing, a manifest that is not JSON, a symlink
+whose target is gone: none produces an error anyone sees. The surface is simply absent,
+and its absence looks exactly like never having written it.
+
+`Broken` for: an entry that is not a directory (a dangling symlink is named as one,
+because it is *there* and adopts nothing), any of the three JSON files that will not
+parse, and a skill missing `name` or `description`.
+
+**The description grades as hard as a parse failure**, because it is the only channel
+that reaches an agent without a tool call. A skill without one is never reached for,
+however good its body is — which is the same outcome as not existing.
+
+**The component table is used positively and never negatively.** Claude Code's list of
+what a plugin root may carry is a third-party table, so an unknown directory is never a
+finding — it is a plugin kind this station has not heard of. The table decides only
+that a directory carries *something*, and a plugin that appears to carry nothing is a
+`Note`: "I recognised nothing here" and "there is nothing here" are different claims,
+and only one of them is this machine's fault.
+
+**The lane rule is not checked here.** Top level is public and plaintext-tracked,
+`attic/` is private under one encrypt pattern; a file in the wrong lane is
+`yadm-coverage`'s R1 and R4, which already run that test in both directions. One fact,
+one owner — the same rule that gave the missing lane to `path`'s lane check.
 
 ## Retired, not ported: `bin/pb`
 

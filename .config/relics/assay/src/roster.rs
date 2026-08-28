@@ -23,6 +23,7 @@ pub fn roster() -> Vec<Box<dyn Station>> {
         Box::new(crate::stations::relic_cache::RelicCache::default()),
         Box::new(crate::stations::yadm_coverage::YadmCoverage::default()),
         Box::new(crate::stations::git_identity::GitIdentity::default()),
+        Box::new(crate::stations::claude_plugins::ClaudePlugins::default()),
         Box::new(crate::stations::hook_wiring::HookWiring::default()),
         Box::new(crate::stations::manifest_drift::ManifestDrift::default()),
         Box::new(crate::stations::path::SearchPath::default()),

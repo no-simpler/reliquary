@@ -6,6 +6,7 @@
 
 pub mod bedrock;
 pub mod brew_health;
+pub mod claude_plugins;
 pub mod git_identity;
 pub mod hook_wiring;
 pub mod manifest_drift;
