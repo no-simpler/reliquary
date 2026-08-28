@@ -371,6 +371,11 @@ Snippet dirs live under `~/.config/yadm/snippets/`. Files are `NN-name.sh`, sort
 Key macOS snippets: homebrew install, brewfile apply, mas (App Store), directory creation, quartz filters, tilde-switch.
 Shared snippets: pbin setup, tpm (tmux plugin manager), rustup, benefactor `gh` profile seeding.
 Util snippets: print helpers, copy helpers, symlink helpers.
+Lib snippets: PATH invariants (`bootstrap::brew_shellenv`, `bootstrap::path_prepend`). Sourced
+first, so they define functions and nothing else — `print_*` does not exist yet. This is where a
+snippet's *postcondition* lives when a guard might skip the work that would otherwise establish
+it: `01-homebrew.sh` once evaluated `brew shellenv` only on the branch that installed Homebrew,
+so every later snippet on a machine that already had it ran against the inherited `$PATH`.
 
 ### Brewfiles (`~/.config/brew/`)
 
