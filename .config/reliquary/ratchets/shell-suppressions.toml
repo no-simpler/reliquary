@@ -15,7 +15,7 @@
 ".config/bin/check-bedrock" = 2
 ".config/bin/check-brew-health" = 2
 ".config/bin/up" = 1
-".config/bin/yadm-wrapper" = 2
+".config/bin/yadm-wrapper" = 1
 ".config/relics/docket/scripts/update.sh" = 1
 ".config/relics/midden/scripts/update.sh" = 1
 ".config/relics/relic/src/relic.sh" = 2

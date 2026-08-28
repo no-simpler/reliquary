@@ -341,16 +341,25 @@ relic::publish() {
     )
 }
 
-# Format and lint one relic's shell. Absent, the relic is unlinted and says so
-# rather than passing quietly — a gate that silently does nothing is worse than
-# no gate, because it also carries the belief that it is on.
+# Format and lint the shell that stays shell, through `assay`'s station.
+#
+# The station has no subset mode and takes no directory: its third gate is an
+# equality against a committed per-file suppression count, and a subset cannot
+# tell a file carrying no directives from one it was not asked about. The retired
+# script met that by disabling the ratchet for the paths it was handed, which is
+# the gate silently switching itself off. So a bash relic's test runs the whole
+# population — a superset, whose findings are all true, at ~3 s over 63 files.
+#
+# Absent, the relic is unlinted and says so rather than passing quietly: a gate
+# that silently does nothing is worse than no gate, because it also carries the
+# belief that it is on. That degrade is deliberate — `relic` publishes `assay`,
+# so on a bare machine the linter does not exist yet and testing must still work.
 relic::_shell_lint() {
-    local dir="${1:-}" linter="$HOME/.config/bin/check-shell-lint"
-    if [[ ! -x "$linter" ]]; then
-        printf 'relic[%s]: check-shell-lint not found — shell unlinted\n' "$NAME" >&2
+    if ! command -v assay >/dev/null 2>&1; then
+        printf 'relic[%s]: assay not on PATH — shell unlinted\n' "$NAME" >&2
         return 0
     fi
-    "$linter" "$dir"
+    assay --quiet shell-lint
 }
 
 relic::test() {
@@ -380,7 +389,7 @@ relic::test() {
     # has no type system, so this is the whole of what can be verified
     # statically. See "Track 2" in ~/.config/reliquary/HARDENING.md.
     if [[ "$RUNTIME" == "bash" ]]; then
-        relic::_shell_lint "$dir" || return $?
+        relic::_shell_lint || return $?
     fi
 
     local tests_dir="$dir/tests"
