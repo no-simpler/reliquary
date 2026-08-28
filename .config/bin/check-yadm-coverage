@@ -31,7 +31,7 @@
 #
 # R4 is hooks/pre_commit run backwards. That hook proves a file *cannot* be
 # plaintext-tracked; here the same test is positive evidence of which lane an
-# untracked file belongs in. Both read one definition — hooks/identity-guard.sh
+# untracked file belongs in. Both read one definition — hooks/identity-guard.toml
 # — which is encrypted, so this public script never names what it looks for. If
 # the archive has not been decrypted yet, R4 is skipped and says so.
 #
@@ -138,11 +138,24 @@ if [ -z "$TRACKED" ]; then
 fi
 
 # --- Identity guard (encrypted; absent before the first decrypt) -----------
-GUARD_FILE="$HOME/.config/yadm/hooks/identity-guard.sh"
+# Read through its own reader, so this and hooks/pre_commit compose one
+# definition the same way. Absent is the undecrypted archive and skips R4;
+# present but unreadable is a broken definition and fails, because a guard that
+# silently tests nothing is worse than no guard.
+GUARD_READER="$HOME/.config/yadm/hooks/identity-guard.py"
 IDENTITY_PATTERN=""
-if [ -r "$GUARD_FILE" ]; then
-    # shellcheck source=/dev/null
-    . "$GUARD_FILE"
+if [ -r "$GUARD_READER" ]; then
+    guard_out="$(python3 "$GUARD_READER")" || {
+        fail "identity guard unreadable — see the message above"
+        exit 2
+    }
+    eval "$guard_out"
+    # An empty pattern matches every line, so a value that never arrived would
+    # accuse every file rather than fail. Assert instead of trusting the eval.
+    if [ -z "$IDENTITY_PATTERN" ]; then
+        fail "identity guard returned no pattern"
+        exit 2
+    fi
 fi
 
 # --- Object database shape (for R8) ----------------------------------------
