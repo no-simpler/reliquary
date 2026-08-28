@@ -68,6 +68,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "autocfg"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -86,6 +92,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bb31b46c14244e20ee9984b11bf5c992b91fb6939fea616e3512c8baecdbe5f"
 dependencies = [
  "memchr",
+ "serde_core",
+]
+
+[[package]]
+name = "camino"
+version = "1.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb1307f12aa967b5a58416e87b3653360e0fd614a016b6e970db08fecbb1b80d"
+dependencies = [
  "serde_core",
 ]
 
@@ -255,9 +270,11 @@ name = "docket"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap",
  "clap_complete",
  "comfy-table",
+ "fs-err",
  "getrandom",
  "jiff",
  "relic-core",
@@ -329,6 +346,15 @@ name = "find-msvc-tools"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d45db016d36b838f563236e9193d0ee6ce38f3f68b6c94e914b4929c96bbb890"
+
+[[package]]
+name = "fs-err"
+version = "3.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b91aa448ca50d7e79433bdf3ee8d99215430d2ec02ade5aefab2a073a1822e8a"
+dependencies = [
+ "autocfg",
+]
 
 [[package]]
 name = "getrandom"
@@ -501,9 +527,11 @@ name = "midden"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap",
  "clap_complete",
  "comfy-table",
+ "fs-err",
  "getrandom",
  "jiff",
  "relic-core",
@@ -643,7 +671,9 @@ name = "relic-core"
 version = "0.1.0"
 dependencies = [
  "anstream",
+ "camino",
  "clap",
+ "fs-err",
  "jiff",
  "thiserror",
  "which",

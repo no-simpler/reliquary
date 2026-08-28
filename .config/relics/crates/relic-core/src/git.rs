@@ -17,9 +17,11 @@
 //! Built on [`crate::tool`], which supplies the guarantees every external
 //! program needs — `C` locale, closed stdin. What is git-specific stays here.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
+
+use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::tool::Tool;
 
@@ -88,7 +90,7 @@ impl Git {
     }
 
     /// [`Git::command`], aimed at one directory.
-    pub fn at(self, dir: &Path) -> Command {
+    pub fn at(self, dir: &Utf8Path) -> Command {
         let mut command = self.command();
         command.arg("-C").arg(dir);
         command
@@ -98,7 +100,7 @@ impl Git {
     /// worktrees fold into it, because `git worktree list` reports the main
     /// checkout first; a submodule reports its own root, which is what a
     /// per-aspect repository layout needs.
-    pub fn main_worktree(self, cwd: &Path) -> Option<PathBuf> {
+    pub fn main_worktree(self, cwd: &Utf8Path) -> Option<Utf8PathBuf> {
         let output = self
             .at(cwd)
             .args(["worktree", "list", "--porcelain"])
@@ -112,12 +114,12 @@ impl Git {
         if main.is_empty() {
             return None;
         }
-        Some(PathBuf::from(main))
+        Some(Utf8PathBuf::from(main))
     }
 
     /// The branch `cwd` is on, when there is one. A detached head names no
     /// branch, and neither does a directory outside a repository.
-    pub fn branch(self, cwd: &Path) -> Option<String> {
+    pub fn branch(self, cwd: &Utf8Path) -> Option<String> {
         let output = self
             .at(cwd)
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -168,7 +170,7 @@ mod tests {
 
     #[test]
     fn aiming_at_a_directory_keeps_the_scrub() {
-        let command = Git.at(Path::new("/tmp"));
+        let command = Git.at(Utf8Path::new("/tmp"));
         let env: HashMap<&OsStr, Option<&OsStr>> = command.get_envs().collect();
         assert_eq!(env.get(OsStr::new("GIT_DIR")), Some(&None));
         let args: Vec<&OsStr> = command.get_args().collect();

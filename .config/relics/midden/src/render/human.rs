@@ -127,7 +127,7 @@ fn table_refs(records: &[&Record], color: bool, now: jiff::Timestamp, with_targe
                     paint(Cell::new("INVALID"), color, Color::Red),
                     Cell::new(""),
                     Cell::new(""),
-                    Cell::new(record.path.display().to_string()),
+                    Cell::new(record.path.to_string()),
                     paint(Cell::new(error), color, Color::Red),
                 ];
                 if with_target {

@@ -12,8 +12,9 @@
 
 use std::fs::File;
 use std::io;
-use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+use camino::{Utf8Path, Utf8PathBuf};
 
 /// First gap between attempts. Doubles up to [`MAX_BACKOFF`].
 const FIRST_BACKOFF: Duration = Duration::from_millis(10);
@@ -46,27 +47,27 @@ impl Wait {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The lock file itself could not be created or opened.
-    #[error("opening the lock file {}", .path.display())]
+    #[error("opening the lock file {path}")]
     Open {
         /// The lock file.
-        path: PathBuf,
+        path: Utf8PathBuf,
         /// The underlying failure.
         #[source]
         source: io::Error,
     },
     /// Somebody else holds it, and the wait ran out.
-    #[error("{} is held by another process (waited {waited:?})", .path.display())]
+    #[error("{path} is held by another process (waited {waited:?})")]
     Busy {
         /// The lock file.
-        path: PathBuf,
+        path: Utf8PathBuf,
         /// How long this caller waited before giving up.
         waited: Duration,
     },
     /// The lock operation failed for a reason that is not contention.
-    #[error("locking {}", .path.display())]
+    #[error("locking {path}")]
     Io {
         /// The lock file.
-        path: PathBuf,
+        path: Utf8PathBuf,
         /// The underlying failure.
         #[source]
         source: io::Error,
@@ -87,11 +88,11 @@ impl Lock {
     ///
     /// [`Error::Busy`] when the wait ran out, [`Error::Open`] or [`Error::Io`]
     /// when the filesystem refused.
-    pub fn acquire(path: &Path, wait: Wait) -> Result<Self, Error> {
+    pub fn acquire(path: &Utf8Path, wait: Wait) -> Result<Self, Error> {
         match Self::poll(path, wait)? {
             Some(lock) => Ok(lock),
             None => Err(Error::Busy {
-                path: path.to_path_buf(),
+                path: path.to_owned(),
                 waited: match wait {
                     Wait::None => Duration::ZERO,
                     Wait::Until(d) => d,
@@ -110,13 +111,13 @@ impl Lock {
     /// # Errors
     ///
     /// [`Error::Open`] or [`Error::Io`]. Contention is `Ok(None)`, not an error.
-    pub fn try_acquire(path: &Path) -> Result<Option<Self>, Error> {
+    pub fn try_acquire(path: &Utf8Path) -> Result<Option<Self>, Error> {
         Self::poll(path, Wait::None)
     }
 
-    fn poll(path: &Path, wait: Wait) -> Result<Option<Self>, Error> {
+    fn poll(path: &Utf8Path, wait: Wait) -> Result<Option<Self>, Error> {
         let file = File::create(path).map_err(|source| Error::Open {
-            path: path.to_path_buf(),
+            path: path.to_owned(),
             source,
         })?;
 
@@ -133,7 +134,7 @@ impl Lock {
                 Err(std::fs::TryLockError::WouldBlock) => {}
                 Err(std::fs::TryLockError::Error(source)) => {
                     return Err(Error::Io {
-                        path: path.to_path_buf(),
+                        path: path.to_owned(),
                         source,
                     });
                 }
@@ -158,9 +159,10 @@ impl Lock {
 mod tests {
     use super::*;
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("relic-core-lock-{name}-{}", std::process::id()));
+    fn scratch(name: &str) -> Utf8PathBuf {
+        let dir = crate::path::utf8(std::env::temp_dir())
+            .unwrap()
+            .join(format!("relic-core-lock-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("lock")
     }

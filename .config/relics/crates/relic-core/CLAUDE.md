@@ -52,9 +52,15 @@ present but broken fails the first real invocation with its own message, which i
 more legible than `detect` returning `None` — and that keeps a fork off the
 session-start hook path.
 
-`path` — one meaning for a path. `resolve_lenient` is absolute and symlink-free as
-far as the path exists and lexical past that, so a directory keys the same however
-it was spelled and whether or not it exists yet.
+`path` — one meaning for a path, and the crate's path *type*. Everything here is
+`camino::Utf8Path`, because a key is program data: `to_string_lossy` maps two
+directories onto one key, and serde's `PathBuf` refuses a path it cannot spell deep
+inside a save rather than at the edge. `utf8`, `cwd` and `home` are the only places a
+filesystem path becomes one. `resolve_lenient` is absolute and symlink-free as far as
+the path exists and lexical past that, so a directory keys the same however it was
+spelled and whether or not it exists yet — and a symlink that resolves somewhere
+unnameable is *reported*, because skipping it would return a different key rather
+than no key.
 
 `git` and `path` are one crate because `project_key` is the composition of both,
 and it is the thing this crate started as: `docket` and `midden` each assembled
@@ -94,8 +100,9 @@ extension — so `a.md` and `a.json` shared one temporary, and two writers to on
 truncated each other. Centralising it was also the moment to make it correct:
 a unique dot-prefixed temporary beside the destination, the parent directory synced
 after the rename (without which the entry is not durable, which is the whole point),
-and a drop guard so no error path leaves litter. It returns `io::Result`, and callers
-add their own context.
+and a drop guard so no error path leaves litter. Every filesystem call goes through
+`fs_err`, so the `io::Result` it returns already names the path; a caller's context
+supplies the verb.
 
 ## Adding a caller
 

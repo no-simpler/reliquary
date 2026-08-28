@@ -17,7 +17,9 @@ path = "src/lib.rs"
 # convenience — every relic that wants a project key pays for it.
 [dependencies]
 anstream.workspace = true
+camino.workspace = true
 clap.workspace = true
+fs-err.workspace = true
 jiff.workspace = true
 thiserror.workspace = true
 which.workspace = true

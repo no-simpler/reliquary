@@ -20,7 +20,7 @@ fn age_color(days: i64) -> Color {
 
 pub fn list(view: &View<'_>) -> Result<()> {
     match view.project {
-        Some(project) => println!("{}", project.display()),
+        Some(project) => println!("{}", project),
         None => println!("{}", plural(view.projects(), "project", "projects")),
     }
     if view.hits.is_empty() {
@@ -121,7 +121,7 @@ pub fn list(view: &View<'_>) -> Result<()> {
                     Cell::new(""),
                     Cell::new(""),
                     paint(
-                        Cell::new(format!("{error}\n{}", record.path.display())),
+                        Cell::new(format!("{error}\n{}", record.path)),
                         view.color,
                         Color::Red,
                     ),

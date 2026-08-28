@@ -2,7 +2,7 @@ pub mod agent;
 pub mod human;
 pub mod json;
 
-use std::path::Path;
+use camino::Utf8Path;
 
 use anyhow::Result;
 
@@ -16,7 +16,7 @@ pub const NO_TARGET: &str = "(no target)";
 pub struct View<'a> {
     /// The project a listing was narrowed to, when it was narrowed at all. The
     /// corpus is machine-wide, so the unnarrowed case is the ordinary one.
-    pub scope: Option<&'a Path>,
+    pub scope: Option<&'a Utf8Path>,
     pub records: &'a [Record],
     pub color: bool,
     /// One instant for the whole frame. A render that reaches for the clock per
@@ -46,7 +46,7 @@ impl Group<'_> {
 }
 
 pub struct Digest<'a> {
-    pub scope: Option<&'a Path>,
+    pub scope: Option<&'a Utf8Path>,
     pub groups: &'a [Group<'a>],
     pub color: bool,
     /// One instant for the whole frame, for the same reason [`View`] carries one.
@@ -104,7 +104,7 @@ pub fn row(position: usize, record: &Record, now: jiff::Timestamp) -> Row {
             ],
             title: error.to_string(),
             detail: String::new(),
-            notes: vec![record.path.display().to_string()],
+            notes: vec![record.path.to_string()],
         },
     }
 }
@@ -146,13 +146,9 @@ pub fn aligned(rows: &[Row], indent: &str) -> (Vec<String>, usize) {
 }
 
 /// The line every renderer opens with: what was read, and how much of it.
-pub fn heading(scope: Option<&Path>, count: usize) -> String {
+pub fn heading(scope: Option<&Utf8Path>, count: usize) -> String {
     match scope {
-        Some(project) => format!(
-            "midden {} — {}",
-            project.display(),
-            plural(count, "note", "notes")
-        ),
+        Some(project) => format!("midden {} — {}", project, plural(count, "note", "notes")),
         None => format!("midden — {}", plural(count, "note", "notes")),
     }
 }

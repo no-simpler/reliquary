@@ -2,7 +2,7 @@ pub mod agent;
 pub mod human;
 pub mod json;
 
-use std::path::Path;
+use camino::Utf8Path;
 
 use anyhow::Result;
 
@@ -18,7 +18,7 @@ const PROJECT_MAX: usize = 40;
 pub struct View<'a> {
     /// The project every item sits on, or nothing when the listing spans the
     /// machine and each row names its own.
-    pub project: Option<&'a Path>,
+    pub project: Option<&'a Utf8Path>,
     pub hits: &'a [Hit],
     pub color: bool,
     /// One instant for the whole frame. A render that reaches for the clock per
@@ -33,7 +33,7 @@ impl View<'_> {
     /// How many projects the listing covers, for the line that heads one
     /// spanning the machine.
     pub fn projects(&self) -> usize {
-        let mut seen: Vec<&Path> = Vec::new();
+        let mut seen: Vec<&Utf8Path> = Vec::new();
         for hit in self.hits {
             if !seen.contains(&hit.record.project.as_path()) {
                 seen.push(&hit.record.project);
@@ -95,7 +95,7 @@ pub fn row(position: usize, record: &Record, now: jiff::Timestamp) -> Row {
                 String::new(),
             ],
             tagline: error.to_string(),
-            notes: vec![record.path.display().to_string()],
+            notes: vec![record.path.to_string()],
         },
     }
 }
@@ -159,19 +159,18 @@ pub fn hit_row(hit: &Hit, name_project: bool, now: jiff::Timestamp) -> Row {
 }
 
 /// The project a roster row sits on, cut to fit a column.
-pub fn project_cell(project: &Path) -> String {
-    let home = std::env::var_os("HOME");
-    shorten(project, home.as_deref().map(Path::new))
+pub fn project_cell(project: &Utf8Path) -> String {
+    shorten(project, relic_core::path::home().as_deref())
 }
 
 /// Home becomes a tilde, and a path still too long loses its head rather than
 /// its tail: the leading directories are what every project on a machine has in
 /// common, and the trailing ones are what say which project this is.
-fn shorten(project: &Path, home: Option<&Path>) -> String {
+fn shorten(project: &Utf8Path, home: Option<&Utf8Path>) -> String {
     let text = match home.and_then(|home| project.strip_prefix(home).ok()) {
-        Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
-        Some(rest) => format!("~/{}", rest.display()),
-        None => project.display().to_string(),
+        Some(rest) if rest.as_str().is_empty() => "~".to_owned(),
+        Some(rest) => format!("~/{rest}"),
+        None => project.to_string(),
     };
     let width = text.chars().count();
     if width <= PROJECT_MAX {
@@ -206,20 +205,23 @@ mod tests {
 
     #[test]
     fn a_project_cell_shortens_home() {
-        let home = Path::new("/Users/example");
+        let home = Utf8Path::new("/Users/example");
         assert_eq!(
-            shorten(Path::new("/Users/example/Developer/halo"), Some(home)),
+            shorten(Utf8Path::new("/Users/example/Developer/halo"), Some(home)),
             "~/Developer/halo"
         );
-        assert_eq!(shorten(Path::new("/Users/example"), Some(home)), "~");
-        assert_eq!(shorten(Path::new("/opt/tools"), Some(home)), "/opt/tools");
-        assert_eq!(shorten(Path::new("/opt/tools"), None), "/opt/tools");
+        assert_eq!(shorten(Utf8Path::new("/Users/example"), Some(home)), "~");
+        assert_eq!(
+            shorten(Utf8Path::new("/opt/tools"), Some(home)),
+            "/opt/tools"
+        );
+        assert_eq!(shorten(Utf8Path::new("/opt/tools"), None), "/opt/tools");
     }
 
     #[test]
     fn a_project_cell_loses_its_head_when_it_must() {
-        let deep = Path::new("/Users/example/Developer/benefactor/services/offer/pillar/api");
-        let cell = shorten(deep, Some(Path::new("/Users/example")));
+        let deep = Utf8Path::new("/Users/example/Developer/benefactor/services/offer/pillar/api");
+        let cell = shorten(deep, Some(Utf8Path::new("/Users/example")));
         assert!(cell.starts_with('…'), "{cell}");
         assert!(cell.ends_with("pillar/api"), "{cell}");
         assert!(cell.chars().count() <= PROJECT_MAX, "{cell}");

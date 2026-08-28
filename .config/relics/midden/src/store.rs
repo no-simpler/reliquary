@@ -1,5 +1,5 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use camino::{Utf8Path, Utf8PathBuf};
+use fs_err as fs;
 
 use anyhow::{Context, Result, anyhow, bail};
 use relic_core::lock::{Lock, Wait};
@@ -31,12 +31,12 @@ pub const OPEN_CEILING: usize = 200;
 
 /// `~/.claude/midden`, or wherever `MIDDEN_ROOT` points. The override exists so
 /// tests and trial runs never touch the live corpus.
-pub fn corpus_root() -> Result<PathBuf> {
+pub fn corpus_root() -> Result<Utf8PathBuf> {
     if let Some(root) = std::env::var_os("MIDDEN_ROOT") {
-        return Ok(PathBuf::from(root));
+        return Ok(relic_core::path::utf8(root.into())?);
     }
-    let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is unset"))?;
-    Ok(PathBuf::from(home).join(".claude").join("midden"))
+    let home = relic_core::path::home().ok_or_else(|| anyhow!("HOME is unset or not UTF-8"))?;
+    Ok(home.join(".claude").join("midden"))
 }
 
 /// One note as it sits on disk. Parsing is total: a file whose metadata does
@@ -44,7 +44,7 @@ pub fn corpus_root() -> Result<PathBuf> {
 /// from a listing.
 pub struct Record {
     pub id: Id,
-    pub path: PathBuf,
+    pub path: Utf8PathBuf,
     /// Taken from the directory rather than from the metadata, so it is known
     /// even when the metadata does not parse.
     pub archived: bool,
@@ -58,7 +58,7 @@ impl Record {
 }
 
 pub struct Corpus {
-    pub root: PathBuf,
+    pub root: Utf8PathBuf,
 }
 
 impl Corpus {
@@ -68,13 +68,12 @@ impl Corpus {
         })
     }
 
-    fn shelf(&self, archived: bool) -> PathBuf {
+    fn shelf(&self, archived: bool) -> Utf8PathBuf {
         self.root.join(if archived { ARCHIVE } else { NOTES })
     }
 
     fn ensure_root(&self) -> Result<()> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("creating {}", self.root.display()))?;
+        fs::create_dir_all(&self.root)?;
         Ok(())
     }
 
@@ -147,11 +146,11 @@ impl Corpus {
         }
     }
 
-    fn note_path(&self, id: Id, slug: &str, archived: bool) -> PathBuf {
+    fn note_path(&self, id: Id, slug: &str, archived: bool) -> Utf8PathBuf {
         self.shelf(archived).join(format!("{id}-{slug}.md"))
     }
 
-    pub fn create(&self, note: &Note, body: &str) -> Result<PathBuf> {
+    pub fn create(&self, note: &Note, body: &str) -> Result<Utf8PathBuf> {
         let _guard = self.lock()?;
         let path = self.note_path(note.id, &slugify(&note.title), false);
         if let Some(parent) = path.parent() {
@@ -164,13 +163,13 @@ impl Corpus {
     /// Rewrites metadata in canonical order while preserving the body byte for
     /// byte, so the evidence a note was filed with is never rephrased by a
     /// later housekeeping pass.
-    pub fn save(&self, record: &Record, note: &Note) -> Result<PathBuf> {
+    pub fn save(&self, record: &Record, note: &Note) -> Result<Utf8PathBuf> {
         let _guard = self.lock()?;
         self.save_locked(record, note)
     }
 
     /// The same, for callers already holding the lock across a batch.
-    fn save_locked(&self, record: &Record, note: &Note) -> Result<PathBuf> {
+    fn save_locked(&self, record: &Record, note: &Note) -> Result<Utf8PathBuf> {
         let body = read_body(&record.path)?;
         write_atomic(&record.path, &render(note, &body)?)?;
         Ok(record.path.clone())
@@ -178,12 +177,12 @@ impl Corpus {
 
     /// Archive rather than delete: a note is an observation, and nothing can
     /// regenerate one after the session that made it is gone.
-    pub fn archive(&self, record: &Record) -> Result<PathBuf> {
+    pub fn archive(&self, record: &Record) -> Result<Utf8PathBuf> {
         let _guard = self.lock()?;
         self.archive_locked(record)
     }
 
-    fn archive_locked(&self, record: &Record) -> Result<PathBuf> {
+    fn archive_locked(&self, record: &Record) -> Result<Utf8PathBuf> {
         if record.archived {
             return Ok(record.path.clone());
         }
@@ -197,8 +196,7 @@ impl Corpus {
         if target.exists() {
             fs::remove_file(&target)?;
         }
-        fs::rename(&record.path, &target)
-            .with_context(|| format!("archiving {}", record.path.display()))?;
+        fs::rename(&record.path, &target).with_context(|| format!("archiving {}", record.path))?;
         Ok(target)
     }
 
@@ -226,7 +224,7 @@ impl Corpus {
             if !dry_run {
                 match action {
                     Action::Dropped => fs::remove_file(&record.path)
-                        .with_context(|| format!("removing {}", record.path.display()))?,
+                        .with_context(|| format!("removing {}", record.path))?,
                     Action::Archived => {
                         self.archive_locked(&record)?;
                     }
@@ -292,20 +290,25 @@ fn rank(record: &Record) -> (u8, u32, i64) {
 
 /// Which notes sit on one shelf, and where their files are — from directory
 /// entries alone. Nothing is opened, so a scan costs one readdir.
-fn filenames(dir: &Path) -> Vec<(Id, PathBuf)> {
+fn filenames(dir: &Utf8Path) -> Vec<(Id, Utf8PathBuf)> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut found = Vec::new();
     for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("md") {
+        // Named from the shelf rather than from the entry, so a name the
+        // filesystem holds but this program cannot spell drops out here — where
+        // it is one skipped file — rather than at a later conversion.
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let path = dir.join(&name);
+        if !path.is_file() || path.extension() != Some("md") {
             continue;
         }
-        let Some(id) = entry
-            .file_name()
-            .to_str()
-            .and_then(|name| name.split('-').next())
+        let Some(id) = name
+            .split('-')
+            .next()
             .and_then(|name| name.parse::<Id>().ok())
         else {
             continue;
@@ -317,9 +320,8 @@ fn filenames(dir: &Path) -> Vec<(Id, PathBuf)> {
 
 /// Atomic replacement lives in `relic-core`: both stores wrote this by hand, and
 /// both copies replaced the destination's extension to name their temporary.
-fn write_atomic(path: &Path, contents: &str) -> Result<()> {
-    relic_core::fs::write_atomic(path, contents)
-        .with_context(|| format!("replacing {}", path.display()))
+fn write_atomic(path: &Utf8Path, contents: &str) -> Result<()> {
+    relic_core::fs::write_atomic(path, contents).with_context(|| format!("replacing {}", path))
 }
 
 /// Splits a document into its metadata and its body. The body is returned
@@ -340,8 +342,8 @@ pub fn split(text: &str) -> Result<(&str, &str)> {
     bail!("unterminated metadata: no closing --- line")
 }
 
-pub fn load(path: &Path) -> Result<Note> {
-    let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+pub fn load(path: &Utf8Path) -> Result<Note> {
+    let text = fs::read_to_string(path)?;
     let (front, _) = split(&text)?;
     let note: Note = serde_yaml_ng::from_str(front).map_err(|e| {
         // The opening `---` occupies line one, so the parser's line number is
@@ -370,8 +372,8 @@ fn without_location(message: &str) -> &str {
     }
 }
 
-pub fn read_body(path: &Path) -> Result<String> {
-    let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+pub fn read_body(path: &Utf8Path) -> Result<String> {
+    let text = fs::read_to_string(path)?;
     let (_, body) = split(&text)?;
     Ok(body.to_owned())
 }

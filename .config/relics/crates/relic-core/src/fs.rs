@@ -17,29 +17,35 @@
 //!   directory entry could be lost to a crash even though the file's own bytes were
 //!   synced — which is the one thing the whole dance is for.
 //!
-//! No dependencies, per this crate's constraint: the unique name is composed from
-//! the process id and a counter rather than taken from `tempfile`.
+//! Every filesystem call goes through `fs_err`, so an error names the file it is
+//! about. Bare `io::Error` says "permission denied" and leaves the reader to guess
+//! which of the four paths in a write it meant.
 
-use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use camino::{Utf8Path, Utf8PathBuf};
+use fs_err as fs;
+use fs_err::{File, OpenOptions};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Removes the temporary unless it has been disarmed, so no error path leaks one.
-struct Scratch(Option<PathBuf>);
+struct Scratch {
+    path: Utf8PathBuf,
+    armed: bool,
+}
 
 impl Scratch {
     fn disarm(&mut self) {
-        self.0 = None;
+        self.armed = false;
     }
 }
 
 impl Drop for Scratch {
     fn drop(&mut self) {
-        if let Some(path) = self.0.take() {
-            let _ = fs::remove_file(path);
+        if self.armed {
+            let _ = fs::remove_file(&self.path);
         }
     }
 }
@@ -47,10 +53,12 @@ impl Drop for Scratch {
 /// Writes `contents` to `path`, atomically: a reader sees either the previous
 /// contents or the new ones, never a prefix of either.
 ///
-/// Returns [`io::Result`] rather than a richer error type because this crate takes
-/// no dependencies; callers add their own context.
-pub fn write_atomic(path: &Path, contents: &str) -> io::Result<()> {
-    let dir = path.parent().unwrap_or(Path::new("."));
+/// # Errors
+///
+/// Any [`io::Error`] the write, the rename or the temporary raises. It names the
+/// path it is about; callers add the verb.
+pub fn write_atomic(path: &Utf8Path, contents: &str) -> io::Result<()> {
+    let dir = path.parent().unwrap_or(Utf8Path::new("."));
     let (mut scratch, mut file) = create_scratch(path, dir)?;
 
     file.write_all(contents.as_bytes())?;
@@ -60,7 +68,7 @@ pub fn write_atomic(path: &Path, contents: &str) -> io::Result<()> {
     // The temporary is named after the destination, so the source of a rename is
     // always in the destination's own directory and the rename never crosses a
     // filesystem — the one condition under which it would stop being atomic.
-    fs::rename(scratch.0.as_ref().expect("armed"), path)?;
+    fs::rename(&scratch.path, path)?;
     scratch.disarm();
 
     // The bytes are durable and the entry is not until the directory is synced.
@@ -78,12 +86,10 @@ pub fn write_atomic(path: &Path, contents: &str) -> io::Result<()> {
 /// The leading dot keeps it out of any directory scan that globs or filters by
 /// extension — both stores enumerate their own directories, and a temporary that
 /// looks like a record is a record as far as they are concerned.
-fn create_scratch(path: &Path, dir: &Path) -> io::Result<(Scratch, File)> {
+fn create_scratch(path: &Utf8Path, dir: &Utf8Path) -> io::Result<(Scratch, File)> {
     let stem = path
         .file_name()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name to replace"))?
-        .to_string_lossy()
-        .into_owned();
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name to replace"))?;
     let pid = std::process::id();
 
     // The pid and counter make a collision possible only across processes that
@@ -98,7 +104,15 @@ fn create_scratch(path: &Path, dir: &Path) -> io::Result<(Scratch, File)> {
             .create_new(true)
             .open(&candidate)
         {
-            Ok(file) => return Ok((Scratch(Some(candidate)), file)),
+            Ok(file) => {
+                return Ok((
+                    Scratch {
+                        path: candidate,
+                        armed: true,
+                    },
+                    file,
+                ));
+            }
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(e) => last = Some(e),
         }
@@ -116,15 +130,16 @@ mod tests {
     use super::*;
     use std::sync::Barrier;
 
-    fn scratch_dir(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("relic-core-fs-{}-{}", name, std::process::id()));
+    fn scratch_dir(name: &str) -> Utf8PathBuf {
+        let dir = crate::path::utf8(std::env::temp_dir())
+            .expect("a temporary directory this program can name")
+            .join(format!("relic-core-fs-{}-{}", name, std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("scratch dir");
         dir
     }
 
-    fn leftovers(dir: &Path) -> Vec<String> {
+    fn leftovers(dir: &Utf8Path) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(dir)
             .expect("read scratch dir")
             .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())

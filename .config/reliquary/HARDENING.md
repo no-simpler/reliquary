@@ -108,6 +108,17 @@ step: the compiler verifies nothing about the domain. The standard is the point.
 >   exit-code arithmetic, never `LEVEL<TAB>message`.
 > - Newtypes are zero-cost. This buys static analysis, not runtime overhead.
 
+**Two ambient types the standard names outright**, because every relic meets both:
+
+- **Paths are `camino::Utf8Path`.** A relic's paths are program data — keys it compares, stores
+  and prints. `to_string_lossy` maps two different directories onto one key, and serde's
+  `PathBuf` refuses a path it cannot spell deep inside a save rather than at the edge.
+  `relic_core::path::utf8` is the parse; past it a path is a string by construction. `std::path`
+  stays where a path is an arbitrary filesystem entry being walked rather than data.
+- **Filesystem calls go through `fs_err`.** A bare `io::Error` says "permission denied" and
+  leaves the reader to guess which of a write's four paths it meant. With the path in the error,
+  a caller's own context supplies the verb instead of restating the path.
+
 **The boundary carve-out is real, and naive application is fragile.** Third-party schemas
 (`brew info --json=v2`, `docker inspect`) gain fields on every upgrade — deserialize them into
 typed structs, but never with `#[serde(deny_unknown_fields)]`. Reserve that for schemas **we**

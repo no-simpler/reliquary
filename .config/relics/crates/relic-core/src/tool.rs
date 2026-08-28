@@ -17,6 +17,8 @@
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+
+use camino::Utf8Path;
 use std::process::{Command, Stdio};
 
 /// Why a tool run did not produce an answer.
@@ -154,7 +156,7 @@ impl Tool {
 
     /// [`Tool::command`], run from `dir`.
     #[must_use]
-    pub fn in_dir(&self, dir: &Path) -> Command {
+    pub fn in_dir(&self, dir: &Utf8Path) -> Command {
         let mut command = self.command();
         command.current_dir(dir);
         command
@@ -259,7 +261,7 @@ mod tests {
         let Some(tool) = Tool::find("pwd") else {
             return;
         };
-        let dir = std::env::temp_dir();
+        let dir = crate::path::utf8(std::env::temp_dir()).expect("nameable");
         let output = tool
             .capture(&mut tool.in_dir(&dir))
             .expect("pwd runs anywhere");

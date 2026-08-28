@@ -13,6 +13,10 @@
 //!
 //! [`ui`] and [`fmt`] are the platform half: one answer to "who is reading this"
 //! and one spelling for the quantities that answer reports.
+//!
+//! Paths are [`camino::Utf8Path`]. A relic's paths are program data — keys it
+//! compares, stores and prints — and `to_string_lossy` maps two directories onto
+//! one key. [`path::utf8`] is the parse; past it, a path is a string.
 
 // A platform crate documents its whole surface: doctests only carry weight if
 // they exist. `lints.workspace = true` is exclusive of every other entry in a

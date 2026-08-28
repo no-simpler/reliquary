@@ -1,7 +1,7 @@
+use camino::{Utf8Path, Utf8PathBuf};
 use std::io::Read;
-use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail};
 
 use crate::cli::*;
 use crate::field;
@@ -23,7 +23,7 @@ pub struct Ctx {
     pub format: Format,
     pub color: bool,
     pub quiet: bool,
-    pub project: PathBuf,
+    pub project: Utf8PathBuf,
 }
 
 impl Ctx {
@@ -77,19 +77,19 @@ impl<'a> Mutation<'a> {
     /// Removes an item and records the removal, refusing unless history already
     /// holds it. The one place the git layer is load-bearing rather than
     /// additive: without it, closing would be deletion with nothing behind it.
-    fn close(&self, footprint: &Path, message: &str) -> Result<String> {
+    fn close(&self, footprint: &Utf8Path, message: &str) -> Result<String> {
         let Some(repo) = &self.repo else {
             bail!(
                 "closing needs git, because the depot's history is what keeps a closed item. \
                  Put git on PATH, or remove {} by hand",
-                footprint.display()
+                footprint
             );
         };
         if !repo.is_recorded(footprint)? {
             bail!(
                 "history does not hold {} yet, so closing it would lose it. \
                  Run docket doctor",
-                footprint.display()
+                footprint
             );
         }
         repo.remove(footprint, message)
@@ -145,7 +145,7 @@ fn resolve(ctx: &Ctx, raw: &str) -> Result<Record> {
         count => {
             let candidates: Vec<String> = found
                 .iter()
-                .map(|record| format!("  {} {}", record.id, record.project.display()))
+                .map(|record| format!("  {} {}", record.id, record.project))
                 .collect();
             bail!(
                 "{wanted} names {count} open items. Say which by id:\n{}",
@@ -181,16 +181,16 @@ pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
 pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
     let mutation = Mutation::open(ctx)?;
     let target = match &args.to {
-        Some(path) => relic_core::path::project_key(path),
+        Some(path) => relic_core::path::project_key(path)?,
         None => ctx.project.clone(),
     };
     if !target.exists() && !args.allow_missing {
         bail!(
             "{} does not exist. If you are about to create it, say so: \
              docket create {} --to {} --allow-missing ...",
-            target.display(),
+            target,
             args.kind,
-            target.display()
+            target
         );
     }
 
@@ -234,7 +234,7 @@ pub fn create(ctx: &Ctx, args: &CreateArgs) -> Result<()> {
     Ok(())
 }
 
-fn report_created(ctx: &Ctx, item: &Item, path: &Path, empty: bool) {
+fn report_created(ctx: &Ctx, item: &Item, path: &Utf8Path, empty: bool) {
     if ctx.format == Format::Json {
         let mut value = render::json::item_json(item);
         value["path"] = serde_json::json!(path);
@@ -244,7 +244,7 @@ fn report_created(ctx: &Ctx, item: &Item, path: &Path, empty: bool) {
         );
         return;
     }
-    println!("{}\t{}", item.id, path.display());
+    println!("{}\t{}", item.id, path);
     if empty {
         ctx.note("write the body at that path; the metadata above it belongs to docket");
     }
@@ -252,13 +252,12 @@ fn report_created(ctx: &Ctx, item: &Item, path: &Path, empty: bool) {
 
 pub fn show(ctx: &Ctx, args: &IdArgs) -> Result<()> {
     let record = resolve(ctx, &args.id)?;
-    let text = std::fs::read_to_string(&record.path)?;
+    let text = fs_err::read_to_string(&record.path)?;
     let (_, body) = crate::store::split(&text)?;
     if body.trim().is_empty() {
         ctx.note(&format!(
             "{} has no body yet — write one at {}",
-            record.id,
-            record.path.display()
+            record.id, record.path
         ));
         return Ok(());
     }
@@ -268,7 +267,7 @@ pub fn show(ctx: &Ctx, args: &IdArgs) -> Result<()> {
 
 pub fn path(ctx: &Ctx, args: &IdArgs) -> Result<()> {
     let record = resolve(ctx, &args.id)?;
-    println!("{}", record.path.display());
+    println!("{}", record.path);
     Ok(())
 }
 
@@ -329,13 +328,13 @@ pub fn set(ctx: &Ctx, args: &SetArgs) -> Result<()> {
 fn recover(record: &Record) -> Result<Item> {
     use serde_yaml_ng::Value;
 
-    let raw = std::fs::read_to_string(&record.path)?;
+    let raw = fs_err::read_to_string(&record.path)?;
     let (front, _) = crate::store::split(&raw)?;
     let map: Value = serde_yaml_ng::from_str(front).map_err(|e| {
         anyhow!(
             "{} is damaged past automatic repair ({e}). Edit it directly: {}",
             record.id,
-            record.path.display()
+            record.path
         )
     })?;
     let get = |key: &str| -> Option<String> {
@@ -480,21 +479,17 @@ pub fn r#move(ctx: &Ctx, args: &MoveArgs) -> Result<()> {
         .clone();
 
     let from = record.project.clone();
-    let target = relic_core::path::project_key(&args.to);
+    let target = relic_core::path::project_key(&args.to)?;
     if target == from {
-        bail!(
-            "{} is already on the docket of {}",
-            record.id,
-            from.display()
-        );
+        bail!("{} is already on the docket of {}", record.id, from);
     }
     if !target.exists() && !args.allow_missing {
         bail!(
             "{} does not exist. If you are about to create it, say so: \
              docket move {} --to {} --allow-missing",
-            target.display(),
+            target,
             record.id,
-            target.display()
+            target
         );
     }
 
@@ -515,8 +510,8 @@ pub fn r#move(ctx: &Ctx, args: &MoveArgs) -> Result<()> {
         crate::store::slug_for_path(&from),
         crate::store::slug_for_path(&target)
     ));
-    println!("{}\t{}", item.id, path.display());
-    ctx.note(&format!("{} moved to {}", item.id, target.display()));
+    println!("{}\t{}", item.id, path);
+    ctx.note(&format!("{} moved to {}", item.id, target));
     Ok(())
 }
 
@@ -540,12 +535,7 @@ pub fn promote(ctx: &Ctx, args: &PromoteArgs) -> Result<()> {
     item.updated = now();
     let path = ctx.depot.save(&record, &item)?;
     mutation.record(&format!("promote {}: {was} to {}", item.id, item.kind()));
-    println!(
-        "{}\t{}\t{}",
-        item.id,
-        render::kind_badge(&item),
-        path.display()
-    );
+    println!("{}\t{}\t{}", item.id, render::kind_badge(&item), path);
     ctx.note(&format!("{step}"));
     Ok(())
 }
@@ -579,7 +569,7 @@ pub fn relay(ctx: &Ctx, args: &RelayArgs) -> Result<()> {
         &format!("relay {} to {}", record.id, successor.id),
     )?;
 
-    println!("{}\t{}", successor.id, path.display());
+    println!("{}\t{}", successor.id, path);
     ctx.note(&format!(
         "{} closed at {commit}; {} carries the chain on to hop {}",
         record.id,
@@ -630,28 +620,23 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
             match &record.item {
                 Err(error) => report(format!(
                     "invalid  {} {}\n         {error}\n         repair: docket set {}",
-                    record.id,
-                    record.path.display(),
-                    record.id
+                    record.id, record.path, record.id
                 )),
                 Ok(item) => {
                     if item.project != project {
                         report(format!(
                             "misfiled {} claims {} but sits under {}",
-                            record.id,
-                            item.project.display(),
-                            project.display()
+                            record.id, item.project, project
                         ));
                     }
-                    let body = std::fs::read_to_string(&record.path).unwrap_or_default();
+                    let body = fs_err::read_to_string(&record.path).unwrap_or_default();
                     if crate::store::split(&body)
                         .map(|(_, b)| b.trim().is_empty())
                         .unwrap_or(false)
                     {
                         report(format!(
                             "empty    {} has no body — {}",
-                            record.id,
-                            record.path.display()
+                            record.id, record.path
                         ));
                     }
                     if !field::is_name(&item.name) {
@@ -722,7 +707,7 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
 /// Names are not unique, and nothing enforces that they should be — one is
 /// expected to be consumed before it recurs. Two open at once is still worth
 /// saying, because it is what makes a name stop resolving.
-fn duplicate_names(ctx: &Ctx, project: &Path) -> Vec<String> {
+fn duplicate_names(ctx: &Ctx, project: &Utf8Path) -> Vec<String> {
     let mut seen: Vec<(String, Vec<Id>)> = Vec::new();
     for record in ctx.depot.list(project) {
         let Ok(item) = &record.item else { continue };
@@ -759,7 +744,7 @@ fn history_problems(ctx: &Ctx) -> Vec<String> {
             found.push(format!(
                 "unversioned {} has no repository yet\n         \
                  the next command that writes will create one",
-                ctx.depot.root.display()
+                ctx.depot.root
             ));
         }
         return found;
@@ -769,7 +754,7 @@ fn history_problems(ctx: &Ctx) -> Vec<String> {
         found.push(format!(
             "nested   {} is a repository of its own\n         \
              git records it as a link rather than as content, so nothing under it has history",
-            nested.display()
+            nested
         ));
     }
 
@@ -781,7 +766,7 @@ fn history_problems(ctx: &Ctx) -> Vec<String> {
             found.push(format!(
                 "legacy   {} is a retired archive shelf\n         \
                  nothing lists it: move what it holds back, or delete it",
-                shelf.display()
+                shelf
             ));
         }
     }
@@ -790,11 +775,11 @@ fn history_problems(ctx: &Ctx) -> Vec<String> {
 }
 
 fn hook_is_wired() -> bool {
-    let Some(home) = std::env::var_os("HOME") else {
+    let Some(home) = relic_core::path::home() else {
         return true;
     };
-    let settings = PathBuf::from(home).join(".claude").join("settings.json");
-    let Ok(text) = std::fs::read_to_string(settings) else {
+    let settings = home.join(".claude").join("settings.json");
+    let Ok(text) = fs_err::read_to_string(settings) else {
         return true;
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
@@ -912,10 +897,11 @@ pub fn open_context(global: &Global) -> Result<Ctx> {
     } else {
         Format::from_process(global.format, "DOCKET_UI")
     };
-    let project = relic_core::path::project_key(&match &global.project {
+    let here = match &global.project {
         Some(path) => path.clone(),
-        None => std::env::current_dir().context("reading the working directory")?,
-    });
+        None => relic_core::path::cwd()?,
+    };
+    let project = relic_core::path::project_key(&here)?;
     Ok(Ctx {
         depot,
         format,

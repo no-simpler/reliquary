@@ -1,5 +1,5 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use camino::{Utf8Path, Utf8PathBuf};
+use fs_err as fs;
 
 use anyhow::{Context, Result, anyhow, bail};
 use relic_core::lock::{Lock, Wait};
@@ -15,27 +15,27 @@ const ORDER_STEP: i64 = 10;
 
 /// `~/.claude/docket`, or wherever `DOCKET_ROOT` points. The override exists so
 /// tests and trial runs never touch the live depot.
-pub fn depot_root() -> Result<PathBuf> {
+pub fn depot_root() -> Result<Utf8PathBuf> {
     if let Some(root) = std::env::var_os("DOCKET_ROOT") {
-        return Ok(PathBuf::from(root));
+        return Ok(relic_core::path::utf8(root.into())?);
     }
-    let home = std::env::var_os("HOME").ok_or_else(|| anyhow!("HOME is unset"))?;
-    Ok(PathBuf::from(home).join(".claude").join("docket"))
+    let home = relic_core::path::home().ok_or_else(|| anyhow!("HOME is unset or not UTF-8"))?;
+    Ok(home.join(".claude").join("docket"))
 }
 
 /// Claude Code's own project-directory convention, so a docket sits beside the
 /// transcript directory for the same project.
-pub fn slug_for_path(path: &Path) -> String {
-    path.to_string_lossy()
+pub fn slug_for_path(path: &Utf8Path) -> String {
+    path.as_str()
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
 }
 
-fn digest(path: &Path) -> String {
+fn digest(path: &Utf8Path) -> String {
     const ALPHABET: &[u8] = b"0123456789abcdefghjkmnpqrstvwxyz";
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in path.to_string_lossy().bytes() {
+    for byte in path.as_str().bytes() {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
@@ -53,8 +53,8 @@ pub struct Record {
     /// Taken from the directory rather than from the frontmatter, so it is
     /// known even when the frontmatter does not parse.
     pub kind: Kind,
-    pub path: PathBuf,
-    pub project: PathBuf,
+    pub path: Utf8PathBuf,
+    pub project: Utf8PathBuf,
     pub item: Result<Item, String>,
 }
 
@@ -65,7 +65,7 @@ impl Record {
 }
 
 pub struct Depot {
-    pub root: PathBuf,
+    pub root: Utf8PathBuf,
 }
 
 impl Depot {
@@ -78,24 +78,23 @@ impl Depot {
     /// The directory holding one project's items. The slug is lossy, so the
     /// sentinel decides: a slug already claimed by a different path falls back
     /// to a digest-suffixed sibling rather than merging two dockets.
-    pub fn project_dir(&self, project: &Path) -> PathBuf {
+    pub fn project_dir(&self, project: &Utf8Path) -> Utf8PathBuf {
         let slug = slug_for_path(project);
         let base = self.root.join(&slug);
         match fs::read_to_string(base.join(SENTINEL)) {
-            Ok(claimed) if claimed.trim() != project.to_string_lossy() => {
+            Ok(claimed) if claimed.trim() != project.as_str() => {
                 self.root.join(format!("{slug}--{}", digest(project)))
             }
             _ => base,
         }
     }
 
-    fn ensure_project(&self, project: &Path) -> Result<PathBuf> {
+    fn ensure_project(&self, project: &Utf8Path) -> Result<Utf8PathBuf> {
         let dir = self.project_dir(project);
-        fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
+        fs::create_dir_all(&dir)?;
         let sentinel = dir.join(SENTINEL);
         if !sentinel.exists() {
-            fs::write(&sentinel, format!("{}\n", project.display()))
-                .with_context(|| format!("writing {}", sentinel.display()))?;
+            fs::write(&sentinel, format!("{project}\n"))?;
         }
         Ok(dir)
     }
@@ -105,7 +104,7 @@ impl Depot {
     ///
     /// Always nested inside the depot lock, never taken around it — see the
     /// ordering rule in `git`.
-    fn lock(&self, project: &Path) -> Result<Lock> {
+    fn lock(&self, project: &Utf8Path) -> Result<Lock> {
         let dir = self.ensure_project(project)?;
         Ok(Lock::acquire(&dir.join(LOCK), Wait::INTERACTIVE)?)
     }
@@ -113,8 +112,7 @@ impl Depot {
     /// The coarse lock, held by a whole mutating command, so a snapshot and the
     /// change it brackets are one unit against a concurrent session.
     pub fn lock_depot(&self) -> Result<Lock> {
-        fs::create_dir_all(&self.root)
-            .with_context(|| format!("creating {}", self.root.display()))?;
+        fs::create_dir_all(&self.root)?;
         Ok(Lock::acquire(&self.root.join(LOCK), Wait::INTERACTIVE)?)
     }
 
@@ -126,7 +124,7 @@ impl Depot {
     }
 
     /// Every project that has a docket directory.
-    pub fn projects(&self) -> Vec<PathBuf> {
+    pub fn projects(&self) -> Vec<Utf8PathBuf> {
         let mut found = Vec::new();
         let Ok(entries) = fs::read_dir(&self.root) else {
             return found;
@@ -136,14 +134,14 @@ impl Depot {
                 continue;
             }
             if let Ok(claimed) = fs::read_to_string(entry.path().join(SENTINEL)) {
-                found.push(PathBuf::from(claimed.trim()));
+                found.push(Utf8PathBuf::from(claimed.trim()));
             }
         }
         found.sort();
         found
     }
 
-    pub fn list(&self, project: &Path) -> Vec<Record> {
+    pub fn list(&self, project: &Utf8Path) -> Vec<Record> {
         let dir = self.project_dir(project);
         let mut records = Vec::new();
         for kind in Kind::ALL {
@@ -155,7 +153,7 @@ impl Depot {
 
     /// Every place an open item can sit, for the scans that only need
     /// filenames. A closed item sits nowhere: history holds it.
-    fn shelves(&self, project: &Path) -> Vec<(Kind, PathBuf)> {
+    fn shelves(&self, project: &Utf8Path) -> Vec<(Kind, Utf8PathBuf)> {
         let dir = self.project_dir(project);
         Kind::ALL
             .into_iter()
@@ -188,7 +186,7 @@ impl Depot {
         if git::Repo::open(&self.root).is_some() {
             message.push_str(&format!(
                 ". If it was closed, history holds it: git -C {} log --diff-filter=D --name-only",
-                self.root.display()
+                self.root
             ));
         }
         bail!(message)
@@ -220,7 +218,7 @@ impl Depot {
     /// The readable half of a filename is the item's name, taken verbatim: the
     /// grammar admits nothing a filesystem minds. It is fixed at creation, so a
     /// rename never moves a file out from under an open session.
-    fn item_path(&self, item: &Item, slug: &str) -> PathBuf {
+    fn item_path(&self, item: &Item, slug: &str) -> Utf8PathBuf {
         let dir = self.project_dir(&item.project).join(item.kind().dir());
         match item.kind() {
             Kind::Spec => dir.join(format!("{}-{}", item.id, slug)).join(SPEC_FILE),
@@ -229,7 +227,7 @@ impl Depot {
     }
 
     /// Writes a brand new item and returns where its body should be authored.
-    pub fn create(&self, item: &Item, body: &str) -> Result<PathBuf> {
+    pub fn create(&self, item: &Item, body: &str) -> Result<Utf8PathBuf> {
         let _guard = self.lock(&item.project)?;
         let path = self.item_path(item, &item.name);
         if let Some(parent) = path.parent() {
@@ -246,7 +244,7 @@ impl Depot {
     /// item, so a rename never moves a file out from under an open session —
     /// which leaves the computed path differing from the current one exactly
     /// when a relocation is owed.
-    pub fn save(&self, record: &Record, item: &Item) -> Result<PathBuf> {
+    pub fn save(&self, record: &Record, item: &Item) -> Result<Utf8PathBuf> {
         let _guard = self.lock(&item.project)?;
         let body = read_body(&record.path)?;
         let target = self.item_path(item, &existing_slug(&record.path, record.id));
@@ -265,8 +263,7 @@ impl Depot {
             if let Some(parent) = to.parent() {
                 fs::create_dir_all(parent)?;
             }
-            fs::rename(&from, &to)
-                .with_context(|| format!("moving {} to {}", from.display(), to.display()))?;
+            fs::rename(&from, &to)?;
             write_atomic(&target, &render(item, &body)?)?;
         } else {
             if let Some(parent) = target.parent() {
@@ -280,21 +277,21 @@ impl Depot {
 
     /// Everything one item occupies: the file, or a spec's whole directory.
     /// Closing removes this and history is what keeps it; a move relocates it.
-    pub fn footprint(&self, record: &Record) -> Result<PathBuf> {
+    pub fn footprint(&self, record: &Record) -> Result<Utf8PathBuf> {
         self.footprint_at(record.kind, &record.path)
     }
 
-    fn footprint_at(&self, kind: Kind, path: &Path) -> Result<PathBuf> {
+    fn footprint_at(&self, kind: Kind, path: &Utf8Path) -> Result<Utf8PathBuf> {
         match kind {
             Kind::Spec => path
                 .parent()
-                .map(Path::to_owned)
-                .ok_or_else(|| anyhow!("{} has no directory", path.display())),
+                .map(Utf8Path::to_owned)
+                .ok_or_else(|| anyhow!("{path} has no directory")),
             _ => Ok(path.to_owned()),
         }
     }
 
-    pub fn next_order(&self, project: &Path) -> i64 {
+    pub fn next_order(&self, project: &Utf8Path) -> i64 {
         self.list(project)
             .iter()
             .map(Record::order)
@@ -306,7 +303,7 @@ impl Depot {
 
     /// Renumbers the whole project sparsely, so a later insertion rarely has to
     /// touch its neighbours.
-    pub fn resequence(&self, project: &Path, ordered: &[Id]) -> Result<usize> {
+    pub fn resequence(&self, project: &Utf8Path, ordered: &[Id]) -> Result<usize> {
         let _guard = self.lock(project)?;
         let records = self.list(project);
         let mut touched = 0;
@@ -331,14 +328,13 @@ impl Depot {
 /// The readable half of a filename: an item's name as it was written there.
 /// The one place that knows how a filename is built, so it also answers for an
 /// item whose metadata will not parse.
-pub fn existing_slug(path: &Path, id: Id) -> String {
-    let stem = if path.file_name().and_then(|n| n.to_str()) == Some(SPEC_FILE) {
-        path.parent().and_then(|p| p.file_name())
+pub fn existing_slug(path: &Utf8Path, id: Id) -> String {
+    let stem = if path.file_name() == Some(SPEC_FILE) {
+        path.parent().and_then(Utf8Path::file_name)
     } else {
         path.file_stem()
     };
-    stem.and_then(|s| s.to_str())
-        .and_then(|s| s.strip_prefix(&format!("{id}-")))
+    stem.and_then(|s| s.strip_prefix(&format!("{id}-")))
         .unwrap_or("item")
         .to_owned()
 }
@@ -346,28 +342,29 @@ pub fn existing_slug(path: &Path, id: Id) -> String {
 /// Which items sit on one shelf, and where their files are — from directory
 /// entries alone. Nothing is opened, so a scan across the whole depot costs one
 /// readdir per shelf.
-fn filenames(dir: &Path, kind: Kind) -> Vec<(Id, PathBuf)> {
+fn filenames(dir: &Utf8Path, kind: Kind) -> Vec<(Id, Utf8PathBuf)> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut found = Vec::new();
     for entry in entries.flatten() {
+        // Built from the shelf rather than from the entry, so a name the
+        // filesystem holds but this program cannot spell drops out here — where
+        // it is one skipped file — rather than at a later conversion.
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
         let path = match kind {
-            Kind::Spec => entry.path().join(SPEC_FILE),
-            _ => entry.path(),
+            Kind::Spec => dir.join(&name).join(SPEC_FILE),
+            _ => dir.join(&name),
         };
         if !path.is_file() {
             continue;
         }
-        if kind != Kind::Spec && path.extension().and_then(|e| e.to_str()) != Some("md") {
+        if kind != Kind::Spec && path.extension() != Some("md") {
             continue;
         }
-        let name = entry.file_name();
-        let Some(id) = name
-            .to_str()
-            .and_then(|n| n.split('-').next())
-            .and_then(|n| n.parse::<Id>().ok())
-        else {
+        let Some(id) = name.split('-').next().and_then(|n| n.parse::<Id>().ok()) else {
             continue;
         };
         found.push((id, path));
@@ -375,7 +372,7 @@ fn filenames(dir: &Path, kind: Kind) -> Vec<(Id, PathBuf)> {
     found
 }
 
-fn collect(dir: &Path, kind: Kind, project: &Path, out: &mut Vec<Record>) {
+fn collect(dir: &Utf8Path, kind: Kind, project: &Utf8Path, out: &mut Vec<Record>) {
     for (id, path) in filenames(dir, kind) {
         out.push(Record {
             id,
@@ -387,7 +384,7 @@ fn collect(dir: &Path, kind: Kind, project: &Path, out: &mut Vec<Record>) {
     }
 }
 
-fn remove_item(path: &Path) -> Result<()> {
+fn remove_item(path: &Utf8Path) -> Result<()> {
     if path.is_dir() {
         fs::remove_dir_all(path)?;
     } else if path.exists() {
@@ -398,9 +395,8 @@ fn remove_item(path: &Path) -> Result<()> {
 
 /// Atomic replacement lives in `relic-core`: both stores wrote this by hand, and
 /// both copies replaced the destination's extension to name their temporary.
-fn write_atomic(path: &Path, contents: &str) -> Result<()> {
-    relic_core::fs::write_atomic(path, contents)
-        .with_context(|| format!("replacing {}", path.display()))
+fn write_atomic(path: &Utf8Path, contents: &str) -> Result<()> {
+    relic_core::fs::write_atomic(path, contents).with_context(|| format!("replacing {path}"))
 }
 
 /// Splits a document into its frontmatter and its body. The body is returned
@@ -421,8 +417,8 @@ pub fn split(text: &str) -> Result<(&str, &str)> {
     bail!("unterminated metadata: no closing --- line")
 }
 
-pub fn load(path: &Path) -> Result<Item> {
-    let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+pub fn load(path: &Utf8Path) -> Result<Item> {
+    let text = fs::read_to_string(path)?;
     let (front, _) = split(&text)?;
     let wire: Wire = serde_yaml_ng::from_str(front).map_err(|e| {
         // The opening `---` occupies line one, so the parser's line number is
@@ -450,8 +446,8 @@ fn without_location(message: &str) -> &str {
     }
 }
 
-fn read_body(path: &Path) -> Result<String> {
-    let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+fn read_body(path: &Utf8Path) -> Result<String> {
+    let text = fs::read_to_string(path)?;
     let (_, body) = split(&text)?;
     Ok(body.to_owned())
 }
@@ -468,7 +464,7 @@ mod tests {
     #[test]
     fn slug_matches_the_claude_project_convention() {
         assert_eq!(
-            slug_for_path(Path::new("/Users/example/.config")),
+            slug_for_path(Utf8Path::new("/Users/example/.config")),
             "-Users-example--config"
         );
     }
@@ -489,7 +485,7 @@ mod tests {
 
     #[test]
     fn digests_differ_per_path() {
-        assert_ne!(digest(Path::new("/a/b")), digest(Path::new("/a/c")));
-        assert_eq!(digest(Path::new("/a/b")).len(), 4);
+        assert_ne!(digest(Utf8Path::new("/a/b")), digest(Utf8Path::new("/a/c")));
+        assert_eq!(digest(Utf8Path::new("/a/b")).len(), 4);
     }
 }

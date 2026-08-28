@@ -5,7 +5,7 @@
 //! per project, and an index would be a second copy of the truth that every
 //! write has to keep honest.
 
-use std::path::Path;
+use camino::Utf8Path;
 
 use anyhow::{Result, bail};
 
@@ -129,7 +129,7 @@ impl Filter {
 
         // A file that cannot be read is a miss. A listing that failed on one
         // damaged item would hide every sound one beside it.
-        let text = std::fs::read_to_string(&record.path).ok()?;
+        let text = fs_err::read_to_string(&record.path).ok()?;
         let body = match store::split(&text) {
             Ok((_, body)) => body,
             // Unsplittable, so there is no metadata to hold apart from a body.
@@ -143,7 +143,7 @@ impl Filter {
 }
 
 /// One project's docket, narrowed.
-pub fn project(depot: &Depot, project: &Path, filter: &Filter) -> Vec<Hit> {
+pub fn project(depot: &Depot, project: &Utf8Path, filter: &Filter) -> Vec<Hit> {
     narrow(depot.list(project), filter)
 }
 
@@ -202,7 +202,7 @@ fn holds(haystack: &str, needle: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use camino::Utf8PathBuf;
 
     use jiff::Timestamp;
 
@@ -219,7 +219,7 @@ mod tests {
             id: Id::mint(),
             name: name.to_owned(),
             tagline: format!("The tagline of {name}."),
-            project: PathBuf::from("/tmp/project"),
+            project: Utf8PathBuf::from("/tmp/project"),
             created: Timestamp::from_second(created).expect("a stamp in range"),
             updated: Timestamp::from_second(created).expect("a stamp in range"),
             order: 10,
@@ -235,8 +235,8 @@ mod tests {
         Record {
             id,
             kind,
-            path: PathBuf::from("/tmp/project").join(format!("{id}-NAME.md")),
-            project: PathBuf::from("/tmp/project"),
+            path: Utf8PathBuf::from("/tmp/project").join(format!("{id}-NAME.md")),
+            project: Utf8PathBuf::from("/tmp/project"),
             item,
         }
     }

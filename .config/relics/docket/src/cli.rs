@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use camino::Utf8PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -42,7 +42,7 @@ pub struct Global {
 
     /// Act on another project's docket.
     #[arg(long, global = true, value_name = "PATH")]
-    pub project: Option<PathBuf>,
+    pub project: Option<Utf8PathBuf>,
 
     /// Print only what was asked for.
     #[arg(short, long, global = true)]
@@ -186,7 +186,7 @@ pub struct CreateArgs {
 
     /// Open it for another project. Defaults to this one.
     #[arg(long, value_name = "PATH")]
-    pub to: Option<PathBuf>,
+    pub to: Option<Utf8PathBuf>,
 
     /// Allow a target directory that does not exist yet.
     #[arg(long)]
@@ -272,7 +272,7 @@ pub struct MoveArgs {
 
     /// The project to move it to.
     #[arg(long, value_name = "PATH")]
-    pub to: PathBuf,
+    pub to: Utf8PathBuf,
 
     /// Allow a target directory that does not exist yet.
     #[arg(long)]

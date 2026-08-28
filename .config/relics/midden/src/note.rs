@@ -1,5 +1,5 @@
+use camino::Utf8PathBuf;
 use std::fmt;
-use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use jiff::Timestamp;
@@ -112,9 +112,9 @@ pub struct Note {
     pub status: Status,
     pub occurrences: u32,
 
-    pub project: PathBuf,
+    pub project: Utf8PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<PathBuf>,
+    pub cwd: Option<Utf8PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -250,7 +250,7 @@ mod tests {
             target: target.map(str::to_owned),
             status: Status::Open,
             occurrences: 1,
-            project: PathBuf::from("/tmp/project"),
+            project: Utf8PathBuf::from("/tmp/project"),
             cwd: None,
             branch: None,
             session: None,

@@ -13,8 +13,8 @@
 //! always taken first. [`Repo`] never takes a lock itself; `cmd` holds the depot
 //! lock for the whole of a mutating command.
 
+use camino::{Utf8Path, Utf8PathBuf};
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -55,7 +55,7 @@ const EXCLUDE: &str = ".lock\n*.tmp\n";
 /// the depot is one tree and its commits read better in one log.
 pub struct Repo {
     git: Git,
-    root: PathBuf,
+    root: Utf8PathBuf,
 }
 
 impl Repo {
@@ -65,7 +65,7 @@ impl Repo {
     /// Creation is also the migration: the tree is committed as it stands, and
     /// only then is the retired archive shelf removed, so what sat on it is in
     /// history before it leaves the disk.
-    pub fn ensure(root: &Path) -> Result<Option<Repo>> {
+    pub fn ensure(root: &Utf8Path) -> Result<Option<Repo>> {
         let Some(git) = detect() else {
             return Ok(None);
         };
@@ -85,7 +85,7 @@ impl Repo {
 
     /// Opens only an existing repository, and never creates one. Reads use this
     /// so a listing is never the thing that writes a repository into the depot.
-    pub fn open(root: &Path) -> Option<Repo> {
+    pub fn open(root: &Utf8Path) -> Option<Repo> {
         let git = detect()?;
         root.join(".git").exists().then(|| Repo {
             git,
@@ -99,7 +99,7 @@ impl Repo {
             .at(&self.root)
             .args(args)
             .output()
-            .with_context(|| format!("running git in {}", self.root.display()))?;
+            .with_context(|| format!("running git in {}", self.root))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             bail!("git failed: {}", stderr.trim());
@@ -119,11 +119,11 @@ impl Repo {
             .args(["-c", "init.defaultBranch=main", "init", "--quiet"])
             .arg(&self.root)
             .output()
-            .with_context(|| format!("initialising {}", self.root.display()))?;
+            .with_context(|| format!("initialising {}", self.root))?;
         if !created.status.success() {
             bail!(
                 "git could not initialise {}: {}",
-                self.root.display(),
+                self.root,
                 String::from_utf8_lossy(&created.stderr).trim()
             );
         }
@@ -132,10 +132,9 @@ impl Repo {
         }
         let exclude = self.root.join(".git").join("info").join("exclude");
         if let Some(parent) = exclude.parent() {
-            std::fs::create_dir_all(parent)?;
+            fs_err::create_dir_all(parent)?;
         }
-        std::fs::write(&exclude, EXCLUDE)
-            .with_context(|| format!("writing {}", exclude.display()))?;
+        fs_err::write(&exclude, EXCLUDE).with_context(|| format!("writing {}", exclude))?;
 
         self.snapshot("init depot")?;
         self.retire_archive_shelves()?;
@@ -146,7 +145,7 @@ impl Repo {
     /// already recorded everything that sat on it.
     fn retire_archive_shelves(&self) -> Result<()> {
         let mut shelves = Vec::new();
-        let Ok(entries) = std::fs::read_dir(&self.root) else {
+        let Ok(entries) = fs_err::read_dir(&self.root) else {
             return Ok(());
         };
         for entry in entries.flatten() {
@@ -170,7 +169,7 @@ impl Repo {
             ])?;
             // Untracked leftovers survive `git rm --ignore-unmatch`, and the
             // shelf must be gone from the disk either way.
-            let _ = std::fs::remove_dir_all(shelf);
+            let _ = fs_err::remove_dir_all(shelf);
         }
         self.commit("migrate: retire the archive shelf")?;
         Ok(())
@@ -216,7 +215,7 @@ impl Repo {
 
     /// Whether history already holds this path exactly as it sits on disk. The
     /// precondition for removing it.
-    pub fn is_recorded(&self, path: &Path) -> Result<bool> {
+    pub fn is_recorded(&self, path: &Utf8Path) -> Result<bool> {
         let Ok(relative) = path.strip_prefix(&self.root) else {
             return Ok(false);
         };
@@ -242,10 +241,10 @@ impl Repo {
     /// Everything else outstanding is staged first, so a removal that comes
     /// paired with a write — a relay minting its successor — lands in one
     /// commit rather than leaving half the exchange unrecorded.
-    pub fn remove(&self, path: &Path, message: &str) -> Result<String> {
+    pub fn remove(&self, path: &Utf8Path, message: &str) -> Result<String> {
         let relative = path
             .strip_prefix(&self.root)
-            .map_err(|_| anyhow!("{} is not inside the depot", path.display()))?;
+            .map_err(|_| anyhow!("{} is not inside the depot", path))?;
         self.run(&["add", "-A"])?;
         self.run(&[
             OsStr::new("rm"),
@@ -255,7 +254,7 @@ impl Repo {
             relative.as_os_str(),
         ])?;
         self.commit(message)?
-            .ok_or_else(|| anyhow!("git recorded no removal for {}", path.display()))
+            .ok_or_else(|| anyhow!("git recorded no removal for {}", path))
     }
 
     /// Every id any commit ever added, so a closed item's id is never minted a
@@ -282,7 +281,7 @@ impl Repo {
     /// Directories inside the depot that hold a repository of their own. Git
     /// records one as a gitlink rather than as content, so an item under it
     /// would have no history at all.
-    pub fn nested_repositories(&self) -> Vec<PathBuf> {
+    pub fn nested_repositories(&self) -> Vec<Utf8PathBuf> {
         let mut found = Vec::new();
         walk(&self.root, 0, &mut found);
         found
@@ -299,21 +298,26 @@ fn ids_in(path: &str) -> Vec<Id> {
         .collect()
 }
 
-fn walk(dir: &Path, depth: usize, found: &mut Vec<PathBuf>) {
+fn walk(dir: &Utf8Path, depth: usize, found: &mut Vec<Utf8PathBuf>) {
     // Deep enough for a spec's own subdirectories, shallow enough that the
     // check stays free.
     if depth > 4 {
         return;
     }
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    let Ok(entries) = fs_err::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
-        let path = entry.path();
+        // Named from the parent, so an entry this program cannot spell is one
+        // skipped directory rather than a conversion failure further down.
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let path = dir.join(&name);
         if !path.is_dir() {
             continue;
         }
-        if path.file_name() == Some(OsStr::new(".git")) {
+        if name == ".git" {
             if depth > 0 {
                 found.push(path);
             }

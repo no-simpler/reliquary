@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use camino::Utf8PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -43,7 +43,7 @@ pub struct Global {
     /// Narrow to one project. The corpus is machine-wide by default, which is
     /// what lets one cause show up as one note across every repository.
     #[arg(long, global = true, value_name = "PATH")]
-    pub project: Option<PathBuf>,
+    pub project: Option<Utf8PathBuf>,
 
     /// Print only what was asked for.
     #[arg(short, long, global = true)]
@@ -186,7 +186,7 @@ pub struct FileArgs {
 
     /// File it against another project. Defaults to the one you are in.
     #[arg(long, value_name = "PATH")]
-    pub to: Option<PathBuf>,
+    pub to: Option<Utf8PathBuf>,
 }
 
 #[derive(Args)]

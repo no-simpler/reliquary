@@ -1,6 +1,6 @@
+use camino::{Utf8Path, Utf8PathBuf};
 use std::collections::BTreeMap;
 use std::io::Read;
-use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 
@@ -21,9 +21,9 @@ pub struct Ctx {
     pub color: bool,
     pub quiet: bool,
     /// The project a new note is filed against.
-    pub project: PathBuf,
+    pub project: Utf8PathBuf,
     /// The project a listing is narrowed to, when --project was given.
-    pub scope: Option<PathBuf>,
+    pub scope: Option<Utf8PathBuf>,
 }
 
 impl Ctx {
@@ -99,7 +99,7 @@ pub fn list(ctx: &Ctx, args: &ListArgs) -> Result<()> {
 
 pub fn file(ctx: &Ctx, args: &FileArgs) -> Result<()> {
     let project = match &args.to {
-        Some(path) => relic_core::path::project_key(path),
+        Some(path) => relic_core::path::project_key(path)?,
         None => ctx.project.clone(),
     };
 
@@ -126,7 +126,7 @@ pub fn file(ctx: &Ctx, args: &FileArgs) -> Result<()> {
         return report(ctx, &folded, &existing.path, Filed::Folded);
     }
 
-    let cwd = std::env::current_dir().context("reading the working directory")?;
+    let cwd = relic_core::path::cwd()?;
     let note = Note {
         id: ctx.corpus.mint_id(),
         kind: args.kind,
@@ -157,7 +157,7 @@ enum Filed {
     Folded,
 }
 
-fn report(ctx: &Ctx, note: &Note, path: &Path, how: Filed) -> Result<()> {
+fn report(ctx: &Ctx, note: &Note, path: &Utf8Path, how: Filed) -> Result<()> {
     if ctx.format == Format::Json {
         let mut value = render::json::note_json(note);
         value["path"] = serde_json::json!(path);
@@ -189,7 +189,7 @@ pub fn show(ctx: &Ctx, args: &IdArgs) -> Result<()> {
 
 pub fn path(ctx: &Ctx, args: &IdArgs) -> Result<()> {
     let record = ctx.corpus.find(parse_id(&args.id)?)?;
-    println!("{}", record.path.display());
+    println!("{}", record.path);
     Ok(())
 }
 
@@ -203,7 +203,7 @@ pub fn set(ctx: &Ctx, args: &SetArgs) -> Result<()> {
             "{} will not parse: {error}\n\
              repair it in {} — midden help metadata lists the keys",
             record.id,
-            record.path.display()
+            record.path
         ),
     };
 
@@ -248,8 +248,8 @@ pub fn set(ctx: &Ctx, args: &SetArgs) -> Result<()> {
     if let Some(raw) = &args.body {
         let body = field::body(&text(raw)?)?;
         let rendered = crate::store::render(&note, &body)?;
-        std::fs::write(&record.path, rendered)
-            .with_context(|| format!("writing {}", record.path.display()))?;
+        fs_err::write(&record.path, rendered)
+            .with_context(|| format!("writing {}", record.path))?;
     } else {
         ctx.corpus.save(&record, &note)?;
     }
@@ -289,7 +289,7 @@ pub fn archive(ctx: &Ctx, args: &IdArgs) -> Result<()> {
         bail!("{} is already archived", record.id);
     }
     let target = ctx.corpus.archive(&record)?;
-    println!("{}", target.display());
+    println!("{}", target);
     ctx.say(&format!("midden: archived {}", record.id));
     Ok(())
 }
@@ -412,8 +412,7 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
         match &record.note {
             Err(error) => report(format!(
                 "invalid  {} will not parse: {error}\n         {}",
-                record.id,
-                record.path.display()
+                record.id, record.path
             )),
             Ok(note) => {
                 if note.status == Status::Open {
@@ -481,7 +480,7 @@ fn absent_target(target: &str) -> Option<String> {
     }
     // A target may point into a file, so only the leading path is tested.
     let head = target.split_whitespace().next().unwrap_or(target);
-    let resolved = relic_core::path::resolve_lenient(Path::new(head));
+    let resolved = relic_core::path::resolve_lenient(Utf8Path::new(head)).ok()?;
     (!resolved.exists()).then(|| head.to_owned())
 }
 
@@ -525,16 +524,17 @@ pub fn open_context(global: &Global) -> Result<Ctx> {
     } else {
         Format::from_process(global.format, "MIDDEN_UI")
     };
-    let cwd = std::env::current_dir().context("reading the working directory")?;
+    let cwd = relic_core::path::cwd()?;
     Ok(Ctx {
         corpus,
         format,
         color: global.color.use_color(format),
         quiet: global.quiet,
-        project: relic_core::path::project_key(&cwd),
+        project: relic_core::path::project_key(&cwd)?,
         scope: global
             .project
             .as_ref()
-            .map(|path| relic_core::path::project_key(path)),
+            .map(|path| relic_core::path::project_key(path))
+            .transpose()?,
     })
 }

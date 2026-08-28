@@ -1,5 +1,5 @@
+use camino::Utf8PathBuf;
 use std::fmt;
-use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use jiff::Timestamp;
@@ -104,13 +104,13 @@ pub struct Item {
     pub id: Id,
     pub name: String,
     pub tagline: String,
-    pub project: PathBuf,
+    pub project: Utf8PathBuf,
     pub created: Timestamp,
     pub updated: Timestamp,
     pub order: i64,
     pub rung: Rung,
     pub blocked: Option<String>,
-    pub origin: Option<PathBuf>,
+    pub origin: Option<Utf8PathBuf>,
     pub tags: Vec<String>,
 }
 
@@ -262,7 +262,7 @@ pub struct Wire {
     pub kind: Kind,
     pub name: String,
     pub tagline: String,
-    pub project: PathBuf,
+    pub project: Utf8PathBuf,
     pub created: Timestamp,
     pub updated: Timestamp,
     pub order: i64,
@@ -277,7 +277,7 @@ pub struct Wire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocked: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin: Option<PathBuf>,
+    pub origin: Option<Utf8PathBuf>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
 }
