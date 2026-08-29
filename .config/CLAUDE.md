@@ -114,7 +114,6 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `timeout` - GNU-style `timeout(1)` shim, so scripts can rely on it being present
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm, relics, relic build cache); writes timestamp to `~/.local/state/up/last_upped_at`
 - `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt; tries `ske read` first, falls back to `op read` (never hard-depend — it decrypts the attic `ske` lives in)
-- `ske-prompt` - prints the open `ske` Touch ID window for the oh-my-posh right prompt; silent when closed (`sh`, not bash: `$BASH_ENV` would cost ~230ms per render)
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below); also reachable as `yadm` via the `~/.config/bin/yadm` symlink (shadows brew's yadm — see "Path availability")
 - Additional encrypted scripts may exist (see `~/.config/yadm/encrypt`)
 
@@ -280,8 +279,9 @@ sessions stop needing a human at the fingerprint sensor. Attic relic (`~/.config
 full reference in its `CLAUDE.md`.
 
 ```
-ske              window state      ske 1h    open (or re-arm to) 1 hour
+ske              window state      ske 1h      open (or re-arm to) 1 hour
 ske off          close now         ske doctor  wiring + registry health
+ske prompt       the prompt segment, or nothing at all
 ```
 
 `ske <duration>` is **absolute** — it always means "end at `now + duration`", never "extend
@@ -374,7 +374,7 @@ Reachable as `yadm` in **every** shell — `~/.config/bin/yadm` is a symlink to 
 - `yadm check` - compares archive SHA256 to detect drift
 - `yadm verify` - decrypts archive to tmpdir and diffs against disk
 - `yadm ls-all` - complete tracked set: `yadm ls-files` (plaintext) + archive listing (`decrypt -l`, Touch ID)
-- `yadm doctor` - dotfiles health self-check. The machine's checks are `assay`'s and reached by running it; what stays here is what is genuinely yadm's — encrypted-archive drift, and the `--full` archive verify — plus one `ske doctor` call, the only check `assay` cannot collect until `ske` answers `doctor --format json`. Detect-only and Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
+- `yadm doctor` - dotfiles health self-check. The machine's checks are `assay`'s and reached by running it; what stays here is what is genuinely yadm's — encrypted-archive drift, and the `--full` archive verify. Detect-only and Touch-ID-free. `--full` adds the `verify` deep check; `--quiet`/`-q` runs silently and prints the report only on a failure/warning (flags compose). Used by the dream pre-pass (`~/.config/.claude/DREAM.md`) and, in `--quiet` form, by `yadm update`
 - `yadm update` - `pull --ff-only`, then `doctor --quiet` (silent when healthy; surfaces drift/regressions the pull introduced — the quiet doctor already covers the encrypted-archive check)
 - All other commands pass through to real yadm, followed by an encrypted-files check
 

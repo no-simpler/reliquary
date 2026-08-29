@@ -56,10 +56,11 @@ const PROBE: &[&str] = &["doctor", "--format", "json"];
 /// its own finding to make, in its own report, and not something this station
 /// can wait out.
 ///
-/// Measured 2026-08-28: `ske doctor` runs for **20.3 s** and never speaks the
-/// protocol anyway. A budget generous enough to sit through it would put twenty
-/// seconds onto every standing audit to learn nothing, which is how a station
-/// gets switched off.
+/// The budget is what made `ske` fit. Measured 2026-08-28 it ran for **20.3 s**,
+/// and 89.65 s by the time it was ported; a budget generous enough to sit
+/// through that would have put a minute onto every standing audit, which is how
+/// a station gets switched off. It answers in ~130 ms now, and it is the
+/// protocol's first speaker.
 const BUDGET: Duration = Duration::from_secs(2);
 
 /// The station.

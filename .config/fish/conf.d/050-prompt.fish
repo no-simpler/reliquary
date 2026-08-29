@@ -16,7 +16,7 @@ function _ske_window --on-event fish_prompt
     set -l sock "$HOME/.local/state/ske/agent.sock"
     test -n "$SKE_STATE"; and set sock "$SKE_STATE/agent.sock"
     if test -S "$sock"
-        set -gx SKE_WINDOW (~/.config/bin/ske-prompt 2>/dev/null)
+        set -gx SKE_WINDOW (ske prompt 2>/dev/null)
     else
         set -e SKE_WINDOW
     end

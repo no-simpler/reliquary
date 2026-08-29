@@ -115,9 +115,12 @@ depth two. The number is honest for the same reason: it is what the path costs."
 [[path]]
 name = "ske-doctor"
 command = ["ske", "doctor"]
-budget_ms = 20300
-measured = "2026-08-27"
-note = "Two thirds of yadm doctor's total, and the single largest item in it."
+budget_ms = 340
+measured = "2026-08-29"
+note = """Was 20300ms, and 89650ms by the time it was ported: its op:// sweep read
+141,571 files under two cargo `target/` trees as text, so it got slower the more the
+machine was built on. The sweep has a boundary now. This also puts it inside assay's
+2s registry-adapter probe budget, which is what lets the aggregator collect it."""
 
 [[path]]
 name = "shell-lint"

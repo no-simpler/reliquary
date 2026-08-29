@@ -10,10 +10,11 @@
 ## A text segment reading .Env is the supported way to surface external state.
 ##
 ## Cheap by construction: the common case (no window) is a single [[ -S ]] test,
-## and only pays for ske-prompt (~10ms) once a ske agent socket actually exists.
+## and only pays for `ske prompt` once a ske agent socket actually exists. A ske
+## that is not on PATH renders nothing, which is what pure decoration must do.
 _ske_window() {
     if [[ -S "${SKE_STATE:-$HOME/.local/state/ske}/agent.sock" ]]; then
-        export SKE_WINDOW="$($HOME/.config/bin/ske-prompt 2>/dev/null)"
+        export SKE_WINDOW="$(ske prompt 2>/dev/null)"
     else
         unset SKE_WINDOW
     fi

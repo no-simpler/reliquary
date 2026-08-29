@@ -8,7 +8,7 @@
 ## was removed upstream and silently renders nothing).
 _ske_window() {
     if [ -S "${SKE_STATE:-$HOME/.local/state/ske}/agent.sock" ]; then
-        SKE_WINDOW="$("$HOME/.config/bin/ske-prompt" 2>/dev/null)"
+        SKE_WINDOW="$(ske prompt 2>/dev/null)"
         export SKE_WINDOW
     else
         unset SKE_WINDOW

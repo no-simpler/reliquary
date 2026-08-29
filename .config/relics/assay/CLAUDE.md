@@ -206,7 +206,7 @@ are not silent, because in both something is wrong rather than absent:
 | decision | why |
 | --- | --- |
 | Probe every registered name; do not require an opt-in declaration | it is what the design locked ("a registered binary with no `doctor` subcommand is a skip, not a finding"), and it needs no coordination with repositories this one does not own. Checked rather than assumed, 2026-08-28: of the eleven binaries this workspace does not own, ten have no `doctor` at all and the eleventh — halo's `dewey` — has one whose own test is `test_doctor_reports_and_never_writes`, and which refuses `--format json` with a usage error. Nothing is mutated by asking |
-| A **2-second** budget, not a generous one | a health report is data the program already holds, and a binary without the subcommand refuses in milliseconds. `ske doctor` measures 20.3 s and never speaks the protocol anyway, so a budget wide enough to sit through it would put twenty seconds onto every standing audit to learn nothing — which is how a station gets switched off |
+| A **2-second** budget, not a generous one | a health report is data the program already holds, and a binary without the subcommand refuses in milliseconds. `ske doctor` measured 20.3 s when this landed and 89.65 s by the time it was ported, so a budget wide enough to sit through it would have put a minute onto every standing audit — which is how a station gets switched off. It answers in ~130 ms now, as the protocol's first speaker |
 | The probes run at once | twenty-one process starts, several of them interpreters. Serially that is seconds on the path `yadm update` and the dream pre-pass both take. Order is restored afterwards, because a report that reshuffles between runs cannot be diffed |
 | A report is refused unless its station is the binary's name or a name under it (`docket`, `docket-git`) | findings are minted through a `StationId` locally so a station cannot stamp another's name on its own report. Across a process boundary that cannot be enforced, only checked, and this is the check |
 | A registered name that is not on `PATH` is silent here | registered-and-absent is real drift and it is `relic doctor`'s finding to report. This station only collects, and A1 introduces no new checks |
@@ -250,7 +250,7 @@ Where each section went:
 | shell lint and format | **`shell-lint`** |
 | relic build cache | **`relic-cache`** |
 | encrypted archive drift · archive vs disk verification | **stays in the wrapper.** Genuinely dotfile-specific, and the second is the one Touch-ID check |
-| ske wiring | the registry adapter, once `ske` speaks the protocol — which is migration ④. Until then the wrapper keeps one call, because losing it would lose the check that a broken `gpg.ssh.program` shim breaks every commit |
+| ske wiring | **the registry adapter.** `ske` is the protocol's first speaker, so its registry, ssh routing, git signing and vector sweep arrive as findings like any other — including the one that matters most, that a broken `gpg.ssh.program` shim breaks every commit |
 
 ## Deviations from `yadm doctor`'s shell sections
 
@@ -628,5 +628,8 @@ station. Depth two, and the number is honest for the same reason: it is what the
 costs today, `assay` included, which is most of what it now is.
 
 **It found a live regression on its first run**: `ske doctor` at 80.6 s against a
-budget of 20.3 s recorded one day earlier — 4×, past the tolerance. Migration ④ is
-what fixes it; until then the ratchet is the only thing that says so out loud.
+budget of 20.3 s recorded one day earlier — 4×, past the tolerance. Nothing else on
+the machine said so, and the cause was this programme's own: two cargo `target/`
+trees inside a sweep with no boundary. Migration ④ closed it at 130 ms, and lowered
+the budget in the same commit, which is the ratchet working in the direction it is
+usually not asked to.
