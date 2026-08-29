@@ -100,11 +100,15 @@ after a table header to that table, so a flat manifest would capture the first
 future `[section]`'s keys into itself. Unknown keys inside `[relic]` are refused;
 unknown *tables* are left alone, which is what the namespace buys.
 
-`~/.config/reliquary/lib/relic.sh` is the only reader — `relic::load_manifest`
-for one relic, `relic::_manifest_read` for many at once, both parsing through
-`lib/manifest.py`. Every consumer that has to decide whether a directory is a
-relic at all asks `relic::has_manifest`: the `relic` CLI, the bootstrap publish
-snippet, `up`. One predicate, so no two of them can disagree.
+**The `relic` binary is the only reader**, through `relic::manifest`, and it is
+the only thing that decides whether a directory is a relic at all. One reader
+and one predicate, so no two consumers can disagree about what a relic is.
+
+That used to be a shell library shelling out to a `python3` reader for
+`tomllib`, which is how a machine whose `python3` was 3.9 failed every publish
+and reported it as a missing manifest field. Nothing outside the binary parses
+a manifest now — not the bootstrap seed, which reads none, and not `up`, which
+asks the binary.
 
 ### Entrypoints
 
@@ -245,168 +249,42 @@ So when the first attic relic becomes Rust: give `~/.config/attic/` its own
 workspace, depend on `relic-core` by path across the lanes, and **add a `target/`
 exclusion to `~/.config/yadm/encrypt` before that first build exists**, not after.
 
-## Shared library: `~/.config/reliquary/lib/relic.sh`
+## The bootstrap seed: `~/.config/reliquary/lib/relic.sh`
 
-Thin defaults so most relics need zero `scripts/` overrides.
+**The bootstrap paradox**: the thing that builds and publishes the first Rust
+binary cannot itself be a Rust binary. That is a property of the path between a
+bare machine and its first executable, not a preference a faster toolchain could
+overturn — which is why this file survived a programme that rewrote everything
+around it, and why it is the only shell left in this system.
+
+It is no longer a library. It is the shortest thing that produces **one** binary
+and gets out of the way:
 
 ```bash
 source ~/.config/reliquary/lib/relic.sh
-relic::publish ~/.config/relics/<name>     # check_deps, then publish by RUNTIME
-relic::test    ~/.config/relics/<name>     # dispatches by RUNTIME
-relic::update  ~/.config/relics/<name>     # dispatches by RUNTIME
-relic::cover   ~/.config/relics/<name>     # rust only — coverage + the ratchet
-relic::mutants ~/.config/relics/<name>     # rust only — mutation testing
+relic::seed    # cargo build relic → install_on_path → `relic publish --all`
 ```
 
-**Fast loop, slow gate.** `test` is the loop and must stay fast, because agents route
-around slow commands: format, then lint, then the suite. `cover` and `mutants` are
-separate, deliberate invocations run at wave boundaries. The bash branch of `test`
-runs `assay shell-lint` first for the same reason the rust branch runs `fmt` first —
-cheapest station reports first, and bash has nothing else that can be verified
-statically. It runs over the whole tracked bash population, not the one relic: the
-station's suppression ratchet is an equality, and a subset cannot tell a file with no
-directives from one it was not asked about.
+Two properties are load-bearing. It reads **no manifest and starts no
+interpreter but the one running it**, so nothing on the path to the first binary
+can be taken down by a stale `python3`. And it is **bash-3.2-safe**, because the
+bootstrap sources it into the stock macOS shell, which the modern bash installed
+minutes earlier does not upgrade.
 
-For `rust` the defaults are the whole story, so no Rust relic carries a
-`scripts/publish.sh` or `scripts/test.sh`: publish builds then installs from the
-workspace `target/`, test runs format → clippy at `-D warnings` → the suite
-(fail-fast in ascending cost), and update is publish. Only a relic with a genuine
-periodic job of its own keeps a `scripts/update.sh` — `docket` packs its depot,
-`midden` prunes its corpus — and it calls `relic::publish` rather than
-reimplementing it.
-
-Override any default by dropping an executable `scripts/<op>.sh` into the
-relic dir — the lib will exec it instead.
-
-**Tests run against the live machine unless a relic stops them.** A relic that
-owns state redirects both its own state root *and* `HOME` at a scratch tree in
-every test — the first keeps the suite out of the real corpus, the second keeps
-git from reading the machine's global config and signing setup. `docket` is the
-worked example, with `DOCKET_ROOT`. A test that forgets is not a failing test; it
-is a passing test that mutated your data.
-
-External (Stage 3) relics do **not** depend on this lib. They source
-`install-on-path.sh` directly.
-
-## PATH wiring
-
-Entrypoints land in `~/.local/bin/` via `install-on-path.sh`, which records
-every managed binary in a single shared registry:
-
-```
-~/.local/bin/.reliquary-managed     # <name>[<TAB><owner>], one per line
-```
-
-The **owner** column is optional, per-entry provenance — the publishing
-meta-repo's `META_NAME`. `META_NAME` is itself optional now; when set it
-becomes the owner and is used to detect cross-relic collisions, when unset
-the entry is ownerless. (Legacy per-meta `~/.local/bin/.<name>-managed`
-files are folded into the single registry automatically — by bootstrap, by
-`relic migrate`, and on first publish.)
-
-**Unique names, fail fast.** PATH names must be globally unique. A publish
-is refused if the name is already owned by a *different* relic, already
-resolves elsewhere on `$PATH`, or a foreign file sits at the target — so a
-relic learns at publish time that it needs a different name. Re-publishing a
-name you already own is a normal overwrite. Promotion to Stage 3 preserves
-the registry entry as-is.
-
-## The `relic` CLI
-
-`relic` is the user-facing surface over this whole system — and the first
-Stage-2 relic, self-hosted at `~/.config/relics/relic/`:
-
-```
-relic list                       # all relics: stage, runtime, published-state
-relic status [<name>]            # one relic's detail (deps, PATH wiring, git dirty)
-relic publish [<name>]           # in-house relic → PATH (wraps relic::publish)
-relic test    [<name>] [--cover] # wraps relic::test; --cover adds the coverage gate
-relic mutants [<name>]           # mutation testing — the assertion-quality gate
-relic update  [<name>]           # wraps relic::update
-relic scaffold <name> [-r <rt>]  # Stage 1 → 2: promote a bin/ util or fresh idea
-relic registry [--migrate|--prune]  # show / fold / prune the shared registry
-relic migrate                    # fold legacy per-meta registries
-relic doctor                     # cross-check registry ↔ ~/.local/bin ↔ entrypoints
-```
-
-`<name>` is optional for status/publish/test/update (cwd auto-detect).
-In-house relics get the full set; external relics are read-only here
-(`list`/`status` report them best-effort; manage them in their own repos).
-
-`relic doctor` is a read-only health check: it reports orphan registry entries
-(registered but no file on PATH), unpublished entrypoints (declared by a relic
-but missing from the registry — the `transcribe-asr`-shaped drift), and — both
-informational — relics that are not Rust and do not say why, and unmanaged lane
-files. `relic registry --prune` is its companion
-fix: it drops orphan entries whose `~/.local/bin/<name>` target is gone.
-
-`relic scaffold <name>` automates **Stage 1 → 2**: it moves a `~/.config/bin`
-one-shot util into `src/`, wires the entrypoint, fills the manifest (RUNTIME
-inferred from the script's shebang, or `-r/--runtime`, defaulting to `rust` when
-neither says otherwise), publishes, and stages the result in yadm. A Rust relic is
-scaffolded as a workspace member — `Cargo.toml`, `src/main.rs`, and an appended
-`members` entry — and a non-Rust `-r` requires `--exempt "<why>"`. With no Stage-1
-source it scaffolds a bare skeleton and prints next steps. The `graduate` subcommand stays
-deferred.
-
-## Private lane: `~/.config/attic/`
-
-Relics whose existence is sensitive live under `~/.config/attic/<name>/`
-(same anatomy). The whole subtree is encrypted via the `attic/**` pattern
-in `~/.config/yadm/encrypt`. The bootstrap snippet and `up` integration
-iterate this lane as well — gracefully no-ops if the lane isn't decrypted.
-
-## Bootstrap
-
-`~/.config/yadm/snippets/shared/12-publish-relics.sh` iterates both lanes
-and publishes every relic on every bootstrap. Idempotent; failures are
-tolerated.
-
-## `up` integration
-
-`up` iterates relics and runs `relic::update` on each. Opt out with
-`UP_SKIP_RELICS=1 up` or `up --no-relics`.
-
-**Contract on `update.sh`**: must be non-interactive and time-bounded.
-`up` is a batch tool; an interactive prompt or hanging process would
-wedge the whole update run.
-
-## Promotion to external relic (Stage 2 → 3)
-
-1. `git init` inside the relic dir; push to GitHub (or wherever).
-2. `yadm rm -r --cached .config/relics/<name>/` to untrack from Reliquary.
-3. `mv ~/.config/relics/<name> ~/Developer/<name>` on the author's
-   machine. On other machines, clone wherever convenient.
-4. **Add an explicit `scripts/publish.sh`** that sources
-   `install-on-path.sh` directly. The external relic must not depend on
-   `relic.sh` at runtime — only on `install-on-path.sh` (the stable
-   cross-stage API). `relic.toml` and `entrypoints/` may be kept or shed.
-   For a Rust relic this is also its exit from the lane's workspace: drop its
-   `members` entry, and give the repo back what the workspace was holding — its
-   own `[profile]`, `rustfmt.toml`, `Cargo.lock`, and a decision about every
-   `crates/*` crate it depended on (vendor it, or depend on Reliquary's copy by
-   absolute path and accept that the tie is no longer unidirectional).
-5. **Verify or add `BREW_DEPS` entries** to the appropriate Brewfile —
-   the manifest stays the source of truth, but external relics live
-   outside Reliquary's bootstrap loop, so their deps must be declared
-   somewhere Reliquary's machine setup will honor.
-6. Commit Reliquary's untracking.
-7. **Add the relic to the "Known external relics" list above.** This is a
-   convenience checklist for coordinating shared-wiring upgrades — kept
-   current best-effort, not load-bearing. (The relic also self-identifies
-   via the registry's owner column once it publishes, so discovery degrades
-   gracefully if the list drifts.)
+Everything the retired 667-line library did — dependency checks, the publish
+split, both gates, both ratchets, the cross-lane gate — is in the binary now,
+with a test suite behind it. See `relic --help`.
 
 ## Files this system touches
 
 - `~/.config/relics/`                                 — in-house relics (incl. `relic` CLI), and the cargo workspace
 - `~/.config/relics/crates/`                           — shared crates (members, not relics)
 - `~/.config/attic/`                                  — private relics (encrypted)
-- `~/.config/reliquary/lib/relic.sh`                  — shared library
+- `~/.config/reliquary/lib/relic.sh`                  — the bootstrap seed (the only shell left)
 - `~/.config/reliquary/template/`                     — relic skeleton
 - `~/.config/reliquary/lib/install-on-path.sh`        — stable PATH API + single registry
 - `~/.local/bin/.reliquary-managed`                   — the shared PATH registry (not tracked)
-- `~/.config/yadm/snippets/shared/12-publish-relics.sh` — bootstrap migrate + re-publish
+- `~/.config/yadm/snippets/shared/12-publish-relics.sh` — bootstrap migrate + seed + hand-off
 - `~/.config/bin/up`                                  — periodic update loop
 - `~/.config/yadm/encrypt`                            — `.config/attic/**` pattern
 

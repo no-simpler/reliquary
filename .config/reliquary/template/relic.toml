@@ -1,4 +1,4 @@
-# Manifest for an in-house relic. Read by ~/.config/reliquary/lib/relic.sh.
+# Manifest for an in-house relic. Read by the `relic` binary, and by nothing else.
 # See ~/.config/reliquary/GRADUATION.md for the full schema.
 #
 # Keys live under [relic] so a later section cannot be captured into this one,

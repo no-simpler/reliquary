@@ -66,8 +66,8 @@ time-bounded, or it stalls the machine-wide update.
 `install_on_path` copies the built binary, so nothing may be read from beside
 the executable at runtime.
 
-Publishing and testing carry **no per-relic scripts**. `relic::publish` builds
-and installs from the workspace `target/release/`, and `relic::test` runs format,
+Publishing and testing carry **no per-relic scripts**. `relic publish` builds
+and installs from the workspace `target/release/`, and `relic test` runs format,
 then clippy at `-D warnings`, then the suite — over this crate and every
 `crates/*` member. Do not reintroduce `scripts/publish.sh` or `scripts/test.sh`;
 the lib's rust branch is the whole story.

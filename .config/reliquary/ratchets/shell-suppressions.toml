@@ -12,13 +12,8 @@
 # Population: what the `shell-lint` station checks, so no `.md`, no `.rs`, no
 # symlink and no fixture appears here.
 
-".config/bin/up" = 1
 ".config/bin/yadm-wrapper" = 1
-".config/relics/docket/scripts/update.sh" = 1
-".config/relics/midden/scripts/update.sh" = 1
-".config/relics/relic/src/relic.sh" = 2
-".config/relics/relic/tests/run.sh" = 1
-".config/reliquary/lib/relic.sh" = 3
+".config/reliquary/lib/relic.sh" = 1
 ".config/shell/env.d/040-env.sh" = 1
 ".config/shell/interactive.d/100-aliases.sh" = 2
 ".config/yadm/snippets/shared/12-publish-relics.sh" = 2

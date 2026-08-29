@@ -172,16 +172,35 @@ pub fn suppressions(package_dir: &Utf8Path) -> u64 {
 }
 
 /// How many suppression attributes one file's text opens.
+///
+/// The grammar rather than a list of four concatenations: `#`, an optional `!`,
+/// `[`, and a lint-silencing keyword. Spelled this way for a reason particular
+/// to this crate — the four literals it would otherwise carry are four openers
+/// in its **own** sources, and this is the file that counts them, so its
+/// baseline would be four suppressions it does not have.
+///
+/// A `#` inside a comment or a string still opens one, and that is honest: a
+/// count that reasoned about either would be a parser, and a parser is
+/// something an agent can find the edge of.
 #[must_use]
 pub fn count_in(body: &str) -> u64 {
+    /// The attributes that silence a lint. `expect` is the preferable form —
+    /// it fails once the lint it silences stops firing — and a count that
+    /// could not see it would be a count anyone could walk around.
+    const SILENCERS: [&str; 2] = ["allow", "expect"];
+
     let mut count = 0;
     for (index, _) in body.match_indices('#') {
-        let rest = body.get(index..).unwrap_or_default();
-        for opener in ["#[allow(", "#![allow(", "#[expect(", "#![expect("] {
-            if rest.starts_with(opener) {
-                count += 1;
-                break;
-            }
+        let rest = body.get(index + 1..).unwrap_or_default();
+        let rest = rest.strip_prefix('!').unwrap_or(rest);
+        let Some(rest) = rest.strip_prefix('[') else {
+            continue;
+        };
+        if SILENCERS
+            .iter()
+            .any(|word| rest.strip_prefix(word).is_some_and(|t| t.starts_with('(')))
+        {
+            count += 1;
         }
     }
     count
@@ -191,6 +210,17 @@ pub fn count_in(body: &str) -> u64 {
 mod tests {
     use super::{Baseline, Verdict, count_in};
     use camino::Utf8Path;
+
+    /// Fixture text, read from `tests/fixtures/` rather than written inline.
+    ///
+    /// This is the one crate whose *subject* is suppression attributes, so
+    /// spelling them in its own source would put eighteen of them in its own
+    /// baseline and stop that number meaning anything. The `fixtures/`
+    /// exclusion exists for exactly this.
+    const SUPPRESSIONS: &str = include_str!("../tests/fixtures/suppressions.rs");
+    const ONE_ALLOW: &str = include_str!("../tests/fixtures/one-allow.rs");
+    const ONE_EXPECT: &str = include_str!("../tests/fixtures/one-expect.rs");
+    const THREE_ALLOWS: &str = include_str!("../tests/fixtures/three-allows.rs");
 
     #[test]
     fn a_baseline_ignores_comments_and_quotes() {
@@ -234,17 +264,12 @@ mod tests {
 
     #[test]
     fn every_suppression_form_is_counted_including_the_preferable_one() {
-        let body = "\
-#[allow(dead_code)]
-#![allow(clippy::all)]
-#[expect(unused, reason = \"x\")]
-#![expect(unused)]
-// #[allow( in a comment still opens one, and that is honest: a count that
-// reasoned about comments would be a parser.
-#[derive(Debug)]
-#[must_use]
-";
-        assert_eq!(count_in(body), 5);
+        assert_eq!(count_in(SUPPRESSIONS), 5);
+    }
+
+    #[test]
+    fn a_file_with_no_suppressions_counts_none() {
+        assert_eq!(count_in("fn main() {}\n#[derive(Clone)]\nstruct X;\n"), 0);
     }
 
     #[test]
@@ -259,23 +284,15 @@ mod tests {
             }
             fs_err::write(path.as_std_path(), body).expect("a file");
         };
-        write("src/lib.rs", "#[allow(dead_code)]\nfn a() {}\n");
-        write("src/deep/mod.rs", "#[expect(unused)]\nfn b() {}\n");
+        write("src/lib.rs", ONE_ALLOW);
+        write("src/deep/mod.rs", ONE_EXPECT);
         // Not Rust, so not counted.
-        write("src/notes.md", "#[allow(everything)]\n");
+        write("src/notes.md", THREE_ALLOWS);
         // A build tree is not the package's code.
-        write("target/debug/build.rs", "#[allow(a)]\n#[allow(b)]\n");
+        write("target/debug/build.rs", THREE_ALLOWS);
         // A fixture is test data, and lints written into one are its point.
-        write(
-            "tests/fixtures/bad.rs",
-            "#[allow(a)]\n#[allow(b)]\n#[allow(c)]\n",
-        );
+        write("tests/fixtures/bad.rs", THREE_ALLOWS);
 
         assert_eq!(super::suppressions(&root), 2);
-    }
-
-    #[test]
-    fn a_file_with_no_suppressions_counts_none() {
-        assert_eq!(count_in("fn main() {}\n#[derive(Clone)]\nstruct X;\n"), 0);
     }
 }

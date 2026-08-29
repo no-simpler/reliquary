@@ -1,12 +1,14 @@
-# Manifest for the `relic` CLI — the first in-house (Stage-2) relic.
-# See ~/.config/reliquary/GRADUATION.md for the full schema.
-#
-# No runtime-exemption: this one is on the rewrite worklist, and `relic doctor`
-# is what keeps it there.
+# Manifest for the `relic` CLI — the first in-house (Stage-2) relic, and the
+# one that publishes every other. See ~/.config/reliquary/GRADUATION.md.
 
 [relic]
 name = "relic"
 description = "Manage Reliquary relics: list, status, publish, test, update, registry."
-runtime = "bash"
-min-runtime-version = "3.2" # macOS floor; the CLI is bash-3.2 compatible
-brew-deps = []              # none — awk/git are part of the base system/Brewfile
+runtime = "rust"
+min-runtime-version = "1.89" # floor, never a pin — the workspace's rust-version
+brew-deps = []               # rustup owns the toolchain; git is bedrock
+external-deps = [
+    "cargo (bedrock; the compiled branch builds, tests and publishes through it)",
+    "bash (bedrock; install-on-path.sh is a sourced ABI, not a program this reimplements)",
+    "assay (published by this relic; a bash relic's lint gate degrades loudly without it)",
+]

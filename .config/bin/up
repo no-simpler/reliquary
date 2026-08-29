@@ -378,24 +378,14 @@ update_relics() {
             ;;
     esac
 
-    local lib="$HOME/.config/reliquary/lib/relic.sh"
-    [ -f "$lib" ] || return 3
-
-    # shellcheck disable=SC1090
-    source "$lib"
-
-    local lane r rc=0
-    for lane in "$HOME/.config/relics" "$HOME/.config/attic"; do
-        [ -d "$lane" ] || continue
-        for r in "$lane"/*/; do
-            relic::has_manifest "${r%/}" || continue
-            (cd "$r" && relic::update "$r") || {
-                print_err "  relic update failed: $r"
-                rc=1
-            }
-        done
-    done
-    return "$rc"
+    # Through the binary, which owns discovery, the manifest schema and both
+    # lanes. `up` iterating the lanes itself was a second implementation of all
+    # three, and the one that would silently disagree first.
+    command -v relic >/dev/null 2>&1 || {
+        print_err "  relic is not on PATH — run the bootstrap publish snippet"
+        return 1
+    }
+    relic update --all
 }
 
 # --- Cargo build caches (one per relic lane) --------------------------------

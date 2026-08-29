@@ -59,8 +59,9 @@ Enumerated by *why*, because the defence differs by class and only one of them i
 call. Track 2 exists for exactly this set.
 
 **Class 1 — the recovery critical path.** The gpg shims, `ske-sign`, the `yadm` and `gh`
-passthrough shims, `timeout`, `pm`, all of `yadm/snippets/**`, and `reliquary/lib/relic.sh`'s
-bootstrap seed.
+passthrough shims, `timeout`, `pm`, all of `yadm/snippets/**`, and `reliquary/lib/relic.sh` —
+which *is* the bootstrap seed now, at 82 lines against the 667-line library it used to be,
+reading no manifest and starting no interpreter but the one running it.
 
 > **The bootstrap paradox: the thing that builds and publishes the first Rust binary cannot be
 > a Rust binary.** A fixed point, not a preference a faster toolchain could overturn. The gpg

@@ -1,14 +1,16 @@
-# Re-publish in-house relics onto PATH after bootstrap.
-# Idempotent; install-on-path enforces a single shared registry and unique
-# PATH names.
+# Publish in-house relics onto PATH after bootstrap.
 #
-# Iterates both lanes:
-#   ~/.config/relics/ — public, yadm-tracked
-#   ~/.config/attic/  — private; only iterates if decrypted
+# Three lines and a hand-off. The seed builds `relic` from source and publishes
+# it; `relic publish --all` does both lanes, skipping an attic that has not been
+# decrypted because a relic with no readable manifest is a directory it knows
+# nothing about.
+#
+# Idempotent; install-on-path enforces a single shared registry and unique PATH
+# names.
 
-# Fold any legacy per-meta registries into the single .reliquary-managed
-# file before publishing, so the first publish writes into the consolidated
-# registry. Idempotent; tolerates absence.
+# Fold any legacy per-meta registries into the single .reliquary-managed file
+# before publishing, so the first publish writes into the consolidated registry.
+# Idempotent; tolerates absence.
 # shellcheck disable=SC1091
 source "$HOME/.config/reliquary/lib/install-on-path.sh" 2>/dev/null &&
     install_on_path_migrate_registries
@@ -16,17 +18,4 @@ source "$HOME/.config/reliquary/lib/install-on-path.sh" 2>/dev/null &&
 # shellcheck disable=SC1091
 source "$HOME/.config/reliquary/lib/relic.sh" 2>/dev/null || return 0
 
-_publish_lane() {
-    local lane="$1"
-    [ -d "$lane" ] || return 0
-    local r
-    for r in "$lane"/*/; do
-        relic::has_manifest "${r%/}" || continue
-        relic::publish "$r" || echo "  publish failed: $r"
-    done
-}
-
-_publish_lane "$HOME/.config/relics"
-_publish_lane "$HOME/.config/attic"
-
-unset -f _publish_lane
+relic::seed || echo "  relic seed failed — nothing is published"

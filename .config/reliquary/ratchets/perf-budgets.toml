@@ -85,27 +85,29 @@ note = """Held its number across the port rather than beating it: 9ms wall at 2%
 so what it costs is the agent handshake, not the awk-over-JSON the Rust replaced."""
 
 # ── every relic listing, and the lane's own health check ─────────────────────
-# A TOML manifest is parsed, not sourced, so each of these pays one interpreter
-# start — the floor, and the whole reason discovery reads every manifest in one
-# batch. A second discovery in the same command doubles it, which is why each
-# of these commands makes exactly one.
+# These were 320/385/220ms, and every millisecond of it was an interpreter
+# start: the bash CLI shelled out to a `python3` reader to parse manifests, and
+# batching every read into one call was the floor that made the cost bearable.
+# The reader is gone; the numbers below are rounded up from 2-3ms, because at
+# this scale what is being measured is process spawn and a budget pinned to the
+# last millisecond is a gate that flaps.
 [[path]]
 name = "relic-list"
 command = ["relic", "list"]
-budget_ms = 320
-measured = "2026-08-28"
+budget_ms = 5
+measured = "2026-08-29"
 
 [[path]]
 name = "relic-doctor"
 command = ["relic", "doctor"]
-budget_ms = 385
-measured = "2026-08-28"
+budget_ms = 5
+measured = "2026-08-29"
 
 [[path]]
 name = "relic-status"
 command = ["relic", "status"]
-budget_ms = 220
-measured = "2026-08-28"
+budget_ms = 5
+measured = "2026-08-29"
 
 # ── every `yadm update` and every dream pre-pass ─────────────────────────────
 [[path]]

@@ -50,10 +50,10 @@ gate. `deny.toml` is the supply-chain check (`cargo deny check`), and `cargo mac
 covers the unused-dependency case it does not. See "Track 3" in
 `~/.config/reliquary/HARDENING.md`.
 
-Rust relics carry no `scripts/publish.sh` and no `scripts/test.sh` — the rust
-branch of `~/.config/reliquary/lib/relic.sh` is the whole story, and it publishes
-manifest-declared names out of the workspace `target/release/` rather than through
-an `entrypoints/` symlink that would dangle on a fresh clone. Only a genuine
+Rust relics carry no `scripts/publish.sh` and no `scripts/test.sh` — `relic`'s own
+compiled branch is the whole story, and it publishes manifest-declared names out of
+the workspace `target/release/` rather than through an `entrypoints/` symlink that
+would dangle on a fresh clone. Only a genuine
 periodic job earns a `scripts/update.sh`.
 
 **Never add an attic relic to `members`.** A member's name lands in the publicly

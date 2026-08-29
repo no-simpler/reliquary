@@ -49,7 +49,7 @@ a real guarantee, not an afterthought.
   plumbing for no real gain while brew already tracks latest.)
 - **Per-app version floors, never pins.** An app that needs a minimum Python declares a *floor*
   where it already lives — relic manifests' `MIN_RUNTIME_VERSION`, enforced at publish time by
-  `relic::check_deps` (`reliquary/lib/relic.sh`). A floor that breaks when system Python advances is
+  `relic`'s own dependency check. A floor that breaks when system Python advances is
   a bug in the app, not a reason to pin the system.
 - **Anything needing very specific Python wiring dockerizes** and self-isolates. That's the escape
   hatch, not a bedrock special case.

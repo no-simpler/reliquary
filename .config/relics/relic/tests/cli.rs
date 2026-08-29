@@ -614,11 +614,10 @@ mod compiled {
         // A suppression nobody accounted for.
         let main = box_.at(".config/relics/widget/src/main.rs");
         let body = super::read(&main);
-        fs_err::write(
-            main.as_std_path(),
-            format!("#[allow(dead_code)]\nfn unused() {{}}\n{body}"),
-        )
-        .expect("a suppression");
+        // From a fixture, not spelled here: this crate's own baseline counts
+        // every opener in its sources, and one written inline would be it.
+        let suppression = include_str!("fixtures/one-allow.rs");
+        fs_err::write(main.as_std_path(), format!("{suppression}{body}")).expect("a suppression");
         let assert = with_cargo(&box_)
             .args(["test", "widget"])
             .assert()

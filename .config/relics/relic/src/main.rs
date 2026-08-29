@@ -86,6 +86,9 @@ enum Command {
     Update {
         /// Which one. Defaults to the relic the cwd is inside.
         name: Option<String>,
+        /// Every in-house relic in both lanes. What `up` runs.
+        #[arg(long, conflicts_with = "name")]
+        all: bool,
     },
     /// Promote a Stage-1 util, or lay down a fresh relic.
     Scaffold {
@@ -197,11 +200,10 @@ fn run(cli: Cli) -> Result<u8> {
         Command::Status { name } => status(&mut out, &cx, name.as_deref()),
         Command::Publish { name, all } => {
             if all {
-                publish_all(&mut out, &cx)
-            } else {
-                publish::publish(&cx.paths, &cx.aim("publish", name.as_deref())?)?;
-                Ok(CLEAN)
+                return each(&mut out, &cx, "publish", publish::publish);
             }
+            publish::publish(&cx.paths, &cx.aim("publish", name.as_deref())?)?;
+            Ok(CLEAN)
         }
         Command::Test { name, cover } => {
             let relic = cx.aim("test", name.as_deref())?;
@@ -216,7 +218,10 @@ fn run(cli: Cli) -> Result<u8> {
             gate::mutants(&cx.aim("mutants", name.as_deref())?, &extra)?;
             Ok(CLEAN)
         }
-        Command::Update { name } => {
+        Command::Update { name, all } => {
+            if all {
+                return each(&mut out, &cx, "update", gate::update);
+            }
             gate::update(&cx.paths, &cx.aim("update", name.as_deref())?)?;
             Ok(CLEAN)
         }
@@ -439,27 +444,29 @@ fn status_external(out: &mut impl Write, cx: &Cx, found: &External) -> Result<u8
     Ok(CLEAN)
 }
 
-/// Publish every in-house relic in both lanes.
+/// Run one operation over every in-house relic in both lanes.
 ///
-/// **What the bootstrap seed hands off to**, which is why one relic's failure
-/// does not stop the rest: a machine with nine relics published and one broken
-/// is a machine you can work on.
-fn publish_all(out: &mut impl Write, cx: &Cx) -> Result<u8> {
+/// **What bootstrap and `up` reach for**, which is why one relic's failure does
+/// not stop the rest: a machine with nine relics published and one broken is a
+/// machine you can work on, and a periodic update that abandoned the remaining
+/// relics on the first failure would leave the machine worse for having run.
+fn each(
+    out: &mut impl Write,
+    cx: &Cx,
+    op: &str,
+    run: fn(&Paths, &Relic) -> Result<(), publish::Error>,
+) -> Result<u8> {
     let relics = lane::all(&cx.paths);
     warn_unreadable(&relics);
     let mut failed = 0;
     for relic in &relics {
-        if let Err(error) = publish::publish(&cx.paths, relic) {
-            let _ = writeln!(
-                anstream::stderr(),
-                "  publish failed: {} — {error}",
-                relic.dir
-            );
+        if let Err(error) = run(&cx.paths, relic) {
+            let _ = writeln!(anstream::stderr(), "  {op} failed: {} — {error}", relic.dir);
             failed += 1;
         }
     }
     if failed > 0 {
-        writeln!(out, "{failed} relic(s) failed to publish")?;
+        writeln!(out, "{failed} relic(s) failed to {op}")?;
         return Ok(REFUSED);
     }
     Ok(CLEAN)

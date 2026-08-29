@@ -4,7 +4,8 @@
 #
 # Public API: install_on_path + a single shared registry.
 # Stable — do not break without coordinated republish of all callers:
-#   - ~/.config/reliquary/lib/relic.sh    (Reliquary in-house relics)
+#   - the `relic` binary                  (Reliquary in-house relics)
+#   - ~/.config/reliquary/lib/relic.sh    (the bootstrap seed, before that binary exists)
 #   - all known external relics — currently bb and halo
 #     (see ~/.config/reliquary/GRADUATION.md "Known external relics")
 #
@@ -57,7 +58,7 @@ _INSTALL_ON_PATH_REGISTRY="$_INSTALL_ON_PATH_DIR/.reliquary-managed"
 # where the assignment is scoped to the source command and is gone by the
 # time install_on_path runs on a later line — so we must read it now.
 # install_on_path still honours a call-time META_NAME (the export-then-call
-# idiom in relic::publish) by preferring it over this captured value.
+# idiom `relic` uses) by preferring it over this captured value.
 _INSTALL_ON_PATH_OWNER="${META_NAME:-}"
 
 # True if <name> appears (first field) in the registry.

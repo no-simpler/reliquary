@@ -139,7 +139,7 @@ Personal CLI utils have a three-stage lifecycle. A **relic** is a personal tool 
 - **Stage 2 — in-house relic**: directory at `~/.config/relics/<name>/`, yadm-tracked, with a manifest (`relic.toml`) and optional `src/`, `tests/`, `scripts/`. Published onto PATH via the shared lib. The `relic` CLI itself is the first Stage-2 relic.
 - **Stage 3 — external relic**: independent repo at `~/Developer/<name>/` (`bb`, `halo` today). The dependency is strictly **unidirectional** (relic → reliquary, via `install-on-path.sh`). Reliquary's "known external relics" list in `GRADUATION.md` is a best-effort convenience, not authoritative; it can also discover registrants via the registry's owner column, but doesn't chase this exhaustively.
 
-**Relics are Rust by default.** Any other `RUNTIME` records a `RUNTIME_EXEMPTION` in its manifest saying why; `relic doctor` lists the ones that have not, informationally and never as a failure, and that list is the worklist. `relic` itself is the last holdout, and it is last on purpose: it publishes everything else.
+**Relics are Rust by default, and as of 2026-08-29 every one of them is.** Any other `RUNTIME` records a `RUNTIME_EXEMPTION` in its manifest saying why; `relic doctor` lists the ones that have not, informationally and never as a failure, and that list is now empty. It is the worklist, so keep it that way rather than trusting this sentence.
 
 **`~/.config/relics/` is a cargo workspace.** The lane root carries `Cargo.toml` (one `members` whitelist, `[workspace.dependencies]`, and the only `[profile]` blocks cargo honours), `Cargo.lock`, `rustfmt.toml`, and one gitignored `target/`. A relic carries none of those itself. `crates/` is the shared-library boundary — a member with no manifest, which is what makes it invisible to `relic`, to bootstrap, and to `up`, all of which gate on a readable manifest. `crates/relic-core` is the first: git as a capability (the constructor that strips the ambient `GIT_*` environment, so a relic run from a git hook does not answer for the hook's repository) and one meaning for a path (`project_key`, shared by `docket` and `midden`). Code moves there when a *second* relic needs it, not in anticipation. A Rust relic therefore carries **no `scripts/publish.sh`, no `scripts/test.sh`, and no `entrypoints/`** — the lib's rust branch builds, tests and publishes manifest-declared names out of the workspace `target/release/`.
 
@@ -151,7 +151,7 @@ The `relic` CLI (`relic list|status|publish|test|mutants|update|scaffold|registr
 
 **The roster is `relic list`, not a list in this file.** Each relic's doctrine lives in its own `CLAUDE.md`, and the sections below exist only for the relics whose *system-wide* integration needs explaining — a hook, a command surface, a Touch ID vector. A relic that is simply a tool on `$PATH` (`ernest`, which measures prose density and backs `/modes:deprose`) gets no section here, because a hand-maintained roster in the root file is a roster that silently goes stale.
 
-`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`, `HARDENING.md`, `AGENTIC-TOOLING.md`), the shared libraries (`lib/relic.sh`, `lib/install-on-path.sh`), the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton).
+`~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`, `HARDENING.md`, `AGENTIC-TOOLING.md`), the shared library `lib/install-on-path.sh` and the bootstrap seed `lib/relic.sh`, the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton).
 
 ### Session docket (`docket`)
 
@@ -360,9 +360,9 @@ Canonical bank of reusable templates for recurring agentic project patterns — 
 
 `~/.config/attic/` is the **private relic lane** — the whole subtree is encrypted (the `.config/attic/**` pattern in `~/.config/yadm/encrypt`). Same anatomy inside as public relics, and its own cargo workspace: a member's name and version land in its workspace's `Cargo.lock`, and the public one is tracked in plaintext. `!**/target` keeps the build tree out of the archive; the attic `Cargo.lock` rides along inside it deliberately. `[workspace.dependencies]` is not inheritable across workspaces, so the attic root redeclares what it shares — keep it a strict subset copied from the public table. An attic member may depend on `relics/crates/*` by path, and when a public relic's `relic test` covers a shared crate it additionally runs the attic workspace's format, lints and suite, because that is the one thing a lane boundary cannot carry. `up` and `yadm doctor` sweep and report both lanes' build caches.
 
-Manifest-declared `BREW_DEPS` and `MIN_RUNTIME_VERSION` are **load-bearing**: `relic::check_deps` fails closed at publish time. When a relic graduates to Stage 3, its deps should be reflected in the appropriate Brewfile — the manifest stays the source of truth.
+Manifest-declared `BREW_DEPS` and `MIN_RUNTIME_VERSION` are **load-bearing**: `relic`'s dependency check fails closed at publish time. When a relic graduates to Stage 3, its deps should be reflected in the appropriate Brewfile — the manifest stays the source of truth.
 
-Bootstrap re-publishes all relics via `~/.config/yadm/snippets/shared/12-publish-relics.sh`. `up` runs `relic::update` per relic; opt out with `UP_SKIP_RELICS=1 up` or `up --no-relics`.
+Bootstrap builds `relic` from source and hands off to `relic publish --all`, via `~/.config/yadm/snippets/shared/12-publish-relics.sh` and the seed it sources. `up` runs `relic update` per relic; opt out with `UP_SKIP_RELICS=1 up` or `up --no-relics`.
 
 Full reference: `~/.config/reliquary/GRADUATION.md`.
 

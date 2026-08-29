@@ -32,7 +32,7 @@ the lib's rust branch builds, tests and publishes.
 
 Add **`entrypoints/<name>`** — a symlink to the executable in `src/` you want
 published. The filename is the published name. Add `scripts/{publish,test,update}.sh`
-only to override the defaults in `~/.config/reliquary/lib/relic.sh`.
+only to override what `relic publish|test|update` does by default.
 
 ## Publish
 
