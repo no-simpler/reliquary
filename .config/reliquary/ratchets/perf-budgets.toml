@@ -75,9 +75,11 @@ note = "rglob per token, so the cost is O(tree) — the scaling is the argument,
 
 [[path]]
 name = "ske-prompt"
-command = ["ske-prompt"]
+command = ["ske", "prompt"]
 budget_ms = 10
-measured = "2026-08-27"
+measured = "2026-08-29"
+note = """Held its number across the port rather than beating it: 9ms wall at 2% CPU,
+so what it costs is the agent handshake, not the awk-over-JSON the Rust replaced."""
 
 # ── every relic listing, and the lane's own health check ─────────────────────
 # A TOML manifest is parsed, not sourced, so each of these pays one interpreter
