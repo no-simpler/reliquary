@@ -26,6 +26,7 @@ members = [
     "docket",
     "ernest",
     "midden",
+    "relic",
     "warden",
 ]
 
