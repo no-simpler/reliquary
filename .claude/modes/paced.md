@@ -1,6 +1,6 @@
 ---
-description: Paced mode
-disable-model-invocation: true
+triggers:
+  - when: { context_tokens: 500000 }
 ---
 
 # Paced mode

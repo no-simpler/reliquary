@@ -1,6 +1,8 @@
 ---
-description: Terse mode
-disable-model-invocation: true
+triggers:
+  - on: activate
+  - every: { tokens: 25000 }
+refrain: Say **few** words; cut filler. Chat and in-file prose both.
 ---
 
 # Terse mode

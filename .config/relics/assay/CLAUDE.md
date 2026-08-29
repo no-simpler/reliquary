@@ -620,7 +620,7 @@ The fourth ratchet, and the one that guards this programme's own claims. It read
 | Exit status is ignored | the clock is what is being read. `yadm doctor --quiet` exits 1 on a degraded machine, which is not a failure to time |
 | `timed = false` is silent | a recorded decision, in the same sense as a line in `yadm/unmanaged`: the reason sits beside it in the file, and a note repeated on every run is inventory rather than verification |
 | A program the machine does not have is a `Note` | one item that could not be judged, which is what `Note` is. The other eleven paths still have answers |
-| `stdin` is fed from a temporary file | `modes.py` refuses an empty stdin, and a timing taken from a program that refused is a timing of the refusal. A pipe would need somebody left to write into it |
+| `stdin` is fed from a temporary file | A hook given no payload does whatever it does when asked nothing, and a timing taken from a program that bailed at its first read is a timing of the bail. A pipe would need somebody left to write into it |
 
 **The recursion is real and it terminates.** `yadm doctor --quiet` is a budgeted path
 and `yadm doctor` runs `assay` — but without `--deep`, so the inner run skips this

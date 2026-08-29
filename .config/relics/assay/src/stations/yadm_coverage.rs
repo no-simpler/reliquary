@@ -62,6 +62,7 @@ const PRUNE_DIRS: &[&str] = &[
     ".claude/plans",
     ".claude/docket",
     ".claude/midden",
+    ".claude/mantra",
     ".claude/jobs",
     ".claude/backups",
     ".claude/sessions",

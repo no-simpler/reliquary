@@ -227,9 +227,10 @@ impl PerfBudgets {
 
 /// What the path reads on stdin.
 ///
-/// A hook is not runnable without its input — `modes.py` refuses an empty stdin
-/// — and a timing taken from a program that refused is a timing of the refusal.
-/// The literal is written to a temporary file rather than a pipe because nothing
+/// A hook reads a payload, and one given nothing does whatever it does when
+/// asked nothing — which is not the work the budget is about. A timing taken
+/// from a program that bailed at its first read is a timing of the bail. The
+/// literal is written to a temporary file rather than a pipe because nothing
 /// would be left to write into the pipe once the child is running.
 fn stdin_for(path: &Budgeted) -> Result<Stdio, String> {
     let Some(text) = path.stdin.as_deref() else {
@@ -457,8 +458,8 @@ mod tests {
 
     #[test]
     fn a_path_that_needs_its_stdin_is_given_it() {
-        // Refuses an empty stdin, the way `modes.py` does. Without the literal
-        // it would exit at once and be timed as a refusal rather than as work.
+        // Refuses an empty stdin. Without the literal it would exit at once and
+        // be timed as a refusal rather than as work.
         let machine = Machine::new(&one("fed", "fed", 5_000, "stdin = \"{}\"\n"));
         machine.program("fed", "read line || exit 3\ntest -n \"$line\" || exit 3");
         assert!(

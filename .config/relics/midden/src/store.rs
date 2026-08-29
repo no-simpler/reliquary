@@ -2,6 +2,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use fs_err as fs;
 
 use anyhow::{Context, Result, anyhow, bail};
+use relic_core::frontmatter;
 use relic_core::lock::{Lock, Wait};
 
 use crate::id::{Id, slugify};
@@ -324,86 +325,20 @@ fn write_atomic(path: &Utf8Path, contents: &str) -> Result<()> {
     relic_core::fs::write_atomic(path, contents).with_context(|| format!("replacing {path}"))
 }
 
-/// Splits a document into its metadata and its body. The body is returned
-/// untouched, so every rewrite preserves it exactly.
-pub fn split(text: &str) -> Result<(&str, &str)> {
-    let rest = text
-        .strip_prefix("---\n")
-        .or_else(|| text.strip_prefix("---\r\n"))
-        .ok_or_else(|| anyhow!("no metadata: the file must open with a --- line"))?;
-
-    // `get` rather than a slice: the offsets come from `split_inclusive`, so they
-    // are character boundaries, and saying so with a total operation costs one
-    // error arm that cannot fire.
-    let boundary = || anyhow!("the metadata does not end on a character boundary");
-    let mut offset = 0;
-    for line in rest.split_inclusive('\n') {
-        if line.trim_end() == "---" {
-            let front = rest.get(..offset).ok_or_else(boundary)?;
-            let body = rest.get(offset + line.len()..).ok_or_else(boundary)?;
-            return Ok((front, body));
-        }
-        offset += line.len();
-    }
-    bail!("unterminated metadata: no closing --- line")
-}
-
 pub fn load(path: &Utf8Path) -> Result<Note> {
     let text = fs::read_to_string(path)?;
-    let (front, _) = split(&text)?;
-    let note: Note = serde_yaml_ng::from_str(front).map_err(|e| {
-        // The opening `---` occupies line one, so the parser's line number is
-        // one short of the line a reader would count in the file.
-        match e.location() {
-            Some(at) => anyhow!(
-                "line {}, column {}: {}",
-                at.line() + 1,
-                at.column(),
-                without_location(&e.to_string())
-            ),
-            None => anyhow!("{e}"),
-        }
-    })?;
+    let (front, _) = frontmatter::split(&text)?;
+    let note: Note = frontmatter::parse(front)?;
     note.validate()?;
     Ok(note)
 }
 
-/// The parser appends its own coordinates, which are relative to the metadata
-/// rather than to the file. One location per message, and it should be the one
-/// a reader can act on.
-fn without_location(message: &str) -> &str {
-    match message.rfind(" at line ") {
-        Some(cut) => message.get(..cut).unwrap_or(message).trim_end(),
-        None => message,
-    }
-}
-
 pub fn read_body(path: &Utf8Path) -> Result<String> {
     let text = fs::read_to_string(path)?;
-    let (_, body) = split(&text)?;
+    let (_, body) = frontmatter::split(&text)?;
     Ok(body.to_owned())
 }
 
 pub fn render(note: &Note, body: &str) -> Result<String> {
-    let front = serde_yaml_ng::to_string(note)?;
-    Ok(format!("---\n{front}---\n{body}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn splitting_finds_the_body_untouched() {
-        let text = "---\nid: b71c\n---\n# Title\n\nbody\n";
-        let (front, body) = split(text).unwrap();
-        assert_eq!(front, "id: b71c\n");
-        assert_eq!(body, "# Title\n\nbody\n");
-    }
-
-    #[test]
-    fn splitting_rejects_documents_without_metadata() {
-        assert!(split("# no metadata\n").is_err());
-        assert!(split("---\nid: b71c\n").is_err());
-    }
+    Ok(frontmatter::render(note, body)?)
 }

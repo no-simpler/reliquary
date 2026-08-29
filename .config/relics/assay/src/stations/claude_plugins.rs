@@ -300,7 +300,7 @@ mod tests {
                 r#"{"name":"many","version":"1.0.0"}"#,
             );
             machine.skill("many", "skills/first/SKILL.md", "first");
-            machine.write("many/commands/modes/a.md", "# a\n");
+            machine.write("many/commands/review/a.md", "# a\n");
             machine
         }
 

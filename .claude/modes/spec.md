@@ -1,6 +1,8 @@
 ---
-description: Spec mode
-disable-model-invocation: true
+triggers:
+  - on: activate
+  - every: { tokens: 40000 }
+refrain: This session drives a docket spec; address `blocked` first, summarize every evolution tersely.
 ---
 
 # Spec mode

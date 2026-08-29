@@ -1,6 +1,8 @@
 ---
-description: Deprose mode
-disable-model-invocation: true
+triggers:
+  - on: activate
+  - every: { tokens: 25000 }
+refrain: Prose density must go **down**, measured by `ernest`. Delete first, compact second.
 ---
 
 # Deprose mode

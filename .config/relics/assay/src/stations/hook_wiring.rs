@@ -398,13 +398,13 @@ mod tests {
                 bin,
             };
             Self::write(&machine.bin.join("python3"), "", 0o755);
-            Self::write(&machine.home.join(".claude/hooks/modes.py"), "", 0o644);
+            Self::write(&machine.home.join(".claude/hooks/example.py"), "", 0o644);
             Self::write(&machine.home.join(".local/bin/docket"), "", 0o755);
             machine.yadm_hook("pre_commit", 0o700);
             machine.settings(
                 r#"{"hooks":{
                      "UserPromptSubmit":[{"hooks":[
-                       {"type":"command","command":"python3 \"$HOME/.claude/hooks/modes.py\""}]}],
+                       {"type":"command","command":"python3 \"$HOME/.claude/hooks/example.py\""}]}],
                      "SessionStart":[{"hooks":[
                        {"type":"command","command":"\"$HOME/.local/bin/docket\" announce --hook || true"}]}]
                    }}"#,
@@ -481,7 +481,7 @@ mod tests {
     #[test]
     fn an_interpreter_that_resolves_does_not_make_its_script_exist() {
         let machine = Machine::sound();
-        fs_err::remove_file(machine.home.join(".claude/hooks/modes.py")).expect("removed");
+        fs_err::remove_file(machine.home.join(".claude/hooks/example.py")).expect("removed");
         let finding = machine.only();
         assert_eq!(finding.severity, Severity::Broken);
         assert!(

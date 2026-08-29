@@ -130,7 +130,7 @@ impl Filter {
         // A file that cannot be read is a miss. A listing that failed on one
         // damaged item would hide every sound one beside it.
         let text = fs_err::read_to_string(&record.path).ok()?;
-        let body = match store::split(&text) {
+        let body = match relic_core::frontmatter::split(&text) {
             Ok((_, body)) => body,
             // Unsplittable, so there is no metadata to hold apart from a body.
             Err(_) => text.as_str(),
@@ -436,7 +436,7 @@ mod tests {
     fn metadata_is_not_searched() {
         let item = item("ALPHA", &[], None, 0);
         let rendered = store::render(&item, "The body says nothing of the sort.\n").unwrap();
-        let (_, body) = store::split(&rendered).unwrap();
+        let (_, body) = relic_core::frontmatter::split(&rendered).unwrap();
         assert!(rendered.contains("kind: handoff"));
         assert!(!holds(body, "handoff"));
     }

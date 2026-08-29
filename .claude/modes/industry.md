@@ -1,6 +1,8 @@
 ---
-description: Industry mode
-disable-model-invocation: true
+triggers:
+  - on: activate
+  - every: { tokens: 25000 }
+refrain: Bring industry state of the art to bear on the work product; route instinct onto known vocabulary, teach the jargon tersely.
 ---
 
 # Industry mode

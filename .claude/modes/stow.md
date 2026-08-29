@@ -1,6 +1,8 @@
 ---
-description: Stow mode
-disable-model-invocation: true
+triggers:
+  - on: activate
+  - every: { tokens: 40000 }
+refrain: Deferred work goes on the docket before this session closes; knowledge to incorporate does not.
 ---
 
 # Stow mode

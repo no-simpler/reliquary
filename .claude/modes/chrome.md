@@ -1,8 +1,3 @@
----
-description: Chrome mode
-disable-model-invocation: true
----
-
 # Chrome mode
 
 The user indicates that they fired up Chrome with Claude Code extension.

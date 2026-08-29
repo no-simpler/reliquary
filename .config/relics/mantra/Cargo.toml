@@ -1,36 +1,33 @@
 [package]
-name = "midden"
+name = "mantra"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
-description = "Machine-wide friction corpus: what the harness cost an agent, filed as it happened."
+description = "Session modes: what a directive says, and when it is said again."
 license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "midden"
+name = "mantra"
 path = "src/main.rs"
 
 [dependencies]
 relic-core = { path = "../crates/relic-core" }
-
 anyhow.workspace = true
 camino.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 comfy-table.workspace = true
 fs-err.workspace = true
-getrandom.workspace = true
-jiff.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-# Integration tests are their own crate, so what the binary depends on is not
-# in scope for them.
+# Integration tests are their own crate, so what the binary depends on is not in
+# scope for them.
 [dev-dependencies]
 assert_cmd.workspace = true
-jiff.workspace = true
 predicates.workspace = true
+proptest.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 

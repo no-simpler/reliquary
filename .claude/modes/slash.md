@@ -1,6 +1,8 @@
 ---
-description: Slash mode
-disable-model-invocation: true
+triggers:
+  - on: activate
+  - every: { tokens: 25000 }
+refrain: Expunge inline history, churn documentation, process narration, rotting re-statements.
 ---
 
 # Slash mode

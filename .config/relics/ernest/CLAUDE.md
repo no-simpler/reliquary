@@ -11,7 +11,7 @@ name — there is no "Ernest Index".
 
 Agents leave prose in files despite every directive to be terse, and most of it
 is re-derivable on demand: it is paid for on every context load and repaid
-rarely. `~/.claude/commands/modes/deprose.md` makes that a mantra. This makes it
+rarely. The `deprose` mode makes that a mantra. This makes it
 a number.
 
 **A helper, not a gate.** It quantifies what otherwise takes a holistic skim

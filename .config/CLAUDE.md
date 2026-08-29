@@ -149,7 +149,7 @@ The build cache is held down by `[profile.dev] debug = "line-tables-only"` and b
 
 The `relic` CLI (`relic list|status|publish|test|mutants|update|scaffold|registry|migrate|doctor`) is the user-facing surface over all of this — see `GRADUATION.md`. `scaffold <name>` is how a relic starts — never hand-lay one without reading that reference first. It promotes a Stage-1 `~/.config/bin` util (or a fresh idea) into a Stage-2 relic — RUNTIME from `-r/--runtime`, else a promoted script's shebang, else `rust`; a non-Rust choice needs `-e/--exempt "<why>"`. A Rust scaffold writes a member `Cargo.toml` and appends to `members`; an interpreted one publishes and stages the result in yadm. `registry` takes `--migrate`/`--prune`; `doctor` is a read-only registry ↔ PATH ↔ entrypoints health check that also carries the runtime-stance worklist.
 
-**The roster is `relic list`, not a list in this file.** Each relic's doctrine lives in its own `CLAUDE.md`, and the sections below exist only for the relics whose *system-wide* integration needs explaining — a hook, a command surface, a Touch ID vector. A relic that is simply a tool on `$PATH` (`ernest`, which measures prose density and backs `/modes:deprose`) gets no section here, because a hand-maintained roster in the root file is a roster that silently goes stale.
+**The roster is `relic list`, not a list in this file.** Each relic's doctrine lives in its own `CLAUDE.md`, and the sections below exist only for the relics whose *system-wide* integration needs explaining — a hook, a command surface, a Touch ID vector. A relic that is simply a tool on `$PATH` (`ernest`, which measures prose density and backs `+deprose`) gets no section here, because a hand-maintained roster in the root file is a roster that silently goes stale.
 
 `~/.config/reliquary/` holds the meta — canonical docs (`GRADUATION.md`, `HARDENING.md`, `AGENTIC-TOOLING.md`), the shared library `lib/install-on-path.sh` and the bootstrap seed `lib/relic.sh`, the relic skeleton (`template/`), the agentic-pattern template bank (`templates/` — note the plural, distinct from the singular relic skeleton).
 
@@ -196,8 +196,7 @@ into one note rather than three.
 
 Nothing announces it. There is **no hook and no skill**: `SessionEnd` is observe-only and cannot
 inject context, `Stop` fires every turn, and a corpus filled reflexively is one nobody reads. The
-sole surface is `~/.claude/commands/modes/feedback.md` — `+feedback` as a standing directive, or
-`/modes:feedback` invoked once at session end.
+sole surface is the `feedback` mode — `+feedback`, activated once at session end.
 
 Size is policed at write time, not only by `gc`: field caps, plus a fingerprint over kind, target and
 claim so a recurrence bumps a counter instead of writing a second file. `midden gc` runs from the
@@ -206,6 +205,35 @@ relic's `scripts/update.sh`, which `up` already invokes.
 **The binary is the single source of truth for its own surface** — reference in `midden --help` and
 `midden help`, doctrine in `midden guide`. Do not restate either here or anywhere else; the relic's
 `CLAUDE.md` records why.
+
+### Session modes (`mantra`)
+
+A **mode** is a reusable paragraph of behavioural directives, switched on for a session by a
+`+token` at the start of a prompt line. Public relic (`~/.config/relics/mantra/`, Rust).
+
+A mode declares **when** it injects, not only what it says. Salience decays as a window fills, so a
+directive delivered once at turn one is the most diluted thing in a long session; and a directive
+that is not true yet is a distractor for every turn before it applies. Three trigger forms, closed
+and tiny, deliberately with no expression language.
+
+Mode files live at `~/.claude/modes/` and, per skills-dir plugin, `~/.claude/skills/<plugin>/modes/`
+— which is what keeps the private lane covered by the one encrypt pattern that already sweeps it.
+The `/modes:<name>` slash lane is **gone**: `+token` is the only entry point.
+
+Wired to three events in `~/.claude/settings.json`, all through one command that routes on the
+payload's own `hook_event_name`: `UserPromptSubmit` (activation and turn-boundary refresh),
+`PostToolBatch` (intra-turn refresh, because a single agentic turn can fill a hundred thousand
+tokens without ever reaching a prompt), and `SessionStart` — where `source: "compact"` is the sole
+vector by which anything survives a compaction. Never inside a subagent.
+
+Per-session state at `~/.claude/mantra/`, machine-local and untracked, keyed by session id — which
+Claude Code keeps across a compaction but not across a fork. So **state is a cache and the transcript
+is the record**: any path that finds none rebuilds by re-reading `+token` activations out of the
+transcript.
+
+**The binary is the single source of truth for its own surface** — reference in `mantra --help` and
+`mantra help`, doctrine in `mantra guide`. Do not restate either here; the relic's `CLAUDE.md`
+records why, and carries the deviations from the python expander it replaced.
 
 ### Cruft sweep (`decruft`)
 
@@ -438,13 +466,16 @@ That gives the tree two lanes, and **position decides the lane** — never a per
   `transplant-worktrees`).
 - **`~/.claude/skills/attic/` = private**, swept whole by the single `.claude/skills/attic/**`
   pattern in `yadm/encrypt`. It is a plugin in its own right, so *every* private surface fits inside
-  it — a skill under `attic/skills/<name>/`, a mode under `attic/commands/modes/<name>.md`, and
+  it — a skill under `attic/skills/<name>/`, a mode under `attic/modes/<name>.md`, and
   later an agent, an output-style, an MCP or LSP server — and each arrives already covered, with no
   new pattern to remember. `attic` means here what it means at `~/.config/attic/`: the private lane.
 
 Naming follows from the plugin shape: a private skill is addressed `attic:<name>`, a private command
-`/attic:<dir>:<name>`. Modes are the exception by design — `~/.claude/hooks/modes.py` searches every
-skills-dir plugin's `commands/modes/`, so `+<name>` is identical whichever lane the file sits in.
+`/attic:<dir>:<name>`. Modes are the exception by design — `mantra` searches every skills-dir
+plugin's `modes/`, so `+<name>` is identical whichever lane the file sits in. Note the asymmetry:
+a mode sits at `attic/modes/`, *beside* the plugin surfaces rather than inside one, because a mode is
+not a Claude Code surface at all — `mantra` owns the whole lookup, and its own directory is what frees
+the metadata from a schema the harness owns.
 
 Enforcement runs both ways and is already wired into `yadm doctor`. A private file left in the
 public lane trips the `yadm-coverage` station's R4 (the `pre_commit` identity guard, run backwards) and

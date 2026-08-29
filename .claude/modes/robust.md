@@ -1,6 +1,8 @@
 ---
-description: Robust mode
-disable-model-invocation: true
+triggers:
+  - on: activate
+  - every: { tokens: 25000 }
+refrain: Generalize a reported defect to its **class** and solve the class — scope is defects and mechanisms.
 ---
 
 # Robust mode

@@ -4,6 +4,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use fs_err as fs;
 
 use anyhow::{Context, Result, anyhow, bail};
+use relic_core::frontmatter;
 use relic_core::lock::{Lock, Wait};
 
 use crate::git;
@@ -401,68 +402,21 @@ fn write_atomic(path: &Utf8Path, contents: &str) -> Result<()> {
     relic_core::fs::write_atomic(path, contents).with_context(|| format!("replacing {path}"))
 }
 
-/// Splits a document into its frontmatter and its body. The body is returned
-/// untouched, so every rewrite preserves it exactly.
-pub fn split(text: &str) -> Result<(&str, &str)> {
-    let rest = text
-        .strip_prefix("---\n")
-        .or_else(|| text.strip_prefix("---\r\n"))
-        .ok_or_else(|| anyhow!("no metadata: the file must open with a --- line"))?;
-
-    // `get` rather than a slice: the offsets come from `split_inclusive`, so they
-    // are character boundaries, and saying so with a total operation costs one
-    // error arm that cannot fire.
-    let boundary = || anyhow!("the metadata does not end on a character boundary");
-    let mut offset = 0;
-    for line in rest.split_inclusive('\n') {
-        if line.trim_end() == "---" {
-            let front = rest.get(..offset).ok_or_else(boundary)?;
-            let body = rest.get(offset + line.len()..).ok_or_else(boundary)?;
-            return Ok((front, body));
-        }
-        offset += line.len();
-    }
-    bail!("unterminated metadata: no closing --- line")
-}
-
 pub fn load(path: &Utf8Path) -> Result<Item> {
     let text = fs::read_to_string(path)?;
-    let (front, _) = split(&text)?;
-    let wire: Wire = serde_yaml_ng::from_str(front).map_err(|e| {
-        // The opening `---` occupies line one, so the parser's line number is
-        // one short of the line a reader would count in the file.
-        match e.location() {
-            Some(at) => anyhow!(
-                "line {}, column {}: {}",
-                at.line() + 1,
-                at.column(),
-                without_location(&e.to_string())
-            ),
-            None => anyhow!("{e}"),
-        }
-    })?;
-    Item::try_from(wire)
-}
-
-/// The parser appends its own coordinates, which are relative to the
-/// frontmatter rather than to the file. One location per message, and it should
-/// be the one a reader can act on.
-fn without_location(message: &str) -> &str {
-    match message.rfind(" at line ") {
-        Some(cut) => message.get(..cut).unwrap_or(message).trim_end(),
-        None => message,
-    }
+    let (front, _) = frontmatter::split(&text)?;
+    Item::try_from(frontmatter::parse::<Wire>(front)?)
 }
 
 fn read_body(path: &Utf8Path) -> Result<String> {
     let text = fs::read_to_string(path)?;
-    let (_, body) = split(&text)?;
+    let (_, body) = frontmatter::split(&text)?;
     Ok(body.to_owned())
 }
 
+/// An item's own metadata shape is `Wire`; rendering it is `relic-core`'s.
 pub fn render(item: &Item, body: &str) -> Result<String> {
-    let front = serde_yaml_ng::to_string(&Wire::from(item))?;
-    Ok(format!("---\n{front}---\n{body}"))
+    Ok(frontmatter::render(&Wire::from(item), body)?)
 }
 
 #[cfg(test)]
@@ -475,32 +429,6 @@ mod tests {
             slug_for_path(Utf8Path::new("/Users/example/.config")),
             "-Users-example--config"
         );
-    }
-
-    #[test]
-    fn splitting_finds_the_body_untouched() {
-        let text = "---\nid: b71c\n---\n# Title\n\nbody\n";
-        let (front, body) = split(text).unwrap();
-        assert_eq!(front, "id: b71c\n");
-        assert_eq!(body, "# Title\n\nbody\n");
-    }
-
-    #[test]
-    fn splitting_rejects_documents_without_frontmatter() {
-        assert!(split("# no frontmatter\n").is_err());
-        assert!(split("---\nid: b71c\n").is_err());
-    }
-
-    proptest::proptest! {
-        /// The body comes back byte for byte, which is what every rewrite of an
-        /// item relies on: only the metadata is ever rendered again.
-        #[test]
-        fn splitting_preserves_the_body(body in "(?s).*") {
-            let text = format!("---\nid: b71c\n---\n{body}");
-            let (front, found) = split(&text).expect("the document opens with metadata");
-            proptest::prop_assert_eq!(front, "id: b71c\n");
-            proptest::prop_assert_eq!(found, body.as_str());
-        }
     }
 
     #[test]

@@ -258,7 +258,7 @@ fn report_created(ctx: &Ctx, item: &Item, path: &Utf8Path, empty: bool) {
 pub fn show(ctx: &Ctx, args: &IdArgs) -> Result<()> {
     let record = resolve(ctx, &args.id)?;
     let text = fs_err::read_to_string(&record.path)?;
-    let (_, body) = crate::store::split(&text)?;
+    let (_, body) = relic_core::frontmatter::split(&text)?;
     if body.trim().is_empty() {
         ctx.note(&format!(
             "{} has no body yet — write one at {}",
@@ -336,7 +336,7 @@ fn recover(record: &Record) -> Result<Item> {
     use serde_yaml_ng::Value;
 
     let raw = fs_err::read_to_string(&record.path)?;
-    let (front, _) = crate::store::split(&raw)?;
+    let (front, _) = relic_core::frontmatter::split(&raw)?;
     let map: Value = serde_yaml_ng::from_str(front).map_err(|e| {
         anyhow!(
             "{} is damaged past automatic repair ({e}). Edit it directly: {}",
@@ -637,7 +637,8 @@ pub fn doctor(ctx: &Ctx) -> Result<bool> {
                         ));
                     }
                     let body = fs_err::read_to_string(&record.path).unwrap_or_default();
-                    if crate::store::split(&body).is_ok_and(|(_, b)| b.trim().is_empty()) {
+                    if relic_core::frontmatter::split(&body).is_ok_and(|(_, b)| b.trim().is_empty())
+                    {
                         report(format!(
                             "empty    {} has no body — {}",
                             record.id, record.path

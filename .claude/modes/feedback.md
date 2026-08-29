@@ -1,8 +1,3 @@
----
-description: Feedback mode
-disable-model-invocation: true
----
-
 # Feedback mode
 
 Give user your feedback about this session.

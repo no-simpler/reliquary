@@ -1,6 +1,8 @@
 ---
-description: Tree mode
-disable-model-invocation: true
+triggers:
+  - on: activate
+  - every: { tokens: 40000 }
+refrain: Work in the current worktree, not the main checkout.
 ---
 
 # Tree mode

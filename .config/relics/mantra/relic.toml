@@ -1,0 +1,13 @@
+# Manifest for an in-house relic. Read by the `relic` binary, and by nothing else.
+# See ~/.config/reliquary/GRADUATION.md for the full schema.
+#
+# Keys live under [relic] so a later section cannot be captured into this one,
+# and unknown keys are refused rather than ignored.
+
+[relic]
+name = "mantra"          # required — published name + META_NAME
+description = "Session modes: what a directive says, and when it is said again."
+runtime = "rust"         # required — rust by default; see the stance
+min-runtime-version = "1.89" # floor, never a pin — edition 2024
+brew-deps = []           # rustup owns the toolchain
+external-deps = []       # nothing outside the binary; hooks feed it on stdin

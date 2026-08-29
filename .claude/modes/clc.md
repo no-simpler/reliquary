@@ -1,6 +1,8 @@
 ---
-description: `clc` mode
-disable-model-invocation: true
+triggers:
+  - on: activate
+  - every: { tokens: 40000 }
+refrain: 'Second brain is `clc`-managed — in a non-main worktree every brain change needs `clc save`, or it is lost on transplant.'
 ---
 
 # `clc` mode

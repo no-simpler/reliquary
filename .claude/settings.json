@@ -24,7 +24,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$HOME/.claude/hooks/modes.py\""
+            "command": "\"$HOME/.local/bin/mantra\" hook || true"
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.local/bin/mantra\" hook || true"
           }
         ]
       }
@@ -39,6 +49,10 @@
           {
             "type": "command",
             "command": "\"$HOME/.local/bin/nexus\" verify --hook || true"
+          },
+          {
+            "type": "command",
+            "command": "\"$HOME/.local/bin/mantra\" hook || true"
           }
         ]
       }

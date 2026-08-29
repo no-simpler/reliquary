@@ -69,12 +69,16 @@ measured = "2026-08-28"
 note = "The SHA-256 it exists to compute is 11ms of that."
 
 [[path]]
-name = "modes-expander"
-command = [".claude/hooks/modes.py"]
-stdin = "{}"
-budget_ms = 26
-measured = "2026-08-27"
-note = "rglob per token, so the cost is O(tree) — the scaling is the argument, not the 26ms."
+name = "mantra-hook"
+command = ["mantra", "hook"]
+stdin = '{"hook_event_name":"PostToolBatch","session_id":"perf-budget-probe","cwd":"/"}'
+budget_ms = 3
+measured = "2026-08-29"
+note = """Was 26ms of python that globbed the whole tree per token; lookup is now one
+stat per search root. The payload names a session with no state, which is the path
+taken on every tool batch of every session that has no modes on — the recurring cost,
+and the only one a fixed literal can ask for. A session with modes on additionally
+reads its state and tails its transcript."""
 
 [[path]]
 name = "ske-prompt"

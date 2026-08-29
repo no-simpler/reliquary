@@ -9,7 +9,8 @@
 //! same code and it diverged. [`git`] is here because a key derived from an
 //! ambient repository is the wrong key, [`path`] because a key that depends on
 //! how a path was spelled is not one key, [`fs`] because both stores had written
-//! the same tmp-then-rename by hand and both had the same collision in it.
+//! the same tmp-then-rename by hand and both had the same collision in it, and
+//! [`frontmatter`] because a third relic then needed the same document split.
 //!
 //! [`ui`] and [`fmt`] are the platform half: one answer to "who is reading this"
 //! and one spelling for the quantities that answer reports. [`finding`] is the
@@ -30,6 +31,7 @@
 
 pub mod finding;
 pub mod fmt;
+pub mod frontmatter;
 pub mod fs;
 pub mod git;
 pub mod lock;

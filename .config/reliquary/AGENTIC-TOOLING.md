@@ -155,10 +155,9 @@ skill *adds* ~1–1.5k input tokens, and whole-session savings land at 14–21% 
 go negative on terse work. Paying that on every repo to buy a register that fits in thirty lines is
 a bad trade.
 
-So the ruleset was distilled into `~/.claude/commands/modes/terse.md` and reaches sessions through
-the `+token` mode framework, which is opt-in per session and costs nothing when unused
-(`disable-model-invocation: true` keeps a mode out of model context entirely). Nothing from the
-upstream repository is installed.
+So the ruleset was distilled into the `terse` mode and reaches sessions through the `+token` mode
+framework, which is opt-in per session and costs nothing when unused — a mode is inert until a
+`+token` names it. Nothing from the upstream repository is installed.
 
 Two harness facts that constrain any future register work, both verified against the current
 reference: an output style reaches the main loop only — a subagent runs its own system prompt, and
