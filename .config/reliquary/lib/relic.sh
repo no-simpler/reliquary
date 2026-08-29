@@ -503,7 +503,13 @@ relic::_test_compiled() {
         fi
     ) || return $?
 
-    [[ $shared -eq 1 ]] && relic::_test_attic_lane
+    # `if`, not `[[ ]] &&`: a trailing test is the function's exit status, so a
+    # relic that uses no shared crate would report every gate passing and still
+    # fail. Every public relic depends on `relic-core`, which is what kept that
+    # latent until the first attic relic — whose lane has no `crates/` at all.
+    if [[ $shared -eq 1 ]]; then
+        relic::_test_attic_lane
+    fi
 }
 
 # The reverse cross-lane gate.
