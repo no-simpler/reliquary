@@ -47,8 +47,11 @@ the whole tree rather than the staged set. `warden` replaced it at 7ms."""
 [[path]]
 name = "nexus-verify-hook"
 command = ["nexus", "verify", "--hook"]
-budget_ms = 1830
-measured = "2026-08-27"
+budget_ms = 520
+measured = "2026-08-29"
+note = """Was 1830ms of bash. What is left is not interpreter startup but a stat over
+every file in the blob store — 4,171 of them — so this number tracks the store's size
+rather than the port's, and it is the reason the default tier reads nothing."""
 
 [[path]]
 name = "docket-announce-hook"
