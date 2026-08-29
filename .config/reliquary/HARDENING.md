@@ -59,13 +59,23 @@ Enumerated by *why*, because the defence differs by class and only one of them i
 call. Track 2 exists for exactly this set.
 
 **Class 1 — the recovery critical path.** The gpg shims, `ske-sign`, the `yadm` and `gh`
-passthrough shims, `timeout`, all of `yadm/snippets/**`, and `reliquary/lib/relic.sh`'s
+passthrough shims, `timeout`, `pm`, all of `yadm/snippets/**`, and `reliquary/lib/relic.sh`'s
 bootstrap seed.
 
 > **The bootstrap paradox: the thing that builds and publishes the first Rust binary cannot be
 > a Rust binary.** A fixed point, not a preference a faster toolchain could overturn. The gpg
 > shims sit at the same point one step earlier — they are how the archive decrypts, and
 > decryption is what delivers everything else.
+
+> **`pm` is the worked example, because its payoff and the rule disagreed.** Porting it was
+> scheduled: `clap` deletes 182 lines of hand-rolled flag parsing. But `yadm/snippets/util/00-print.sh`
+> *is* `pm`, with no fallback, and every `print_*` in bootstrap is a call to it — so a ported
+> `pm` moves to the publish lane and does not exist until the publish snippet runs, which is
+> after `util/` is sourced and after every earlier snippet that prints. Two things follow, and
+> the second is the general one. **Deleting code is not the same as buying verification**:
+> there is no parsing, no set algebra and no state machine in `pm` for types to protect, so the
+> payoff column was measuring the wrong quantity. And **rule 1 is about the path, not the
+> program**: what puts `pm` in class 1 is who calls it, which is not visible from reading it.
 
 **Class 2 — must execute in the caller's process.** The root and `ZDOTDIR` entry points,
 `shell/env.d/*`, `shell/interactive.d/*`, `fish/conf.d/*`.
