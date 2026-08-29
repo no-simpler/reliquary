@@ -5,3 +5,11 @@
 # built with an overridden target-dir — would go unignored and be staged. There
 # is no tracked path named target/ at any depth, so the broad rule costs nothing.
 target/
+
+# cargo-mutants' report tree, and the copy it rotates on the next run.
+# `relic mutants` is part of the verification standard, so this is written by a
+# sanctioned command rather than by accident — and it is 4 MiB of logs per run,
+# regenerated whole. Undeclared, it reported itself as several hundred
+# undecided paths in `assay`'s yadm-coverage station.
+mutants.out/
+mutants.out.old/

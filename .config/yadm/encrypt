@@ -8,6 +8,8 @@
 !**/.ruff_cache
 !**/.DS_Store
 !**/target
+!**/mutants.out
+!**/mutants.out.old
 
 .config/acli/*
 .config/arc/benefactor.md

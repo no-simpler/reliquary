@@ -65,7 +65,7 @@ After all worktrees are processed, run the reconcile pass below, then `git workt
 
 Step 4 only covers the worktrees this run removes. A worktree removed outside this skill — or one whose teardown was skipped or failed — leaves Docker state behind with the compose file gone, permanently out of `docker compose`'s reach: a surviving stack keeps a headless `chromium` (sometimes a whole db stack) alive, starving the machine until system-suite tests fail under the load, and even a fully-exited one pins its volumes for good.
 
-`compose-gc` sweeps those by label instead, scoped to this repository and to both worktree layouts it has used. Its header comment carries the full reasoning, including the provenance test that holds unrelated tooling out of range.
+`compose-gc` sweeps those by label instead, scoped to this repository and to both worktree layouts it has used. Its own `CLAUDE.md` carries the full reasoning, including the provenance test that holds unrelated tooling out of range.
 
 The block below runs when the skill loads, so it reports the state you *inherited*. Run `compose-gc` again by hand once the last worktree is gone — that is the pass that catches anything this run leaked, and it is safe (and useful) on its own, purely to garbage-collect. `compose-gc -n` is the same sweep with nothing removed.
 

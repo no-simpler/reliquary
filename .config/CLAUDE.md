@@ -113,7 +113,6 @@ Executable scripts on `$PATH` (added via `env.d/040-env.sh`):
 - `pm` - print message: typed, coloured terminal output (notice/info/success/warning/error), the interactive counterpart to the bootstrap's `util/00-print.sh`
 - `timeout` - GNU-style `timeout(1)` shim, so scripts can rely on it being present
 - `up` - system-wide updater (brew, rust, zinit, vim-plug, gcloud, tpm, relics, relic build cache); writes timestamp to `~/.local/state/up/last_upped_at`
-- `compose-gc` - reclaims Docker Compose state left behind by dead git worktrees of the current repo, sweeping by label (no compose file needed) across both worktree layouts; `down <path>` is the profile-complete teardown of one stack. `-n` dry-runs. Used by the `transplant-worktrees` skill as its single Docker surface
 - `gpg-yadm-op` - GPG wrapper that fetches symmetric passphrase from 1Password (Touch ID) for yadm encrypt/decrypt; tries `ske read` first, falls back to `op read` (never hard-depend — it decrypts the attic `ske` lives in)
 - `ske-prompt` - prints the open `ske` Touch ID window for the oh-my-posh right prompt; silent when closed (`sh`, not bash: `$BASH_ENV` would cost ~230ms per render)
 - `yadm-wrapper` - wraps yadm with custom subcommands (see below); also reachable as `yadm` via the `~/.config/bin/yadm` symlink (shadows brew's yadm — see "Path availability")
