@@ -236,6 +236,32 @@ impl Tool {
         })
     }
 
+    /// Run it within `budget`, handing it `input` on stdin, and report how it
+    /// exited without judging that.
+    ///
+    /// Some programs take their argument on stdin **because** the argument is a
+    /// secret: argv is world-readable through `ps`, and a temporary file is a
+    /// secret at rest. `ssh-add -` is the case this exists for.
+    ///
+    /// The write runs on its own thread. A child that answers before reading
+    /// everything, or one whose output fills a pipe buffer while this process is
+    /// still writing, deadlocks a caller that writes and then waits.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Spawn`] when it could not start and [`Error::TimedOut`] when it
+    /// outlasted the budget. A broken pipe is not an error here: the child
+    /// exiting early is the answer, and its status carries it.
+    pub fn feed_within(
+        &self,
+        command: &mut Command,
+        input: &str,
+        budget: std::time::Duration,
+    ) -> Result<Exit, Error> {
+        command.stdin(Stdio::piped());
+        self.wait_within(command, Some(input.to_owned()), budget)
+    }
+
     /// Run it within `budget` and report how it exited, without judging that.
     ///
     /// See [`Exit`] for when a status is an answer rather than a failure. Both
@@ -250,6 +276,17 @@ impl Tool {
     pub fn run_within(
         &self,
         command: &mut Command,
+        budget: std::time::Duration,
+    ) -> Result<Exit, Error> {
+        self.wait_within(command, None, budget)
+    }
+
+    /// The one bounded wait. `input` is written to stdin when the caller has
+    /// opened one.
+    fn wait_within(
+        &self,
+        command: &mut Command,
+        input: Option<String>,
         budget: std::time::Duration,
     ) -> Result<Exit, Error> {
         let mut child = command
@@ -267,6 +304,18 @@ impl Tool {
         // end of the pipe. Nothing portable kills a process this one did not
         // start, so the readers are left to end when the pipe finally closes,
         // and the caller is not made to wait for it.
+        // Detached for the same reason the readers are: a child that never
+        // reads leaves this blocked on the write, and the caller asked for a
+        // bounded wait.
+        if let Some(input) = input {
+            let pipe = child.stdin.take();
+            std::thread::spawn(move || {
+                if let Some(mut pipe) = pipe {
+                    use std::io::Write as _;
+                    let _ = pipe.write_all(input.as_bytes());
+                }
+            });
+        }
         let out = std::thread::spawn({
             let pipe = child.stdout.take();
             move || drain(pipe)
@@ -354,6 +403,55 @@ fn drain<R: std::io::Read>(pipe: Option<R>) -> Vec<u8> {
 /// Short enough that a fast program is not held up by the granularity, long
 /// enough that waiting costs no measurable CPU.
 const POLL: std::time::Duration = std::time::Duration::from_millis(5);
+
+#[cfg(test)]
+mod feeding {
+    use super::*;
+
+    fn cat() -> Tool {
+        Tool::find("cat").expect("cat is on PATH everywhere this runs")
+    }
+
+    #[test]
+    fn what_is_written_to_stdin_comes_back_out() {
+        let tool = cat();
+        let mut command = tool.command();
+        let exit = tool
+            .feed_within(&mut command, "secret\n", std::time::Duration::from_secs(10))
+            .expect("cat ran");
+        assert_eq!(exit.stdout, "secret\n");
+        assert!(exit.ok());
+    }
+
+    #[test]
+    fn a_child_that_never_reads_does_not_hold_the_writer() {
+        // `true` exits without touching stdin, so the write gets a broken pipe.
+        // A caller that wrote before waiting would block here forever on input
+        // larger than the pipe buffer.
+        let tool = Tool::find("true").expect("true is on PATH");
+        let mut command = tool.command();
+        let big = "x".repeat(1024 * 1024);
+        let exit = tool
+            .feed_within(&mut command, &big, std::time::Duration::from_secs(10))
+            .expect("true ran");
+        assert!(exit.ok());
+    }
+
+    #[test]
+    fn a_fed_program_is_still_bounded() {
+        let tool = Tool::find("sh").expect("sh is on PATH");
+        let mut command = tool.command();
+        command.args(["-c", "sleep 30"]);
+        let error = tool
+            .feed_within(
+                &mut command,
+                "ignored",
+                std::time::Duration::from_millis(200),
+            )
+            .expect_err("it outlasts the budget");
+        assert!(matches!(error, Error::TimedOut { .. }), "{error:?}");
+    }
+}
 
 #[cfg(test)]
 mod tests {
