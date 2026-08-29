@@ -408,6 +408,12 @@ update_relics() {
 # private one is skipped when absent, like every other loop over it.
 #
 # Best-effort throughout: an unswept cache costs disk, never correctness.
+#
+# The ceiling is a **budget**, and for a long time nothing here could act on one.
+# `--installed` and `--time` remove what is *dead*, and a workspace built every
+# day has nothing dead in it: measured 2026-08-29 at 11 GiB, both reported
+# "would clean: nothing" while the ceiling said act. A check whose remedy cannot
+# act on what the check measures reports for ever, and this one had.
 # 2 GiB — under this, sweeping is churn. Overridable for a machine that wants
 # a different budget, and for exercising the sweep path deliberately. The
 # ceiling is per lane, so neither hides under the other's headroom.
@@ -434,6 +440,21 @@ prune_cargo_cache() {
         # for a month. Neither is allowed to fail the run.
         (cd "$lane" && cargo sweep --installed) || print_warn "  cargo sweep --installed failed in $lane; continuing."
         (cd "$lane" && cargo sweep --time 30) || print_warn "  cargo sweep --time failed in $lane; continuing."
+        # cargo-sweep reasons about build *artifacts* and cannot see incremental
+        # state at all — no flag of its reaches it. Measured 2026-08-29: of an
+        # 11 GiB tree, 6.2 GiB was 707 incremental session directories, and
+        # `--maxsize` "cleaned" 5.5 GiB by taking deps and release binaries
+        # while leaving every one of them. So the directory is removed outright.
+        #
+        # It grows without bound here for a reason cargo cannot fix: `fmt`,
+        # `clippy`, `nextest`, `llvm-cov` and `mutants` each compile under their
+        # own flags, so each produces its own fingerprint family — and cargo
+        # garbage-collects *within* a family, never across. A workspace that is
+        # only ever verified accumulates one family per tool per crate.
+        #
+        # Safe by construction: incremental state is a pure speed cache for the
+        # next edit, regenerated on demand, and no build needs it to be correct.
+        rm -rf "$target/debug/incremental" "$target/llvm-cov-target/debug/incremental"
         echo "$lane build cache now $(du -sh "$target" 2>/dev/null | awk '{print $1}')."
     done
     return "$swept"

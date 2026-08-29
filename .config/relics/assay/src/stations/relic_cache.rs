@@ -90,7 +90,8 @@ impl Station for RelicCache {
                             kib / 1024
                         )))
                         .fixed_by(FixHint::lossy(&format!(
-                            "run `up`, or `cargo sweep --time 30` in ~/{lane}"
+                            "run `up`; most of it is ~/{lane}/{TARGET}/debug/incremental, \
+                             which no `cargo sweep` flag can reach"
                         ))),
                 );
             }
