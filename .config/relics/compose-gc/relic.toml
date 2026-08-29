@@ -1,0 +1,13 @@
+# Manifest for the `compose-gc` CLI — Stage-2 in-house relic.
+# See ~/.config/reliquary/GRADUATION.md for the full schema.
+
+[relic]
+name = "compose-gc"
+description = "Reclaim Docker Compose state left behind by dead git worktrees of this repository."
+runtime = "rust"
+min-runtime-version = "1.89" # floor, never a pin — the workspace's rust-version
+brew-deps = []               # rustup owns the toolchain
+external-deps = [
+    "docker (the daemon holds the state; without it there is nothing to reclaim and the sweep says so)",
+    "git (which worktrees this repository still registers; without it there is no repository to be scoped to)",
+]

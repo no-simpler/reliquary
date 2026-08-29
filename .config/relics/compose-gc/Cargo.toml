@@ -1,0 +1,32 @@
+[package]
+name = "compose-gc"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "compose_gc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "compose-gc"
+path = "src/main.rs"
+
+[dependencies]
+anstream.workspace = true
+anyhow.workspace = true
+camino.workspace = true
+clap.workspace = true
+relic-core = { path = "../crates/relic-core" }
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

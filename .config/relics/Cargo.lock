@@ -239,6 +239,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "compose-gc"
+version = "0.1.0"
+dependencies = [
+ "anstream",
+ "anyhow",
+ "assert_cmd",
+ "camino",
+ "clap",
+ "predicates",
+ "relic-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "console"
 version = "0.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
