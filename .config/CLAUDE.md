@@ -299,6 +299,32 @@ for it. `YADM_HOOK_BREAK_GLASS=1` commits anyway, prints that it did, and append
 `CLAUDE.md` carries the deviations from the shell hook it replaced, each naming the test that
 pins it.
 
+### Password drill (`rote`)
+
+Spaced repetition over the small set of passwords that have to live in a head rather than in a
+vault. Public relic (`~/.config/relics/rote/`, Rust). The only relic a **human** operates daily,
+and the only one through which plaintext secrets pass.
+
+Bare `rote` runs today's session. It **refuses to run wherever the output shape is not human** —
+which `CLAUDECODE` alone triggers — so an agent cannot drill, enrol or rotate, and there is no
+skill advertising it.
+
+Two homes, and the split is the point. The log is in `~/Trove/ark/rote/` — outcomes, timings,
+intervals, no secret material, restic's to keep. The **verifiers are not**: an argon2id hash is an
+offline-attackable confirmation oracle, and it is regenerable by re-enrolment, so it lives at
+`~/.local/state/rote/` and never enters a backup. `rote` inaugurates `~/Trove` as a directory; the
+POSTURE spec's later lanes make a repository of it.
+
+Wired to two things beyond `$PATH`. `rote banner` is the reminder in `080-check.{sh,fish}`,
+alongside `up`'s — it reads only a derived cache, prints **counts and never slug names**, and fails
+silent. And `rote doctor --format json` is the **first public-lane speaker** of `relic-core`'s
+finding protocol, so `assay`'s registry station collects drill staleness into `yadm doctor` with no
+new station.
+
+**The binary is the single source of truth for its own surface** — reference in `rote --help` and
+`rote help`, doctrine in `rote guide`. Do not restate either here; the relic's `CLAUDE.md` carries
+the custody constraints and the measured argon2 figures.
+
 ### Touch ID window (`ske`)
 
 `ske` ("skeleton key") opens a **time-boxed window** in which 1Password Touch ID prompts are

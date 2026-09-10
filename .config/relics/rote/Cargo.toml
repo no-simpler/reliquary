@@ -1,0 +1,67 @@
+[package]
+name = "rote"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Spaced-repetition drill for the passwords you must hold in your head."
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "rote"
+path = "src/main.rs"
+
+[dependencies]
+relic-core = { path = "../crates/relic-core" }
+
+anyhow.workspace = true
+camino.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+comfy-table.workspace = true
+fs-err.workspace = true
+getrandom.workspace = true
+jiff.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+# The verifier. argon2id is the Password Hashing Competition winner and OWASP's
+# first recommendation; the PHC string format it serialises to carries its own
+# parameters, so a verifier is self-describing and `doctor` can read the cost off
+# it rather than trusting a constant that may have moved.
+argon2 = { version = "0.5.3", features = ["zeroize", "std"] }
+# `Zeroizing` wipes a buffer's whole capacity on drop. Deliberately not
+# `secrecy`: see the note at the head of `src/secret.rs`.
+zeroize = "1.9.0"
+# The hash chain over the log — tamper evidence and corruption detection.
+sha2 = "0.10.9"
+# Raw mode, the alternate screen, and bracketed paste. Already in the lane's lock
+# via comfy-table, so no second version enters it.
+crossterm = "0.29.0"
+# std runs no destructor on a default-disposition signal, so a terminated drill
+# would leave the terminal in raw mode with echo off. `ske` met the same class.
+signal-hook = { version = "0.4.4", default-features = false, features = ["iterator"] }
+# The log has one writer by design, so every line names the machine that wrote
+# it. std has no hostname API and a subprocess in the hot path is worse than a
+# fifty-line crate.
+gethostname = "1.1.0"
+# Config only, and read rather than written.
+toml = "1.1.4"
+
+[dev-dependencies]
+# Integration tests are their own crate, so what the binary depends on is not in
+# scope for them. The suite seeds a store rather than driving enrolment, so it
+# mints its own cheap verifiers and its own hash chain.
+argon2 = { version = "0.5.3", features = ["zeroize", "std"] }
+sha2 = "0.10.9"
+assert_cmd.workspace = true
+insta.workspace = true
+jiff.workspace = true
+predicates.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

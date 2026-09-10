@@ -2,7 +2,7 @@
 triggers:
   - on: activate
   - every: { tokens: 25000 }
-refrain: Expunge inline history, churn documentation, process narration, rotting re-statements.
+refrain: 'Expunge: inline history, churn documentation, process narration, rotting re-statements.'
 ---
 
 # Slash mode

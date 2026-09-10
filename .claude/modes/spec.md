@@ -1,18 +1,18 @@
 ---
 triggers:
   - on: activate
-  - every: { tokens: 40000 }
-refrain: This session drives a docket spec; address `blocked` first, summarize every evolution tersely.
 ---
 
 # Spec mode
 
-User signals this session drives a docket spec (`docket guide spec`).
+This session drives a docket spec (`docket guide spec`).
 Address `blocked` first, if present; once cleared, drop the block and proceed.
 
 When spec evolves at any stage, summarize changes to user tersely and at altitude.
 
 ## Stage `design`
+
+Design is in progress; spec content is evidence of latest understanding, not absolute directives.
 
 Where warranted: extrapolate and augment; expecially where deferring to implementation is risky.
 Evolve spec within artistic license outlined by user; if not given — err on the side of caution.

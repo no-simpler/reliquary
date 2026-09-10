@@ -52,3 +52,19 @@ end
 
 # Call the function
 check_yadm_wrapper
+
+##
+## Password drill
+##
+
+# One line, or nothing. The policy lives in the binary; this only asks.
+function check_rote
+    set -l rote "$HOME/.local/bin/rote"
+
+    if test -x $rote
+        $rote banner
+    end
+end
+
+# Call the function
+check_rote

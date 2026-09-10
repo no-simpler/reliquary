@@ -28,6 +28,7 @@ members = [
     "mantra",
     "midden",
     "relic",
+    "rote",
     "warden",
 ]
 
@@ -67,6 +68,16 @@ which = "8.0.0"
 opt-level = 3
 lto = "thin"
 strip = true
+
+# argon2 is a memory-hard function, which means an unoptimised build is not
+# slow, it is unusable: 6.2 s a call against 0.47 s. A relic that hashes cannot
+# have a test suite at all without this, and the package is a dependency nobody
+# steps through.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
 
 # Full DWARF was 88% of this lane's disk (3.26 GB of 3.7 GB, almost all of it
 # under target/debug from test and clippy runs). Line tables keep backtraces

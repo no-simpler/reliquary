@@ -1,0 +1,10 @@
+# Manifest for the `rote` CLI — Stage-2 in-house relic.
+# See ~/.config/reliquary/GRADUATION.md for the full schema.
+
+[relic]
+name = "rote"
+description = "Spaced-repetition drill for the passwords you must hold in your head."
+runtime = "rust"
+min-runtime-version = "1.89" # floor, never a pin — the workspace's rust-version
+brew-deps = []               # rustup owns the toolchain
+external-deps = []           # shells out to nothing; the drill must not depend on a lookup

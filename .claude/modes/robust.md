@@ -1,8 +1,7 @@
 ---
 triggers:
   - on: activate
-  - every: { tokens: 25000 }
-refrain: Generalize a reported defect to its **class** and solve the class — scope is defects and mechanisms.
+refrain: Generalize a defect to its **class** and solve the class — scope is defects and mechanisms.
 ---
 
 # Robust mode

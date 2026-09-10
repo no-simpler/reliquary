@@ -56,3 +56,19 @@ function check_yadm_wrapper() {
 
 # Call the function
 check_yadm_wrapper
+
+##
+## Password drill
+##
+
+# One line, or nothing. The policy lives in the binary; this only asks.
+check_rote() {
+    local rote="$HOME/.local/bin/rote"
+
+    if [[ -x "$rote" ]]; then
+        "$rote" banner
+    fi
+}
+
+# Call the function
+check_rote
