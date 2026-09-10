@@ -342,16 +342,25 @@ pub struct Store {
 impl Store {
     /// Take the lock and read the log.
     ///
+    /// Every caller opens a store in order to write, so a log this binary
+    /// cannot fully read is refused here, before any command has touched the
+    /// verifier file — not at the append, after it has.
+    ///
     /// # Errors
     ///
-    /// When the tree cannot be created, the lock cannot be taken, or the log
-    /// cannot be read.
+    /// When the tree cannot be created, the lock cannot be taken, the log
+    /// cannot be read, or the log holds a record from a newer schema.
     pub fn open(paths: Paths) -> Result<Self> {
         ensure_dir(&paths.log_dir)?;
         ensure_dir(&paths.state_dir)?;
         let lock =
             relic_core::lock::Lock::acquire(&paths.lock(), relic_core::lock::Wait::INTERACTIVE)?;
         let journal = Journal::load(&paths.log())?;
+        if journal.has_future_records() {
+            return Err(anyhow!(
+                "the log holds a record written by a newer rote, so this one will not add to it"
+            ));
+        }
         Ok(Self {
             paths,
             journal,
@@ -461,6 +470,12 @@ impl Verifiers {
         self.0.remove(slug.as_str());
     }
 
+    /// Every name the file holds a verifier for, whether or not the log knows
+    /// it.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+
     /// Write the file.
     ///
     /// # Errors
@@ -471,8 +486,7 @@ impl Verifiers {
             ensure_dir(parent)?;
         }
         let text = toml::to_string_pretty(self)?;
-        relic_core::fs::write_atomic(path, &text).with_context(|| format!("writing {path}"))?;
-        tighten(path)
+        relic_core::fs::write_atomic_private(path, &text).with_context(|| format!("writing {path}"))
     }
 }
 
@@ -511,9 +525,8 @@ impl Cache {
         if let Some(parent) = path.parent() {
             ensure_dir(parent)?;
         }
-        relic_core::fs::write_atomic(path, &serde_json::to_string(self)?)
-            .with_context(|| format!("writing {path}"))?;
-        tighten(path)
+        relic_core::fs::write_atomic_private(path, &serde_json::to_string(self)?)
+            .with_context(|| format!("writing {path}"))
     }
 }
 
@@ -690,8 +703,10 @@ mod tests {
 
         let journal = Journal::load(&paths.log()).unwrap();
         assert!(journal.has_future_records());
-        let mut store = Store::open(paths).unwrap();
-        assert!(store.append(&add(date(2026, 9, 11), "b")).is_err());
+        assert!(
+            Store::open(paths).is_err(),
+            "refused at open, before any command has a chance to touch a verifier"
+        );
     }
 
     #[test]
@@ -713,6 +728,16 @@ mod tests {
 
         let read = Verifiers::load(&paths.verifiers()).unwrap();
         assert_eq!(read.get(&slug).unwrap().unwrap(), verifier);
+    }
+
+    #[test]
+    fn the_file_lists_every_name_it_holds() {
+        let phc = "$argon2id$v=19$m=64,t=1,p=1$CQkJCQkJCQkJCQkJCQkJCQ$\
+                   PdWLZDvNGYPMYWPfbSZq7yZO0eFRHmiGnLTuNBAxUC0";
+        let mut verifiers = Verifiers::default();
+        verifiers.set(&"b".parse().unwrap(), &Verifier::parse(phc).unwrap());
+        verifiers.set(&"a".parse().unwrap(), &Verifier::parse(phc).unwrap());
+        assert_eq!(verifiers.names().collect::<Vec<_>>(), vec!["a", "b"]);
     }
 
     #[test]

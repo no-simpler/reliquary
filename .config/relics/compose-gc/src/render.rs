@@ -4,20 +4,15 @@ use std::io::Write;
 
 use anyhow::Result;
 use relic_core::fmt::plural;
+use relic_core::style::Style as Paint;
 
 use crate::plan::{Plan, Reaping, Reason};
-
-const RESET: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
-const RED: &str = "\x1b[31m";
-const GREEN: &str = "\x1b[32m";
 
 /// How the run is written out.
 #[derive(Clone, Copy, Debug)]
 pub struct Style {
-    /// Whether to spend on colour.
-    pub color: bool,
+    /// Whether to spend on colour, carried as the thing that spends it.
+    pub color: Paint,
     /// Whether this run removes anything.
     pub dry_run: bool,
 }
@@ -31,21 +26,13 @@ pub struct Refusal {
     pub why: String,
 }
 
-fn paint(text: &str, code: &str, color: bool) -> String {
-    if color {
-        format!("{code}{text}{RESET}")
-    } else {
-        text.to_owned()
-    }
-}
-
 /// A line that reports something seen and not acted on.
 ///
 /// # Errors
 ///
 /// When the sink refuses the write.
 pub fn note(out: &mut impl Write, text: &str, style: Style) -> Result<()> {
-    writeln!(out, "      {}", paint(text, DIM, style.color))?;
+    writeln!(out, "      {}", style.color.dim(text))?;
     Ok(())
 }
 
@@ -61,9 +48,9 @@ pub fn reaping(
     style: Style,
 ) -> Result<()> {
     let mark = if refusals.is_empty() {
-        paint("✓", GREEN, style.color)
+        style.color.green("✓")
     } else {
-        paint("✗", RED, style.color)
+        style.color.red("✗")
     };
     let because = match reaping.reason {
         Reason::Abandoned => reaping.worktree.as_ref().map_or_else(
@@ -76,17 +63,15 @@ pub fn reaping(
     writeln!(
         out,
         "      {}",
-        paint(&tally(reaping, style.dry_run), DIM, style.color)
+        style.color.dim(&tally(reaping, style.dry_run))
     )?;
     for refusal in refusals {
         writeln!(
             out,
             "      {}",
-            paint(
-                &format!("{} survived — {}", refusal.what, refusal.why),
-                RED,
-                style.color
-            )
+            style
+                .color
+                .red(&format!("{} survived — {}", refusal.what, refusal.why))
         )?;
     }
     Ok(())
@@ -120,8 +105,8 @@ pub fn summary(out: &mut impl Write, plan: &Plan, repo: &str, style: Style) -> R
     writeln!(
         out,
         "{} {}",
-        paint("==>", BOLD, style.color),
-        paint(&text, BOLD, style.color)
+        style.color.bold("==>"),
+        style.color.bold(&text)
     )?;
     Ok(())
 }
@@ -150,7 +135,7 @@ mod tests {
     }
 
     const PLAIN: Style = Style {
-        color: false,
+        color: Paint::PLAIN,
         dry_run: false,
     };
 
@@ -201,7 +186,7 @@ mod tests {
             rendered(
                 &[],
                 Style {
-                    color: true,
+                    color: Paint::COLOUR,
                     ..PLAIN
                 }
             )

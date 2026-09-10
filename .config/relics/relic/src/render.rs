@@ -1,58 +1,13 @@
 //! How the tables read.
 //!
-//! Colour is resolved once, by `relic_core::ui`, which strips ANSI when the
-//! output is piped — the ladder every relic used to hand-write.
+//! Colour is resolved once, by `relic_core::ui`, and spent through
+//! `relic_core::style` — the ladder every relic used to hand-write.
 
 use std::io::Write;
 
 use anstream::adapter::strip_str;
 
-/// The escape sequences the tables use.
-#[derive(Clone, Copy, Debug)]
-pub struct Style {
-    /// Whether to emit any at all.
-    pub colour: bool,
-}
-
-impl Style {
-    /// Bold.
-    #[must_use]
-    pub fn bold(self, text: &str) -> String {
-        self.wrap("\u{1b}[1m", text)
-    }
-
-    /// Dim.
-    #[must_use]
-    pub fn dim(self, text: &str) -> String {
-        self.wrap("\u{1b}[2m", text)
-    }
-
-    /// Green.
-    #[must_use]
-    pub fn green(self, text: &str) -> String {
-        self.wrap("\u{1b}[32m", text)
-    }
-
-    /// Yellow.
-    #[must_use]
-    pub fn yellow(self, text: &str) -> String {
-        self.wrap("\u{1b}[33m", text)
-    }
-
-    /// Red.
-    #[must_use]
-    pub fn red(self, text: &str) -> String {
-        self.wrap("\u{1b}[31m", text)
-    }
-
-    fn wrap(self, code: &str, text: &str) -> String {
-        if self.colour {
-            format!("{code}{text}\u{1b}[0m")
-        } else {
-            text.to_owned()
-        }
-    }
-}
+pub use relic_core::style::Style;
 
 /// Print a heading with its dim subtitle.
 ///
@@ -81,15 +36,6 @@ pub fn pad(text: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{Style, pad};
-
-    #[test]
-    fn colour_is_a_choice_and_the_text_survives_it() {
-        let plain = Style { colour: false };
-        assert_eq!(plain.bold("x"), "x");
-        let colour = Style { colour: true };
-        assert!(colour.bold("x").contains('x'));
-        assert!(colour.bold("x").len() > 1);
-    }
 
     #[test]
     fn padding_counts_what_is_visible_rather_than_what_is_stored() {

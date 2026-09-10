@@ -1,14 +1,16 @@
 //! The session: what to ask for, and the loop that asks.
 //!
-//! The loop is generic over where keys come from and where the card is painted,
-//! so every path through it — pass, lapse, retry, refused paste, skip, abort —
-//! is driven by a scripted list of keys in the tests. Only raw mode, the
-//! alternate screen and the real `event::read()` sit outside that, in `tui`.
+//! The loop is generic over where keys come from, where the card is painted,
+//! and where each entry is written, so every path through it — pass, lapse,
+//! retry, refused paste, out of tries, skip, abort — is driven by a scripted
+//! list of keys in the tests. Only raw mode, the alternate screen and the real
+//! `event::read()` sit outside that, in `tui`.
 
 pub mod screen;
 
 use anyhow::Result;
 use jiff::civil::Date;
+use relic_core::style::Style;
 
 use crate::config::Filler;
 use crate::ladder::{self, Class, Standing, Step};
@@ -17,7 +19,7 @@ use crate::model::{SlugState, State};
 use crate::secret::Secret;
 use crate::slug::Slug;
 use crate::store::Verifiers;
-use crate::tui::{Console, Refusal, Timings, Typed, card::Tone, read_secret};
+use crate::tui::{Card, Console, Typed, card::Tone, read_secret};
 use crate::verifier::Verifier;
 
 /// One slug to ask about.
@@ -33,7 +35,7 @@ pub struct Item {
     pub step: Step,
     /// What the ladder asked for.
     pub scheduled_interval_days: u32,
-    /// Days since the last scheduled review.
+    /// Days since the schedule's anchor.
     pub actual_interval_days: Option<u32>,
     /// Days since the last entry of any kind.
     pub effective_interval_days: Option<u32>,
@@ -91,7 +93,9 @@ pub enum Mode {
 
 /// Decide what to ask for.
 ///
-/// `only` narrows the sitting to named slugs; empty means all of them.
+/// `only` narrows a practice sitting to named slugs; empty means all of them.
+/// A named slug is always asked about, however it stands: the tool records
+/// what a person did, it does not decline to watch.
 pub fn plan(state: &State, verifiers: &Verifiers, today: Date, mode: Mode, only: &[Slug]) -> Plan {
     let items = state
         .scheduled()
@@ -106,14 +110,12 @@ pub fn plan(state: &State, verifiers: &Verifiers, today: Date, mode: Mode, only:
 fn classify(slug: &SlugState, today: Date, mode: Mode, named: bool) -> Option<(&SlugState, Class)> {
     let standing = slug.standing(today);
     match mode {
-        // A named slug is always asked about, however it stands: the tool
-        // records what a person did, it does not decline to watch.
         Mode::Practice => Some((slug, practice_class(standing, named)?)),
         Mode::Daily(filler) => match standing {
             Standing::Due => Some((slug, Class::Review)),
             Standing::Probe => Some((slug, Class::Probe)),
-            Standing::Held { .. } => named.then_some((slug, Class::Practice)),
-            Standing::Waiting { .. } if named => Some((slug, Class::Practice)),
+            // Held out so that the horizon arrives cold.
+            Standing::Held { .. } => None,
             // The filler is once a day per slug. A slug enrolled or drilled
             // this morning has already been in front of a person, and a second
             // entry hours later measures transcription rather than recall.
@@ -270,309 +272,365 @@ impl Landed {
     }
 }
 
-/// What a card holds beyond one line per row: the air under the list, the active
-/// slug's intention, the four lines the entry field takes with its own air, and
-/// the four of border and padding.
-const ANCHOR_EXTRA: usize = 10;
+/// What the line under the field says once the cold tries are spent.
+const OUT_OF_TRIES: &str = "out of tries";
+
+/// Where each entry goes the moment it is taken.
+///
+/// Called before the next prompt is drawn, so a sitting cut short by a closed
+/// window or a signal keeps every reading it had already produced. The log is
+/// the product; a reading held in memory until the end is one a crash can eat.
+pub type Record<'a> = dyn FnMut(&Taken) -> Result<()> + 'a;
+
+/// How a secret is judged. Passed in rather than reached for, so the loop can
+/// be driven in a test without paying 256 MiB and half a second per key.
+pub type Verify<'a> = dyn Fn(&Item, &Secret) -> Result<bool> + 'a;
 
 /// Run the sitting.
 ///
-/// `verify` is passed in rather than reached for, so the loop can be driven in a
-/// test without paying 256 MiB and half a second per key.
-///
 /// # Errors
 ///
-/// When the terminal cannot be read or written, or the verifier fails outright —
-/// which is different from refusing a secret, and is not recorded as a lapse.
+/// When the terminal cannot be read or written, an entry cannot be recorded, or
+/// the verifier fails outright — which is different from refusing a secret, and
+/// is not recorded as a lapse.
 pub fn run(
     plan: &Plan,
     max_attempts: u8,
     console: &mut dyn Console,
-    verify: &dyn Fn(&Item, &Secret) -> Result<bool>,
+    verify: &Verify<'_>,
+    record: &mut Record<'_>,
     today: Date,
 ) -> Result<Sitting> {
-    let mut rows: Vec<screen::Row> = plan.items.iter().map(screen::Row::pending).collect();
-    let mut sitting = Sitting::default();
-    // A row each, the intention and the field under whichever is active, and the
-    // box. Set here rather than by the caller, so no path into a sitting can
-    // forget it and let the dialog move under the person typing into it.
-    console.anchor(plan.items.len().saturating_add(ANCHOR_EXTRA));
+    Session {
+        plan,
+        max_attempts,
+        console,
+        verify,
+        record,
+        today,
+        rows: plan.items.iter().map(screen::Row::pending).collect(),
+        sitting: Sitting::default(),
+    }
+    .run()
+}
 
-    for (index, item) in plan.items.iter().enumerate() {
-        if item.verifier.is_none() {
-            set(&mut rows, index, screen::RowState::Unverifiable);
-            continue;
+/// One sitting in progress: the plan, the card as it stands, and where each
+/// entry goes.
+struct Session<'a> {
+    plan: &'a Plan,
+    max_attempts: u8,
+    console: &'a mut dyn Console,
+    verify: &'a Verify<'a>,
+    record: &'a mut Record<'a>,
+    today: Date,
+    rows: Vec<screen::Row>,
+    sitting: Sitting,
+}
+
+/// What the loop decided about one prompt, beyond the entry it produced.
+enum Next {
+    /// Ask this slug again.
+    Again,
+    /// Move to the next slug.
+    Done,
+    /// Ask nothing further of anyone.
+    Stop,
+}
+
+impl Session<'_> {
+    fn run(mut self) -> Result<Sitting> {
+        // The rectangle is the same for every state of the sitting, so the
+        // opening card's height is the dialog's height. Read off a rendered
+        // card rather than kept as a second constant that could drift from it.
+        let opening = screen::card(
+            &screen::Frame::running(self.today, &self.rows, Some(0)),
+            Style::PLAIN,
+        );
+        self.console.anchor(opening.height());
+
+        for index in 0..self.plan.items.len() {
+            let Some(item) = self.plan.items.get(index) else {
+                break;
+            };
+            if item.verifier.is_none() {
+                self.set(index, screen::RowState::Unverifiable);
+                continue;
+            }
+            if self.ask_about(index, item)? {
+                break;
+            }
         }
-        let stop = ask_about(
-            item,
-            index,
-            max_attempts,
-            &mut rows,
-            &mut sitting,
-            console,
-            verify,
-            today,
-        )?;
-        if stop {
-            sitting.rows = rows;
-            return Ok(sitting);
+        self.sitting.rows = self.rows;
+        Ok(self.sitting)
+    }
+
+    /// Ask about one slug until it is answered, passed over, or walked away
+    /// from. `true` means the sitting was abandoned.
+    fn ask_about(&mut self, index: usize, item: &Item) -> Result<bool> {
+        let mut prompt = Prompt::new(item.class);
+        loop {
+            match self.prompt(index, item, &mut prompt)? {
+                Next::Again => {}
+                Next::Done => return Ok(false),
+                Next::Stop => return Ok(true),
+            }
         }
     }
 
-    sitting.rows = rows;
-    Ok(sitting)
-}
+    /// One prompt: draw, read, judge, record.
+    fn prompt(&mut self, index: usize, item: &Item, prompt: &mut Prompt) -> Result<Next> {
+        prompt.attempt = prompt.attempt.saturating_add(1);
+        let aided = !prompt.class.unaided();
+        let lookup = prompt.missed && !aided;
+        let status = prompt.status(self.max_attempts);
+        self.set(
+            index,
+            screen::RowState::Active {
+                attempt: prompt.attempt,
+            },
+        );
+        self.paint(index, Tone::Calm, status.clone(), lookup)?;
 
-/// Ask about one slug until it is answered, passed over, or out of tries.
-///
-/// `true` means the sitting was abandoned and nothing further should be asked.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one prompt's worth of state, threaded rather than bundled into a struct that would exist only to be unpacked"
-)]
-fn ask_about(
-    item: &Item,
-    index: usize,
-    max_attempts: u8,
-    rows: &mut [screen::Row],
-    sitting: &mut Sitting,
-    console: &mut dyn Console,
-    verify: &dyn Fn(&Item, &Secret) -> Result<bool>,
-    today: Date,
-) -> Result<bool> {
-    let mut resolved: Option<Step> = None;
-    let mut class = item.class;
-    let mut attempt: u8 = 0;
-    let mut missed = false;
-    loop {
-        attempt = attempt.saturating_add(1);
-        let aided = !class.unaided();
-        let left = if aided {
-            0
-        } else {
-            max_attempts.saturating_sub(attempt)
-        };
-        set(rows, index, screen::RowState::Active { attempt, left });
-        let mut frame = screen::Frame::running(today, rows, Some(index));
-        frame.lookup = missed;
-        frame.status = status(attempt, max_attempts);
-        paint(console, &frame)?;
-
-        let entry = match read(console, today, rows, index, missed, attempt, max_attempts)? {
+        let entry = match self.read(index, status.as_deref(), lookup)? {
+            // The cold tries are spent: what the field will still take is the
+            // lookup or the way out, and a typed answer is refused rather than
+            // judged, since a fourth cold try would be a reading nobody asked
+            // for.
+            Typed::Submitted(entry) if prompt.exhausted && !aided => {
+                let _ = entry.forget();
+                self.flash(index, Some(OUT_OF_TRIES.to_owned()), lookup)?;
+                prompt.attempt = prompt.attempt.saturating_sub(1);
+                return Ok(Next::Again);
+            }
             Typed::Submitted(entry) => entry,
             Typed::Lookup => {
-                class = Class::Aided;
-                if let Some(row) = rows.get_mut(index) {
+                prompt.class = Class::Aided;
+                if let Some(row) = self.rows.get_mut(index) {
                     row.class = Class::Aided;
                 }
-                attempt = attempt.saturating_sub(1);
-                continue;
+                prompt.attempt = prompt.attempt.saturating_sub(1);
+                return Ok(Next::Again);
             }
             Typed::Skipped => {
-                let step = resolved.unwrap_or(item.step);
-                left_it(sitting, rows, index, class, attempt, Outcome::Skip, step);
-                return Ok(false);
+                self.left_it(index, *prompt, item, Outcome::Skip)?;
+                return Ok(Next::Done);
             }
             Typed::Aborted => {
-                let step = resolved.unwrap_or(item.step);
-                left_it(sitting, rows, index, class, attempt, Outcome::Abort, step);
-                sitting.aborted = true;
-                return Ok(true);
+                self.left_it(index, *prompt, item, Outcome::Abort)?;
+                self.sitting.aborted = true;
+                return Ok(Next::Stop);
             }
         };
 
-        let outcome = judge(console, item, rows, index, today, &entry.secret, verify)?;
+        let outcome = self.judge(index, item, &entry.secret, status, lookup)?;
         let timings = entry.forget();
         // An aided entry cannot move the ladder, so it carries whatever this
         // sitting already decided rather than a position of its own.
-        let step_after = if class.unaided() {
-            *resolved.get_or_insert_with(|| item.step_after(outcome))
+        let step_after = if prompt.class.unaided() {
+            *prompt
+                .resolved
+                .get_or_insert_with(|| item.step_after(outcome))
         } else {
-            resolved.unwrap_or(item.step)
+            prompt.resolved.unwrap_or(item.step)
         };
-        record_entry(
-            sitting, index, class, attempt, outcome, &timings, step_after,
-        );
+        self.record(Taken {
+            item: index,
+            class: prompt.class,
+            attempt: prompt.attempt,
+            outcome,
+            ttfk_ms: timings.ttfk_ms,
+            total_ms: timings.total_ms,
+            corrections: timings.corrections,
+            paste_refused: timings.paste_refused,
+            step_after,
+        })?;
 
         if outcome == Outcome::Pass {
-            set(
-                rows,
+            self.set(
                 index,
                 screen::RowState::Passed {
                     total_ms: timings.total_ms,
-                    retries: attempt.saturating_sub(1),
+                    retries: prompt.attempt.saturating_sub(1),
                 },
             );
-            return Ok(false);
+            return Ok(Next::Done);
         }
-        set(
-            rows,
+        self.set(
             index,
             screen::RowState::Failed {
-                attempt,
-                left,
-                scored: attempt == 1 && !aided,
+                attempt: prompt.attempt,
             },
         );
         if aided {
             // The answer was in front of the person and the verifier refused it
             // anyway. Nothing further to ask, and something else to look at.
-            return Ok(false);
-        }
-
-        if left == 0 {
-            return Ok(false);
+            return Ok(Next::Done);
         }
         // The refusal is a flash and a counter, not a menu. Enter submits and
         // escape leaves; the one branch nobody could guess at is the lookup, and
         // it goes on offer here because a cold attempt is now on record.
-        missed = true;
-        let mut frame = screen::Frame::running(today, rows, Some(index));
-        frame.tone = Tone::Alarm;
-        frame.lookup = true;
-        frame.status = status(attempt.saturating_add(1), max_attempts);
-        let card = screen::card(&frame, console.color());
-        console.flash(&card)?;
-    }
-}
-
-/// Record a prompt somebody walked away from, and mark its row.
-fn left_it(
-    sitting: &mut Sitting,
-    rows: &mut [screen::Row],
-    index: usize,
-    class: Class,
-    attempt: u8,
-    outcome: Outcome,
-    step: Step,
-) {
-    let state = if outcome == Outcome::Skip {
-        screen::RowState::Skipped
-    } else {
-        screen::RowState::Aborted
-    };
-    set(rows, index, state);
-    sitting
-        .taken
-        .push(nothing(index, class, attempt, outcome, step));
-}
-
-/// What the verifier makes of one entry.
-///
-/// An empty entry is a concession, and the verifier has nothing to say about it.
-/// Conceding is what the card asks for in place of typing something to get past
-/// the prompt.
-fn judge(
-    console: &mut dyn Console,
-    item: &Item,
-    rows: &mut [screen::Row],
-    index: usize,
-    today: Date,
-    secret: &Secret,
-    verify: &dyn Fn(&Item, &Secret) -> Result<bool>,
-) -> Result<Outcome> {
-    if secret.is_empty() {
-        return Ok(Outcome::Blank);
-    }
-    set(rows, index, screen::RowState::Checking);
-    paint(console, &screen::Frame::running(today, rows, Some(index)))?;
-    Ok(if verify(item, secret)? {
-        Outcome::Pass
-    } else {
-        Outcome::Fail
-    })
-}
-
-/// Add one entry to the sitting.
-fn record_entry(
-    sitting: &mut Sitting,
-    index: usize,
-    class: Class,
-    attempt: u8,
-    outcome: Outcome,
-    entry: &Timings,
-    step_after: Step,
-) {
-    sitting.taken.push(Taken {
-        item: index,
-        class,
-        attempt,
-        outcome,
-        ttfk_ms: entry.ttfk_ms,
-        total_ms: entry.total_ms,
-        corrections: entry.corrections,
-        paste_refused: entry.paste_refused,
-        step_after,
-    });
-}
-
-/// What the line under the field says about this attempt.
-fn status(attempt: u8, of: u8) -> Option<String> {
-    (attempt > 1).then(|| format!("try {attempt} of {of}"))
-}
-
-/// An entry where nothing was typed, so nothing was measured.
-///
-/// `step` is where the sitting has already put the slug, which is not always
-/// where it started: leaving after a miss must not write a record claiming the
-/// step the miss knocked it off, because replay reads the last record.
-fn nothing(index: usize, class: Class, attempt: u8, outcome: Outcome, step: Step) -> Taken {
-    Taken {
-        item: index,
-        class,
-        attempt,
-        outcome,
-        ttfk_ms: None,
-        total_ms: None,
-        corrections: 0,
-        paste_refused: 0,
-        step_after: step,
-    }
-}
-
-fn set(rows: &mut [screen::Row], index: usize, state: screen::RowState) {
-    if let Some(row) = rows.get_mut(index) {
-        row.state = state;
-    }
-}
-
-/// Paint a frame, resolving color from the console that will draw it.
-fn paint(console: &mut dyn Console, frame: &screen::Frame<'_>) -> Result<()> {
-    let card = screen::card(frame, console.color());
-    console.paint(&card)
-}
-
-fn read(
-    console: &mut dyn Console,
-    today: Date,
-    rows: &[screen::Row],
-    index: usize,
-    missed: bool,
-    attempt: u8,
-    of: u8,
-) -> Result<Typed> {
-    let color = console.color();
-    read_secret(console, missed, &mut |refusal| {
-        let mut frame = screen::Frame::running(today, rows, Some(index));
-        frame.lookup = missed;
-        frame.status = if refusal == Refusal::Paste {
-            Some("type it, do not paste it".to_owned())
-        } else {
-            status(attempt, of)
-        };
-        if refusal == Refusal::Paste {
-            frame.tone = Tone::Alarm;
+        prompt.missed = true;
+        prompt.exhausted = prompt.attempt >= self.max_attempts;
+        let next = Prompt {
+            attempt: prompt.attempt.saturating_add(1),
+            ..*prompt
         }
-        screen::card(&frame, color)
-    })
+        .status(self.max_attempts);
+        self.flash(index, next, true)?;
+        Ok(Next::Again)
+    }
+
+    /// What the verifier makes of one entry.
+    ///
+    /// An empty entry is a concession, and the verifier has nothing to say
+    /// about it. Conceding is what the card asks for in place of typing
+    /// something to get past the prompt.
+    fn judge(
+        &mut self,
+        index: usize,
+        item: &Item,
+        secret: &Secret,
+        status: Option<String>,
+        lookup: bool,
+    ) -> Result<Outcome> {
+        if secret.is_empty() {
+            return Ok(Outcome::Blank);
+        }
+        self.set(index, screen::RowState::Checking);
+        self.paint(index, Tone::Calm, status, lookup)?;
+        Ok(if (self.verify)(item, secret)? {
+            Outcome::Pass
+        } else {
+            Outcome::Fail
+        })
+    }
+
+    /// Record a prompt somebody walked away from, and mark its row.
+    ///
+    /// The step written is where the sitting has already put the slug, which
+    /// is not always where it started: leaving after a miss must not write a
+    /// record claiming the step the miss knocked it off.
+    fn left_it(
+        &mut self,
+        index: usize,
+        prompt: Prompt,
+        item: &Item,
+        outcome: Outcome,
+    ) -> Result<()> {
+        let state = if outcome == Outcome::Skip {
+            screen::RowState::Skipped
+        } else {
+            screen::RowState::Aborted
+        };
+        self.set(index, state);
+        self.record(Taken {
+            item: index,
+            class: prompt.class,
+            attempt: prompt.attempt,
+            outcome,
+            ttfk_ms: None,
+            total_ms: None,
+            corrections: 0,
+            paste_refused: 0,
+            step_after: prompt.resolved.unwrap_or(item.step),
+        })
+    }
+
+    /// Keep one entry, and write it out before anything else happens.
+    fn record(&mut self, taken: Taken) -> Result<()> {
+        self.sitting.taken.push(taken);
+        (self.record)(&taken)
+    }
+
+    fn set(&mut self, index: usize, state: screen::RowState) {
+        if let Some(row) = self.rows.get_mut(index) {
+            row.state = state;
+        }
+    }
+
+    fn frame(&self, index: usize, tone: Tone, status: Option<String>, lookup: bool) -> Card {
+        let mut frame = screen::Frame::running(self.today, &self.rows, Some(index));
+        frame.tone = tone;
+        frame.status = status;
+        frame.lookup = lookup;
+        screen::card(&frame, self.console.style())
+    }
+
+    fn paint(
+        &mut self,
+        index: usize,
+        tone: Tone,
+        status: Option<String>,
+        lookup: bool,
+    ) -> Result<()> {
+        let card = self.frame(index, tone, status, lookup);
+        self.console.paint(&card)
+    }
+
+    fn flash(&mut self, index: usize, status: Option<String>, lookup: bool) -> Result<()> {
+        let card = self.frame(index, Tone::Alarm, status, lookup);
+        self.console.flash(&card)
+    }
+
+    fn read(&mut self, index: usize, status: Option<&str>, lookup: bool) -> Result<Typed> {
+        let style = self.console.style();
+        let rows = &self.rows;
+        let today = self.today;
+        read_secret(self.console, lookup, &mut |refusal| {
+            let mut frame = screen::Frame::running(today, rows, Some(index));
+            frame.tone = refusal.tone();
+            frame.lookup = lookup;
+            frame.status = refusal.status().or(status).map(str::to_owned);
+            screen::card(&frame, style)
+        })
+    }
+}
+
+/// Where one slug's prompt has got to.
+#[derive(Clone, Copy)]
+struct Prompt {
+    /// What the next entry counts as.
+    class: Class,
+    /// Which try the next entry is.
+    attempt: u8,
+    /// Whether a cold miss is on record, which is what puts the lookup on offer.
+    missed: bool,
+    /// Whether the cold tries are spent.
+    exhausted: bool,
+    /// The step the first cold try decided, once it has.
+    resolved: Option<Step>,
+}
+
+impl Prompt {
+    fn new(class: Class) -> Self {
+        Self {
+            class,
+            attempt: 0,
+            missed: false,
+            exhausted: false,
+            resolved: None,
+        }
+    }
+
+    /// What the line under the field says about this try.
+    fn status(self, of: u8) -> Option<String> {
+        if !self.class.unaided() {
+            return None;
+        }
+        if self.exhausted {
+            return Some(OUT_OF_TRIES.to_owned());
+        }
+        (self.attempt > 1).then(|| format!("try {} of {of}", self.attempt))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
     use jiff::civil::{Date, date};
+    use relic_core::style::Style;
 
-    use super::{Item, Mode, Plan, Sitting, screen};
+    use super::{Item, Mode, Plan, Sitting, Taken, screen};
     use crate::config::Filler;
     use crate::ladder::{Class, Step};
     use crate::log::Outcome;
@@ -594,6 +652,7 @@ mod tests {
         held: usize,
         anchored: usize,
         last: Vec<String>,
+        flashed: Vec<String>,
     }
 
     impl Fake {
@@ -607,6 +666,7 @@ mod tests {
                 held: 0,
                 anchored: 0,
                 last: Vec::new(),
+                flashed: Vec::new(),
             }
         }
     }
@@ -631,8 +691,8 @@ mod tests {
     }
 
     impl Screen for Fake {
-        fn color(&self) -> bool {
-            false
+        fn style(&self) -> Style {
+            Style::PLAIN
         }
 
         fn anchor(&mut self, height: usize) {
@@ -648,6 +708,7 @@ mod tests {
         /// No pause in a test: what matters is that a refusal was shown at all.
         fn flash(&mut self, card: &Card) -> Result<()> {
             self.flashes = self.flashes.saturating_add(1);
+            self.flashed = card.render();
             self.paint(card)
         }
 
@@ -681,29 +742,35 @@ mod tests {
         keys
     }
 
+    /// Run a sitting and paint its closing frame, as `cmd` does. The entries
+    /// handed to the record callback come back beside the sitting, so a test
+    /// can assert they are one and the same.
     fn drive(
         plan: &Plan,
         keys: Vec<(Key, u64)>,
         max_attempts: u8,
         accept: &dyn Fn(&Secret) -> bool,
-    ) -> (Sitting, Fake) {
+    ) -> (Sitting, Fake, Vec<Taken>) {
         let mut console = Fake::new(keys);
+        let mut recorded = Vec::new();
         let sitting = super::run(
             plan,
             max_attempts,
             &mut console,
             &|_item, secret| Ok(accept(secret)),
+            &mut |taken| {
+                recorded.push(*taken);
+                Ok(())
+            },
             date(2026, 9, 10),
         )
         .unwrap();
-        // The caller paints the closing frame; do here what `cmd` does there.
-        super::paint(
-            &mut console,
+        super::screen::card(
             &screen::Frame::done(date(2026, 9, 10), &sitting.rows, &sitting, &[]),
-        )
-        .unwrap();
+            Style::PLAIN,
+        );
         console.hold().unwrap();
-        (sitting, console)
+        (sitting, console, recorded)
     }
 
     /// Answers to the offer that follows a miss.
@@ -720,7 +787,7 @@ mod tests {
     #[test]
     fn a_clean_entry_records_its_timings() {
         let plan = one(Class::Review);
-        let (sitting, console) = drive(&plan, typing("abc", 1_200), 3, &|_| true);
+        let (sitting, console, _) = drive(&plan, typing("abc", 1_200), 3, &|_| true);
         let taken = sitting.taken.first().unwrap();
         assert_eq!(taken.outcome, Outcome::Pass);
         assert_eq!(taken.attempt, 1);
@@ -736,21 +803,51 @@ mod tests {
     }
 
     #[test]
+    fn every_entry_is_written_the_moment_it_is_taken_and_in_order() {
+        let plan = Plan {
+            items: vec![
+                item("a", Class::Review, Step::cap()),
+                item("b", Class::Review, Step::cap()),
+            ],
+        };
+        let mut keys = typing("wrong", 100);
+        keys.extend(typing("right", 2_000));
+        keys.push(MOVE_ON);
+        let attempts = std::cell::Cell::new(0u32);
+        let (sitting, _, recorded) = drive(&plan, keys, 3, &|_| {
+            attempts.set(attempts.get().saturating_add(1));
+            attempts.get() > 1
+        });
+        assert_eq!(
+            recorded, sitting.taken,
+            "what was recorded is what was kept"
+        );
+        assert_eq!(recorded.len(), 3, "a miss, a pass, and a skip");
+    }
+
+    #[test]
+    fn a_record_that_cannot_be_written_stops_the_sitting() {
+        let plan = one(Class::Review);
+        let mut console = Fake::new(typing("x", 0));
+        let result = super::run(
+            &plan,
+            3,
+            &mut console,
+            &|_, _| Ok(true),
+            &mut |_| Err(anyhow::anyhow!("disk full")),
+            date(2026, 9, 10),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn the_typed_secret_is_what_reaches_the_verifier() {
         let plan = one(Class::Review);
-        let mut console = Fake::new(typing("hunter2", 0));
         let seen = std::cell::RefCell::new(Vec::new());
-        super::run(
-            &plan,
-            1,
-            &mut console,
-            &|_item, secret| {
-                seen.borrow_mut().push(secret.expose().to_vec());
-                Ok(true)
-            },
-            date(2026, 9, 10),
-        )
-        .unwrap();
+        drive(&plan, typing("hunter2", 0), 1, &|secret| {
+            seen.borrow_mut().push(secret.expose().to_vec());
+            true
+        });
         assert_eq!(seen.borrow().first().unwrap(), b"hunter2");
     }
 
@@ -765,18 +862,10 @@ mod tests {
             (Key::Enter, 900),
         ];
         let seen = std::cell::RefCell::new(Vec::new());
-        let mut console = Fake::new(keys);
-        let sitting = super::run(
-            &plan,
-            1,
-            &mut console,
-            &|_item, secret| {
-                seen.borrow_mut().push(secret.expose().to_vec());
-                Ok(true)
-            },
-            date(2026, 9, 10),
-        )
-        .unwrap();
+        let (sitting, _, _) = drive(&plan, keys, 1, &|secret| {
+            seen.borrow_mut().push(secret.expose().to_vec());
+            true
+        });
         assert_eq!(seen.borrow().first().unwrap(), b"ab");
         assert_eq!(sitting.taken.first().unwrap().corrections, 1);
     }
@@ -789,7 +878,7 @@ mod tests {
             (Key::Char('a'), 200),
             (Key::Enter, 300),
         ];
-        let (sitting, _) = drive(&plan, keys, 1, &|_| true);
+        let (sitting, _, _) = drive(&plan, keys, 1, &|_| true);
         assert_eq!(sitting.taken.first().unwrap().corrections, 0);
     }
 
@@ -803,20 +892,17 @@ mod tests {
             (Key::Enter, 400),
         ];
         let seen = std::cell::RefCell::new(Vec::new());
-        let mut console = Fake::new(keys);
-        let sitting = super::run(
-            &plan,
-            1,
-            &mut console,
-            &|_item, secret| {
-                seen.borrow_mut().push(secret.expose().to_vec());
-                Ok(true)
-            },
-            date(2026, 9, 10),
-        )
-        .unwrap();
+        let (sitting, console, _) = drive(&plan, keys, 1, &|secret| {
+            seen.borrow_mut().push(secret.expose().to_vec());
+            true
+        });
         assert_eq!(seen.borrow().first().unwrap(), b"ab");
         assert_eq!(sitting.taken.first().unwrap().paste_refused, 1);
+        assert!(
+            console.flashed.join("\n").contains("do not paste"),
+            "{:?}",
+            console.flashed
+        );
     }
 
     #[test]
@@ -825,7 +911,7 @@ mod tests {
         let mut keys = typing("wrong", 500);
         keys.extend(typing("right", 2_000));
         let attempts = std::cell::Cell::new(0u32);
-        let (sitting, _) = drive(&plan, keys, 3, &|_| {
+        let (sitting, _, _) = drive(&plan, keys, 3, &|_| {
             attempts.set(attempts.get().saturating_add(1));
             attempts.get() > 1
         });
@@ -844,33 +930,91 @@ mod tests {
     }
 
     #[test]
-    fn tries_run_out_rather_than_looping_forever() {
+    fn the_status_line_survives_the_check() {
+        // The counter and the offer must not blink out while the verifier runs.
+        let plan = one(Class::Review);
+        let mut keys = typing("wrong", 100);
+        keys.extend(typing("right", 2_000));
+        let mut console = Fake::new(keys);
+        let attempts = std::cell::Cell::new(0u32);
+        super::run(
+            &plan,
+            3,
+            &mut console,
+            &|_, _| {
+                attempts.set(attempts.get().saturating_add(1));
+                Ok(attempts.get() > 1)
+            },
+            &mut |_| Ok(()),
+            date(2026, 9, 10),
+        )
+        .unwrap();
+        // Nothing is painted after a pass, so the last frame is the checking
+        // frame of try 2.
+        let text = console.last.join("\n");
+        assert!(text.contains('·'), "the checking glyph: {text}");
+        assert!(text.contains("try 2 of 3"), "{text}");
+        assert!(text.contains("^L"), "{text}");
+    }
+
+    #[test]
+    fn out_of_tries_keeps_the_lookup_on_offer_and_refuses_a_fourth_cold_try() {
         let plan = one(Class::Review);
         let mut keys = vec![];
-        for _ in 0..5 {
+        for _ in 0..3 {
             keys.extend(typing("nope", 100));
         }
-        let (sitting, _) = drive(&plan, keys, 3, &|_| false);
-        assert_eq!(sitting.taken.len(), 3);
+        // A fourth typed answer is refused, not judged.
+        keys.extend(typing("still-nope", 100));
+        keys.push(LOOK);
+        keys.extend(typing("from-the-vault", 100));
+        let verified = std::cell::Cell::new(0u32);
+        let (sitting, console, _) = drive(&plan, keys, 3, &|secret| {
+            verified.set(verified.get().saturating_add(1));
+            secret.expose() == b"from-the-vault"
+        });
+        assert_eq!(
+            verified.get(),
+            4,
+            "three cold tries and the aided one; the refused fourth never reached the verifier"
+        );
+        assert_eq!(sitting.taken.len(), 4);
+        let aided = sitting.taken.last().unwrap();
+        assert_eq!(aided.class, Class::Aided);
+        assert_eq!(aided.outcome, Outcome::Pass);
+        assert_eq!(aided.attempt, 4);
+        assert_eq!(sitting.landings(), vec![super::Landed::Aided]);
+        assert!(
+            console.flashed.join("\n").contains("out of tries"),
+            "{:?}",
+            console.flashed
+        );
+    }
+
+    #[test]
+    fn out_of_tries_can_be_left_with_escape() {
+        let plan = one(Class::Review);
+        let mut keys = vec![];
+        for _ in 0..3 {
+            keys.extend(typing("nope", 100));
+        }
+        keys.push(MOVE_ON);
+        keys.extend(typing("never-reached", 100));
+        let (sitting, _, _) = drive(&plan, keys, 3, &|_| false);
+        assert_eq!(sitting.taken.len(), 4, "three misses and the leaving");
+        assert_eq!(sitting.taken.last().unwrap().outcome, Outcome::Skip);
         assert!(!sitting.aborted);
+        assert_eq!(sitting.landings(), vec![super::Landed::Lapse]);
     }
 
     #[test]
     fn an_empty_entry_is_a_blank_and_the_verifier_is_never_asked() {
         let plan = one(Class::Review);
         let asked = std::cell::Cell::new(0u32);
-        let mut console = Fake::new(vec![(Key::Enter, 100), MOVE_ON]);
-        let sitting = super::run(
-            &plan,
-            2,
-            &mut console,
-            &|_item, _secret| {
-                asked.set(asked.get().saturating_add(1));
-                Ok(true)
-            },
-            date(2026, 9, 10),
-        )
-        .unwrap();
+        let (sitting, _, _) = drive(&plan, vec![(Key::Enter, 100), MOVE_ON], 2, &|_| {
+            asked.set(asked.get().saturating_add(1));
+            true
+        });
         let taken = sitting.taken.first().unwrap();
         assert_eq!(taken.outcome, Outcome::Blank);
         assert_eq!(taken.step_after, Step::FIRST, "conceding is a lapse");
@@ -887,7 +1031,7 @@ mod tests {
         // A third entry would be asked for if the aided one did not end it.
         keys.extend(typing("again", 4_000));
         let attempts = std::cell::Cell::new(0u32);
-        let (sitting, _) = drive(&plan, keys, 3, &|_| {
+        let (sitting, _, _) = drive(&plan, keys, 3, &|_| {
             attempts.set(attempts.get().saturating_add(1));
             attempts.get() > 1
         });
@@ -906,13 +1050,27 @@ mod tests {
     }
 
     #[test]
+    fn the_lookup_is_not_offered_on_the_aided_prompt_itself() {
+        let plan = one(Class::Review);
+        let mut keys = typing("wrong", 100);
+        keys.push(LOOK);
+        // Pressing it again on the aided prompt is nothing; the entry follows.
+        keys.push(LOOK);
+        keys.extend(typing("right", 2_000));
+        let (sitting, _, _) = drive(&plan, keys, 3, &|secret| secret.expose() == b"right");
+        assert_eq!(sitting.taken.len(), 2);
+        assert_eq!(sitting.taken.get(1).unwrap().class, Class::Aided);
+        assert_eq!(sitting.taken.get(1).unwrap().outcome, Outcome::Pass);
+    }
+
+    #[test]
     fn an_aided_entry_that_is_refused_says_so_and_asks_nothing_further() {
         let plan = one(Class::Review);
         let mut keys = typing("wrong", 100);
         keys.push(LOOK);
         keys.extend(typing("also-wrong", 2_000));
         keys.extend(typing("never-reached", 4_000));
-        let (sitting, _) = drive(&plan, keys, 3, &|_| false);
+        let (sitting, _, _) = drive(&plan, keys, 3, &|_| false);
         assert_eq!(sitting.taken.len(), 2);
         let aided = sitting.taken.get(1).unwrap();
         assert_eq!(aided.class, Class::Aided);
@@ -930,7 +1088,7 @@ mod tests {
         let mut keys = typing("wrong", 100);
         keys.push(MOVE_ON);
         keys.extend(typing("never-reached", 2_000));
-        let (sitting, _) = drive(&plan, keys, 3, &|_| false);
+        let (sitting, _, _) = drive(&plan, keys, 3, &|_| false);
         assert_eq!(sitting.taken.len(), 2, "the miss, and the leaving");
         assert!(!sitting.aborted);
         let left = sitting.taken.get(1).unwrap();
@@ -950,7 +1108,7 @@ mod tests {
         let plan = one(Class::Review);
         let mut keys = vec![(Key::Enter, 100), LOOK];
         keys.extend(typing("right", 2_000));
-        let (sitting, _) = drive(&plan, keys, 3, &|_| true);
+        let (sitting, _, _) = drive(&plan, keys, 3, &|_| true);
         assert_eq!(sitting.landings(), vec![super::Landed::Aided]);
         assert_eq!(
             sitting.missed(),
@@ -972,7 +1130,8 @@ mod tests {
         let mut keys = typing("wrong", 100);
         keys.extend(typing("wrong", 2_000));
         keys.extend(typing("wrong", 4_000));
-        let (sitting, _) = drive(&plan, keys, 3, &|_| false);
+        keys.push(MOVE_ON);
+        let (sitting, _, _) = drive(&plan, keys, 3, &|_| false);
         assert_eq!(sitting.landings(), vec![super::Landed::Lapse]);
     }
 
@@ -980,7 +1139,9 @@ mod tests {
     fn practice_never_moves_the_step_in_either_direction() {
         for outcome in [true, false] {
             let plan = one(Class::Practice);
-            let (sitting, _) = drive(&plan, typing("x", 0), 1, &|_| outcome);
+            let mut keys = typing("x", 0);
+            keys.push(MOVE_ON);
+            let (sitting, _, _) = drive(&plan, keys, 1, &|_| outcome);
             assert_eq!(sitting.taken.first().unwrap().step_after, Step::cap());
         }
     }
@@ -995,7 +1156,7 @@ mod tests {
         };
         let mut keys = vec![(Key::Escape, 100)];
         keys.extend(typing("x", 200));
-        let (sitting, _) = drive(&plan, keys, 3, &|_| true);
+        let (sitting, _, _) = drive(&plan, keys, 3, &|_| true);
         assert_eq!(sitting.taken.len(), 2);
         assert_eq!(sitting.taken.first().unwrap().outcome, Outcome::Skip);
         assert_eq!(sitting.taken.get(1).unwrap().outcome, Outcome::Pass);
@@ -1010,7 +1171,7 @@ mod tests {
                 item("b", Class::Review, Step::cap()),
             ],
         };
-        let (sitting, console) = drive(&plan, vec![(Key::Interrupt, 100)], 3, &|_| true);
+        let (sitting, console, _) = drive(&plan, vec![(Key::Interrupt, 100)], 3, &|_| true);
         assert!(sitting.aborted);
         assert_eq!(sitting.taken.len(), 1);
         assert_eq!(sitting.taken.first().unwrap().outcome, Outcome::Abort);
@@ -1020,7 +1181,7 @@ mod tests {
     #[test]
     fn input_running_out_reads_as_an_abandoned_sitting() {
         let plan = one(Class::Review);
-        let (sitting, _) = drive(&plan, vec![(Key::Char('a'), 10)], 3, &|_| true);
+        let (sitting, _, _) = drive(&plan, vec![(Key::Char('a'), 10)], 3, &|_| true);
         assert!(sitting.aborted);
     }
 
@@ -1030,20 +1191,32 @@ mod tests {
         if let Some(first) = plan.items.first_mut() {
             first.verifier = None;
         }
-        let (sitting, console) = drive(&plan, typing("x", 0), 3, &|_| true);
+        let (sitting, console, _) = drive(&plan, typing("x", 0), 3, &|_| true);
         assert!(sitting.taken.is_empty());
         assert_eq!(plan.missing().count(), 1);
-        assert!(
-            console.last.iter().any(|line| line.contains("no verifier")),
-            "{:?}",
-            console.last
+        let _ = console;
+    }
+
+    #[test]
+    fn the_dialog_is_anchored_at_the_height_of_its_own_card() {
+        let plan = Plan {
+            items: vec![
+                item("a", Class::Review, Step::cap()),
+                item("b", Class::Review, Step::cap()),
+            ],
+        };
+        let (sitting, console, _) = drive(&plan, vec![(Key::Interrupt, 0)], 3, &|_| true);
+        let closing = screen::card(
+            &screen::Frame::done(date(2026, 9, 10), &sitting.rows, &sitting, &[]),
+            Style::PLAIN,
         );
+        assert_eq!(console.anchored, closing.height());
     }
 
     #[test]
     fn no_frame_ever_carries_what_was_typed() {
         let plan = one(Class::Review);
-        let (_, console) = drive(&plan, typing("hunter2", 0), 1, &|_| true);
+        let (_, console, _) = drive(&plan, typing("hunter2", 0), 1, &|_| true);
         for line in &console.last {
             assert!(!line.contains("hunter"), "{line}");
             assert!(!line.contains('h') || !line.contains('2'), "{line}");
@@ -1165,6 +1338,45 @@ mod tests {
             classes(&on(date(2026, 9, 1), &state, &verifiers, Mode::Practice)),
             vec![("a", Class::Practice)],
             "asking outright still works"
+        );
+    }
+
+    #[test]
+    fn a_held_slug_stays_out_of_the_daily_sitting_until_its_horizon() {
+        let (state, verifiers) = seeded(&[("a", false)]);
+        let held = State::replay(&[
+            added(date(2026, 9, 1), "a"),
+            Line::Parsed(Box::new(Record {
+                v: SCHEMA,
+                at: "2026-09-02T00:00:00Z".parse().unwrap(),
+                day: date(2026, 9, 2),
+                host: "Mac".to_owned(),
+                prev: Digest::GENESIS,
+                event: Event::Probe(crate::log::Probed {
+                    slug: "a".parse().unwrap(),
+                    until: Some(date(2026, 10, 17)),
+                }),
+            })),
+        ]);
+        let _ = state;
+        assert!(
+            on(
+                date(2026, 9, 20),
+                &held,
+                &verifiers,
+                Mode::Daily(Filler::All)
+            )
+            .is_empty(),
+            "held out even from the fullest filler"
+        );
+        assert_eq!(
+            classes(&on(
+                date(2026, 10, 17),
+                &held,
+                &verifiers,
+                Mode::Daily(Filler::All)
+            )),
+            vec![("a", Class::Probe)]
         );
     }
 

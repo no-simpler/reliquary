@@ -84,7 +84,7 @@ impl Verifier {
     pub fn create(secret: &Secret, salt: &[u8; SALT_LEN]) -> Result<Self, Error> {
         let params = params()?;
         let encoded = SaltString::encode_b64(salt).map_err(Error::Render)?;
-        let output = digest(secret, salt, &params)?;
+        let output = digest_bytes(secret, salt, &params)?;
         let hash = PasswordHash {
             algorithm: Ident::new(argon2::ARGON2ID_IDENT.as_str()).map_err(Error::Render)?,
             version: Some(u32::from(Version::V0x13)),
@@ -155,10 +155,6 @@ impl Verifier {
 
 fn params() -> Result<Params, Error> {
     Params::new(M_COST_KIB, T_COST, P_COST, Some(OUTPUT_LEN)).map_err(Error::Params)
-}
-
-fn digest(secret: &Secret, salt: &[u8; SALT_LEN], params: &Params) -> Result<Vec<u8>, Error> {
-    digest_bytes(secret, salt, params)
 }
 
 /// Hash into a buffer we own, so the working memory can be wiped afterwards.

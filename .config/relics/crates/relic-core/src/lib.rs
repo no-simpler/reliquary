@@ -12,8 +12,9 @@
 //! the same tmp-then-rename by hand and both had the same collision in it, and
 //! [`frontmatter`] because a third relic then needed the same document split.
 //!
-//! [`ui`] and [`fmt`] are the platform half: one answer to "who is reading this"
-//! and one spelling for the quantities that answer reports. [`finding`] is the
+//! [`ui`], [`style`] and [`fmt`] are the platform half: one answer to "who is reading
+//! this", one way of spending colour on it, and one spelling for the quantities
+//! that answer reports. [`finding`] is the
 //! same move for verification: the machine's checks live in several programs, and
 //! this is the only thing they agree on.
 //!
@@ -36,5 +37,6 @@ pub mod fs;
 pub mod git;
 pub mod lock;
 pub mod path;
+pub mod style;
 pub mod tool;
 pub mod ui;

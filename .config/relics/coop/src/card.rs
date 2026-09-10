@@ -5,14 +5,10 @@
 //! be a test rather than a screenshot.
 
 use relic_core::finding::Severity;
+use relic_core::style::{Style as Paint, Tint};
 
 use crate::config::Style;
 use crate::notice::Notice;
-
-const RESET: &str = "\x1b[0m";
-const DIM: &str = "\x1b[2m";
-const YELLOW: &str = "\x1b[33m";
-const RED: &str = "\x1b[1;31m";
 
 /// The title, which is also the narrowest a header can be.
 const TITLE: &str = "coop";
@@ -57,7 +53,7 @@ impl Glyphs {
 ///
 /// An empty coop draws no box. The intended state of this inbox is empty, and a
 /// box announcing that would be the first piece of furniture in it.
-pub fn draw(notices: &[Notice], width: usize, style: Style, color: bool) -> Option<String> {
+pub fn draw(notices: &[Notice], width: usize, style: Style, paint: Paint) -> Option<String> {
     if notices.is_empty() {
         return None;
     }
@@ -71,7 +67,7 @@ pub fn draw(notices: &[Notice], width: usize, style: Style, color: bool) -> Opti
 
     let mut lines = vec![header(&glyphs, width)];
     for notice in notices {
-        lines.push(row(notice, &glyphs, inner, column, color));
+        lines.push(row(notice, &glyphs, inner, column, paint));
     }
     lines.push(footer(&glyphs, width));
     Some(lines.join("\n"))
@@ -104,7 +100,7 @@ fn footer(glyphs: &Glyphs, width: usize) -> String {
     )
 }
 
-fn row(notice: &Notice, glyphs: &Glyphs, inner: usize, column: usize, color: bool) -> String {
+fn row(notice: &Notice, glyphs: &Glyphs, inner: usize, column: usize, paint: Paint) -> String {
     let id = pad(&notice.source, column);
     let summary = notice.finding.summary.as_str();
     let tail = notice.distinct_fix().map(|fix| format!(" — {fix}"));
@@ -120,16 +116,12 @@ fn row(notice: &Notice, glyphs: &Glyphs, inner: usize, column: usize, color: boo
     let visible = fixed + summary.chars().count() + tail_width;
     let slack = inner.saturating_sub(visible);
 
-    let body = if color {
-        format!(
-            "{DIM}{id}{RESET}{GAP}{}{summary}{RESET}{}",
-            severity_color(notice.finding.severity),
-            tail.map(|tail| format!("{DIM}{tail}{RESET}"))
-                .unwrap_or_default()
-        )
-    } else {
-        format!("{id}{GAP}{summary}{}", tail.unwrap_or_default())
-    };
+    let body = format!(
+        "{}{GAP}{}{}",
+        paint.dim(&id),
+        paint.paint(severity_tint(notice.finding.severity), &summary),
+        tail.map(|tail| paint.dim(&tail)).unwrap_or_default()
+    );
 
     format!(
         "{} {body}{} {}",
@@ -139,12 +131,12 @@ fn row(notice: &Notice, glyphs: &Glyphs, inner: usize, column: usize, color: boo
     )
 }
 
-fn severity_color(severity: Severity) -> &'static str {
+fn severity_tint(severity: Severity) -> Tint {
     match severity {
-        Severity::Broken => RED,
+        Severity::Broken => Tint::BoldRed,
         // A note never reaches the card, but a colour table with a hole in it is
         // how a later severity arrives invisible.
-        Severity::Soft | Severity::Note => YELLOW,
+        Severity::Soft | Severity::Note => Tint::Yellow,
     }
 }
 
@@ -170,7 +162,7 @@ fn repeat(glyph: char, count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{badge, draw};
+    use super::{Paint, badge, draw};
     use crate::config::Style;
     use crate::notice::Notice;
     use relic_core::finding::{FixHint, Severity, StationId, Summary};
@@ -205,14 +197,14 @@ mod tests {
 
     #[test]
     fn an_empty_coop_draws_nothing_at_all() {
-        assert_eq!(draw(&[], 60, Style::Unicode, false), None);
+        assert_eq!(draw(&[], 60, Style::Unicode, Paint::PLAIN), None);
         assert_eq!(badge(&[]), None);
     }
 
     #[test]
     fn every_line_is_exactly_the_asked_width() {
         for width in [28, 40, 60, 80] {
-            let card = draw(&pair(), width, Style::Unicode, false).unwrap();
+            let card = draw(&pair(), width, Style::Unicode, Paint::PLAIN).unwrap();
             for measured in widths(&card) {
                 assert_eq!(measured, width, "at width {width}\n{card}");
             }
@@ -221,8 +213,8 @@ mod tests {
 
     #[test]
     fn colour_does_not_change_the_shape() {
-        let plain = draw(&pair(), 60, Style::Unicode, false).unwrap();
-        let painted = draw(&pair(), 60, Style::Unicode, true).unwrap();
+        let plain = draw(&pair(), 60, Style::Unicode, Paint::PLAIN).unwrap();
+        let painted = draw(&pair(), 60, Style::Unicode, Paint::COLOUR).unwrap();
         assert_eq!(plain.lines().count(), painted.lines().count());
         assert!(painted.contains("\x1b[33m"));
         assert!(!plain.contains('\x1b'));
@@ -230,7 +222,7 @@ mod tests {
 
     #[test]
     fn ascii_is_the_same_card_in_characters_that_always_arrive() {
-        let card = draw(&pair(), 50, Style::Ascii, false).unwrap();
+        let card = draw(&pair(), 50, Style::Ascii, Paint::PLAIN).unwrap();
         assert!(card.starts_with("+- coop "));
         assert!(!card.contains('│'));
         for measured in widths(&card) {
@@ -240,7 +232,7 @@ mod tests {
 
     #[test]
     fn a_fix_that_only_repeats_the_source_is_not_drawn() {
-        let card = draw(&pair(), 60, Style::Unicode, false).unwrap();
+        let card = draw(&pair(), 60, Style::Unicode, Paint::PLAIN).unwrap();
         assert!(!card.contains("— up"), "{card}");
     }
 
@@ -252,7 +244,7 @@ mod tests {
             "2 drills due",
             Some("rote drill"),
         )];
-        let card = draw(&one, 60, Style::Unicode, false).unwrap();
+        let card = draw(&one, 60, Style::Unicode, Paint::PLAIN).unwrap();
         assert!(card.contains("— rote drill"), "{card}");
     }
 
@@ -264,7 +256,7 @@ mod tests {
             "2 drills due",
             Some("rote drill"),
         )];
-        let card = draw(&one, 28, Style::Unicode, false).unwrap();
+        let card = draw(&one, 28, Style::Unicode, Paint::PLAIN).unwrap();
         assert!(card.contains("2 drills due"), "{card}");
         assert!(!card.contains("rote drill"), "{card}");
     }
@@ -277,7 +269,7 @@ mod tests {
             "a summary far longer than any card could ever hope to hold in one row",
             None,
         )];
-        let card = draw(&one, 40, Style::Unicode, false).unwrap();
+        let card = draw(&one, 40, Style::Unicode, Paint::PLAIN).unwrap();
         assert_eq!(card.lines().count(), 3, "one row, not several\n{card}");
         assert!(card.contains('…'), "{card}");
         for measured in widths(&card) {
@@ -287,7 +279,7 @@ mod tests {
 
     #[test]
     fn the_source_column_lines_up_across_rows() {
-        let card = draw(&pair(), 60, Style::Unicode, false).unwrap();
+        let card = draw(&pair(), 60, Style::Unicode, Paint::PLAIN).unwrap();
         let rows: Vec<&str> = card.lines().skip(1).take(2).collect();
         let positions: Vec<Option<usize>> = rows
             .iter()
@@ -299,7 +291,7 @@ mod tests {
     #[test]
     fn broken_is_painted_differently_from_soft() {
         let one = vec![notice("x", Severity::Broken, "it is broken", None)];
-        let card = draw(&one, 40, Style::Unicode, true).unwrap();
+        let card = draw(&one, 40, Style::Unicode, Paint::COLOUR).unwrap();
         assert!(card.contains("\x1b[1;31m"), "{card}");
     }
 

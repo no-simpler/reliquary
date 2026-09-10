@@ -11,6 +11,7 @@ use std::io::Write;
 use anyhow::Result;
 use relic_core::finding::{Finding, Grade, Outcome, Report, Severity, StationId};
 use relic_core::fmt::plural;
+use relic_core::style::{Style as Paint, Tint};
 use relic_core::ui::Format;
 
 /// How the run is written out.
@@ -18,8 +19,8 @@ use relic_core::ui::Format;
 pub struct Style {
     /// Which shape.
     pub format: Format,
-    /// Whether to spend on colour.
-    pub color: bool,
+    /// Whether to spend on colour, carried as the thing that spends it.
+    pub color: Paint,
     /// Print nothing at all when the run is clean. The dream pre-pass and
     /// `yadm update` both run this way.
     pub quiet: bool,
@@ -66,21 +67,6 @@ pub fn list(out: &mut impl Write, stations: &[(&str, &str)], format: Format) -> 
     Ok(())
 }
 
-const RESET: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
-const RED: &str = "\x1b[31m";
-const GREEN: &str = "\x1b[32m";
-const YELLOW: &str = "\x1b[33m";
-
-fn paint(text: &str, code: &str, color: bool) -> String {
-    if color {
-        format!("{code}{text}{RESET}")
-    } else {
-        text.to_owned()
-    }
-}
-
 fn tally(reports: &[Report]) -> (usize, usize) {
     let mut broken = 0;
     let mut soft = 0;
@@ -96,7 +82,7 @@ fn tally(reports: &[Report]) -> (usize, usize) {
     (broken, soft)
 }
 
-fn human(out: &mut impl Write, reports: &[Report], grade: Grade, color: bool) -> Result<()> {
+fn human(out: &mut impl Write, reports: &[Report], grade: Grade, paint: Paint) -> Result<()> {
     let width = reports
         .iter()
         .map(|report| report.station.as_str().len())
@@ -110,16 +96,16 @@ fn human(out: &mut impl Write, reports: &[Report], grade: Grade, color: bool) ->
                 writeln!(
                     out,
                     "  {name:<width$}  {}",
-                    paint(&format!("skipped — {reason}"), DIM, color)
+                    paint.dim(&format!("skipped — {reason}"))
                 )?;
             }
             Outcome::Ran(findings) if findings.is_empty() => {
-                writeln!(out, "  {name:<width$}  {}", paint("ok", GREEN, color))?;
+                writeln!(out, "  {name:<width$}  {}", paint.green("ok"))?;
             }
             Outcome::Ran(findings) => {
-                writeln!(out, "  {}", paint(name, BOLD, color))?;
+                writeln!(out, "  {}", paint.bold(name))?;
                 for finding in findings {
-                    human_finding(out, finding, &report.station, color)?;
+                    human_finding(out, finding, &report.station, paint)?;
                 }
             }
         }
@@ -127,21 +113,16 @@ fn human(out: &mut impl Write, reports: &[Report], grade: Grade, color: bool) ->
 
     let (broken, soft) = tally(reports);
     let verdict = match grade {
-        Grade::Ok => paint("==> assay ok", GREEN, color),
-        Grade::Soft => paint(
-            &format!("==> assay ok with {}", plural(soft, "warning", "warnings")),
-            YELLOW,
-            color,
-        ),
-        Grade::Broken => paint(
-            &format!(
-                "!!> assay INCOMPLETE — {}, {}",
-                plural(broken, "failure", "failures"),
-                plural(soft, "warning", "warnings")
-            ),
-            RED,
-            color,
-        ),
+        Grade::Ok => paint.green("==> assay ok"),
+        Grade::Soft => paint.yellow(&format!(
+            "==> assay ok with {}",
+            plural(soft, "warning", "warnings")
+        )),
+        Grade::Broken => paint.red(&format!(
+            "!!> assay INCOMPLETE — {}, {}",
+            plural(broken, "failure", "failures"),
+            plural(soft, "warning", "warnings")
+        )),
     };
     writeln!(out, "\n{verdict}")?;
     Ok(())
@@ -151,12 +132,12 @@ fn human_finding(
     out: &mut impl Write,
     finding: &Finding,
     reported_by: &StationId,
-    color: bool,
+    paint: Paint,
 ) -> Result<()> {
-    let (label, code) = match finding.severity {
-        Severity::Broken => ("broken", RED),
-        Severity::Soft => ("soft  ", YELLOW),
-        Severity::Note => ("note  ", DIM),
+    let (label, tint) = match finding.severity {
+        Severity::Broken => ("broken", Tint::Red),
+        Severity::Soft => ("soft  ", Tint::Yellow),
+        Severity::Note => ("note  ", Tint::Dim),
     };
     // A station usually mints its own findings, so the two agree and naming the
     // author twice would be noise. The registry adapter is the exception: it
@@ -165,32 +146,24 @@ fn human_finding(
     let author = if finding.station == *reported_by {
         String::new()
     } else {
-        format!("{} ", paint(&format!("[{}]", finding.station), BOLD, color))
+        format!("{} ", paint.bold(&format!("[{}]", finding.station)))
     };
     writeln!(
         out,
         "    {}  {author}{}",
-        paint(label, code, color),
+        paint.paint(tint, label),
         finding.summary
     )?;
     if let Some(detail) = &finding.detail {
         for line in detail.as_str().lines() {
-            writeln!(out, "            {}", paint(line, DIM, color))?;
+            writeln!(out, "            {}", paint.dim(line))?;
         }
     }
     if let Some(location) = &finding.location {
-        writeln!(
-            out,
-            "            {}",
-            paint(&location.to_string(), DIM, color)
-        )?;
+        writeln!(out, "            {}", paint.dim(&location.to_string()))?;
     }
     if let Some(fix) = &finding.fix {
-        writeln!(
-            out,
-            "            {}",
-            paint(&format!("fix: {fix}"), DIM, color)
-        )?;
+        writeln!(out, "            {}", paint.dim(&format!("fix: {fix}")))?;
     }
     Ok(())
 }
@@ -265,7 +238,7 @@ mod tests {
     fn style(format: Format) -> Style {
         Style {
             format,
-            color: false,
+            color: Paint::PLAIN,
             quiet: false,
         }
     }
@@ -319,7 +292,7 @@ mod tests {
         let painted = rendered(
             &reports,
             Style {
-                color: true,
+                color: Paint::COLOUR,
                 ..style(Format::Human)
             },
         );

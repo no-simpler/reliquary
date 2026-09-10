@@ -187,7 +187,7 @@ fn shipped_verifier() -> &'static str {
     ONCE.get_or_init(|| mint(rote_m_cost(), 4, SECRET))
 }
 
-/// The floor the binary declares, read off its own help rather than duplicated.
+/// The floor the binary declares. A duplicate, like `SCHEMA`.
 fn rote_m_cost() -> u32 {
     262_144
 }
@@ -503,6 +503,41 @@ fn a_horizon_holds_a_slug_and_then_is_dropped() {
 }
 
 #[test]
+fn a_horizon_is_at_least_a_day_and_never_on_a_retired_slug() {
+    let mut rote = Rote::new();
+    rote.add(&today(), "a", false);
+    rote.run(&["probe", "a", "--in", "0"])
+        .assert()
+        .failure()
+        .stderr(contains("one day to a year"));
+    rote.run(&["retire", "a"]).assert().success();
+    rote.run(&["probe", "a", "--in", "45"])
+        .assert()
+        .failure()
+        .stderr(contains("retired"));
+}
+
+#[test]
+fn a_retired_slug_says_how_to_come_back() {
+    let mut rote = Rote::new();
+    rote.add(&today(), "a", false);
+    rote.run(&["retire", "a"]).assert().success();
+    rote.run(&["add", "a", "--stdin"])
+        .write_stdin("x\n")
+        .assert()
+        .failure()
+        .stderr(contains("rote rekey --force a"));
+    rote.run(&["rekey", "a", "--force", "--stdin"])
+        .write_stdin("new secret\n")
+        .assert()
+        .success();
+    assert_eq!(
+        rote.json(&["status", "--json"])["slugs"][0]["retired"],
+        false
+    );
+}
+
+#[test]
 fn a_horizon_needs_a_length_or_a_clear() {
     let mut rote = Rote::new();
     rote.add(&today(), "a", false);
@@ -759,6 +794,54 @@ fn doctor_grades_an_overdue_drill_soft_and_a_broken_log_broken() {
 }
 
 #[test]
+fn a_verifier_nobody_drills_is_reported() {
+    let mut rote = Rote::new();
+    rote.add(&today(), "a", false);
+    rote.verifier("ghost");
+    rote.run(&["doctor"])
+        .assert()
+        .code(1)
+        .stdout(contains("not on the schedule"))
+        .stdout(contains("ghost"));
+}
+
+#[test]
+fn a_never_reviewed_slug_falls_overdue() {
+    let mut rote = Rote::new();
+    rote.add(&days_ago(30), "a", false);
+    rote.run(&["doctor"])
+        .assert()
+        .code(1)
+        .stdout(contains("overdue"));
+}
+
+#[test]
+fn a_blank_aided_entry_is_not_a_disagreement() {
+    let mut rote = Rote::new();
+    rote.add(&days_ago(3), "a", false);
+    rote.attempt(&days_ago(1), "a", "aided", "blank", 1, 0, 0);
+    assert_eq!(
+        rote.json(&["status", "--json"])["slugs"][0]["aided_mismatch"],
+        false
+    );
+    assert_eq!(rote.json(&["stats", "--json"])["aided"]["total"], 0);
+}
+
+#[test]
+fn the_first_review_counts_toward_punctuality() {
+    let mut rote = Rote::new();
+    rote.add(&days_ago(10), "a", false);
+    rote.run(&["add", "b", "--stdin"])
+        .write_stdin("x\n")
+        .assert()
+        .success();
+    // Seeded records carry their own intervals; the enrollment path is what
+    // exercises the anchor. The status reading is enough to see it.
+    let slug = &rote.json(&["status", "--json"])["slugs"][0];
+    assert_eq!(slug["standing"], "due");
+}
+
+#[test]
 fn a_weak_verifier_is_broken_and_a_missing_one_is_soft() {
     let mut rote = Rote::new();
     rote.seed(
@@ -811,7 +894,7 @@ fn a_malformed_line_is_kept_and_reported_rather_than_dropped() {
 }
 
 #[test]
-fn a_record_from_a_newer_schema_stops_the_writer() {
+fn a_record_from_a_newer_schema_stops_the_writer_before_it_touches_anything() {
     let mut rote = Rote::new();
     rote.add(&today(), "a", false);
     let text = rote
@@ -823,6 +906,11 @@ fn a_record_from_a_newer_schema_stops_the_writer() {
         .assert()
         .failure()
         .stderr(contains("newer rote"));
+    let verifiers = std::fs::read_to_string(rote.state.join("verifiers.toml")).expect("the file");
+    assert!(
+        verifiers.contains("argon2"),
+        "the refusal came before the verifier was removed"
+    );
 }
 
 // The reminder.

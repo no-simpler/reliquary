@@ -5,6 +5,7 @@ mod cmd;
 mod config;
 mod doctor;
 mod drill;
+mod exit;
 mod guide;
 mod help;
 mod ladder;
@@ -20,8 +21,7 @@ mod verifier;
 
 use clap::Parser as _;
 
-/// rote could not run at all, which is different from finding something wrong.
-const REFUSED: u8 = 3;
+use crate::exit::REFUSED;
 
 fn main() -> std::process::ExitCode {
     let cli = match cli::Cli::try_parse() {

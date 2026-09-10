@@ -1,56 +1,35 @@
-//! Boxed, colored, and meant to be read once. What a terminal gets.
+//! Boxed, coloured, and meant to be read once. What a terminal gets.
 
 use comfy_table::presets::UTF8_HORIZONTAL_ONLY;
 use comfy_table::{ContentArrangement, Table as Grid};
+use relic_core::style::Style;
 
 use super::Table;
 
-const RESET: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
-
-/// Bold, when color is on.
-pub fn bold(text: &str, color: bool) -> String {
-    paint(text, BOLD, color)
-}
-
-/// Dim, when color is on.
-pub fn dim(text: &str, color: bool) -> String {
-    paint(text, DIM, color)
-}
-
-fn paint(text: &str, code: &str, color: bool) -> String {
-    if color {
-        format!("{code}{text}{RESET}")
-    } else {
-        text.to_owned()
-    }
-}
-
 /// A titled block: heading, grid, then any closing lines.
-pub fn block(heading: &str, table: &Table, notes: &[String], color: bool) -> String {
+pub fn block(heading: &str, table: &Table, notes: &[String], style: Style) -> String {
     let mut lines = Vec::new();
     if !heading.is_empty() {
-        lines.push(bold(heading, color));
+        lines.push(style.bold(heading));
         lines.push(String::new());
     }
     if table.is_empty() {
-        lines.push(dim("nothing", color));
+        lines.push(style.dim("nothing"));
     } else {
-        lines.push(grid(table, color));
+        lines.push(grid(table, style));
     }
     if !notes.is_empty() {
         lines.push(String::new());
-        lines.extend(notes.iter().map(|note| dim(note, color)));
+        lines.extend(notes.iter().map(|note| style.dim(note)));
     }
     lines.join("\n")
 }
 
-fn grid(table: &Table, color: bool) -> String {
+fn grid(table: &Table, style: Style) -> String {
     let mut grid = Grid::new();
-    // Color is already decided; comfy-table would otherwise probe the terminal
+    // Colour is already decided; comfy-table would otherwise probe the terminal
     // and reach a second opinion.
-    if color {
+    if style.colour {
         grid.enforce_styling();
     } else {
         grid.force_no_tty();
@@ -72,8 +51,10 @@ fn grid(table: &Table, color: bool) -> String {
 
 #[cfg(test)]
 mod tests {
+    use relic_core::style::Style;
+
     use super::super::Table;
-    use super::{block, bold, dim};
+    use super::block;
 
     fn table() -> Table {
         let mut table = Table::new(&["slug", "state"]);
@@ -82,16 +63,8 @@ mod tests {
     }
 
     #[test]
-    fn colour_is_only_applied_when_it_was_asked_for() {
-        assert_eq!(bold("x", false), "x");
-        assert_eq!(dim("x", false), "x");
-        assert!(bold("x", true).contains("\x1b["));
-        assert!(dim("x", true).contains("\x1b["));
-    }
-
-    #[test]
     fn a_block_carries_the_heading_the_rows_and_the_notes() {
-        let text = block("schedule", &table(), &["a note".to_owned()], false);
+        let text = block("schedule", &table(), &["a note".to_owned()], Style::PLAIN);
         assert!(text.starts_with("schedule"));
         assert!(text.contains("escrow-p"));
         assert!(text.contains("a note"));
@@ -99,8 +72,14 @@ mod tests {
     }
 
     #[test]
+    fn colour_reaches_the_heading_when_asked_for() {
+        let text = block("schedule", &table(), &[], Style::COLOUR);
+        assert!(text.starts_with("\x1b[1mschedule"));
+    }
+
+    #[test]
     fn an_empty_table_renders_as_a_word_rather_than_an_empty_grid() {
-        let text = block("schedule", &Table::new(&["slug"]), &[], false);
+        let text = block("schedule", &Table::new(&["slug"]), &[], Style::PLAIN);
         assert!(text.contains("nothing"));
         assert!(!text.contains('─'));
     }

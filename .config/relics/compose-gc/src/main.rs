@@ -66,7 +66,9 @@ fn main() -> ExitCode {
 
 fn run(cli: &Cli) -> Result<u8> {
     let style = Style {
-        color: anstream::AutoStream::choice(&stdout()) != anstream::ColorChoice::Never,
+        color: relic_core::style::Style {
+            colour: anstream::AutoStream::choice(&stdout()) != anstream::ColorChoice::Never,
+        },
         dry_run: cli.dry_run,
     };
     let mut out = stdout().lock();

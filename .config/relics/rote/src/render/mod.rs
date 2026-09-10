@@ -58,6 +58,20 @@ impl Table {
     }
 }
 
+/// A duration in seconds to one decimal, or a dash for none.
+///
+/// One spelling for every place a latency is shown, so a card and a table
+/// cannot drift a decimal apart.
+pub fn seconds(ms: Option<u64>) -> String {
+    match ms {
+        Some(ms) => format!(
+            "{:.1}s",
+            f64::from(u32::try_from(ms).unwrap_or(u32::MAX)) / 1000.0
+        ),
+        None => "—".to_owned(),
+    }
+}
+
 /// Aligned plain text, headings included, with the last column unpadded.
 pub fn aligned(table: &Table) -> Vec<String> {
     let widths = table.widths();
@@ -112,6 +126,13 @@ mod tests {
         for line in &lines {
             assert_eq!(line.trim_end(), line, "no trailing whitespace");
         }
+    }
+
+    #[test]
+    fn a_latency_is_seconds_to_one_decimal_or_a_dash() {
+        assert_eq!(super::seconds(Some(1_400)), "1.4s");
+        assert_eq!(super::seconds(Some(0)), "0.0s");
+        assert_eq!(super::seconds(None), "—");
     }
 
     #[test]

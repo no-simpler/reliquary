@@ -178,21 +178,8 @@ fn furniture(ctx: &Ctx, gathered: &Gathered) -> Vec<Finding> {
 }
 
 /// The human shape: one line per finding, with the verdict last.
-pub fn render(report: &Report, color: bool) -> String {
-    const RESET: &str = "\x1b[0m";
-    const BOLD: &str = "\x1b[1m";
-    const DIM: &str = "\x1b[2m";
-    const RED: &str = "\x1b[31m";
-    const GREEN: &str = "\x1b[32m";
-    const YELLOW: &str = "\x1b[33m";
-
-    let paint = |text: &str, code: &str| {
-        if color {
-            format!("{code}{text}{RESET}")
-        } else {
-            text.to_owned()
-        }
-    };
+pub fn render(report: &Report, paint: relic_core::style::Style) -> String {
+    use relic_core::style::Tint;
 
     let findings = match &report.outcome {
         Outcome::Ran(findings) => findings.as_slice(),
@@ -200,35 +187,32 @@ pub fn render(report: &Report, color: bool) -> String {
     };
     let mut lines = Vec::new();
     for finding in findings {
-        let code = match finding.severity {
-            Severity::Broken => RED,
-            Severity::Soft => YELLOW,
-            Severity::Note => DIM,
+        let tint = match finding.severity {
+            Severity::Broken => Tint::Red,
+            Severity::Soft => Tint::Yellow,
+            Severity::Note => Tint::Dim,
         };
         lines.push(format!(
             "{}  {}",
-            paint(&finding.severity.to_string(), code),
+            paint.paint(tint, &finding.severity.to_string()),
             finding.summary
         ));
         if let Some(detail) = &finding.detail {
             for line in detail.as_str().lines() {
-                lines.push(paint(&format!("        {line}"), DIM));
+                lines.push(paint.dim(&format!("        {line}")));
             }
         }
         if let Some(fix) = &finding.fix {
-            lines.push(paint(&format!("        fix: {fix}"), DIM));
+            lines.push(paint.dim(&format!("        fix: {fix}")));
         }
     }
     lines.push(match report.grade() {
-        Grade::Ok => paint("==> coop ok", GREEN),
-        Grade::Soft => paint(
-            &format!("!!> coop degraded — {} to look at", findings.len()),
-            YELLOW,
-        ),
-        Grade::Broken => paint(
-            &format!("!!> coop BROKEN — {} to look at", findings.len()),
-            BOLD,
-        ),
+        Grade::Ok => paint.green("==> coop ok"),
+        Grade::Soft => paint.yellow(&format!(
+            "!!> coop degraded — {} to look at",
+            findings.len()
+        )),
+        Grade::Broken => paint.bold(&format!("!!> coop BROKEN — {} to look at", findings.len())),
     });
     lines.join("\n")
 }

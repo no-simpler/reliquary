@@ -26,13 +26,18 @@ whose only effect would be to advertise a tool an agent cannot use is noise.
 
 ```
 cli.rs          clap derive; doc comments are the help text
-cmd.rs          dispatch, and what each command does
+cmd/mod.rs      the context, dispatch, and what every command shares
+cmd/sitting.rs  the drill: daily and practice
+cmd/enroll.rs   add, rekey, retire, probe — everything that takes or drops a secret
+cmd/reading.rs  status, stats, log
+cmd/health.rs   doctor and banner
 config.rs       ~/.config/rote/config.toml, or its defaults
 doctor.rs       findings in relic_core's vocabulary, and their human shape
 drill/mod.rs    the plan, and the sitting loop
 drill/screen.rs the drill's own layout, as a pure function from a frame to a card
+exit.rs         the four exit codes
 tui/mod.rs      the traits, the one entry loop, and the shared prompt dialogs
-tui/card.rs     the box, the palette, and the one entry line
+tui/card.rs     the box and the one entry line; colour is relic_core::style
 tui/term.rs     crossterm: raw mode, the alternate screen, placement, restoration
 guide.rs        doctrine
 help.rs         reference
@@ -77,14 +82,32 @@ Things a future edit must not undo.
   `Serialize`. Every path to the bytes goes through `Secret::expose`, so
   auditing the crate is one grep. Deliberately **not** `secrecy`:
   `SecretString` is built through `String::into_boxed_str`, which shrinks to fit
-  and so copies exactly the buffer this type exists to avoid copying.
+  and so copies exactly the buffer this type exists to avoid copying. A refused
+  paste is zeroized on receipt, because it is usually the secret itself. Two
+  residuals are accepted rather than closed: crossterm's own read buffer holds
+  typed bytes transiently, and the signal path exits without running
+  destructors — the kernel zeroes pages on reuse, swap is encrypted and core
+  dumps are off, and the alternative is `mlock` through unsafe code.
+- **A full buffer refuses the character and says so.** The dialog and the pipe
+  hold one rule: a secret longer than the field is refused, never truncated
+  into a verifier for something nobody typed.
+- **Every entry is written the moment it is taken.** The sitting loop hands
+  each `Taken` to a record callback before the next prompt is drawn, so a
+  closed window or a signal keeps every reading it had already produced. The
+  closing card is drawn from the log after the last write, not before it.
+- **`Store::open` fails closed on a record from a newer schema.** Every caller
+  opens the store in order to write, so the refusal lands before any command
+  has touched the verifier file — an append that failed after a verifier was
+  replaced or removed would leave the two files disagreeing.
 - **No secret ever reaches argv, the environment, the clipboard, a formatter, a
   log line, an error, or the screen.** The drill is blind and there is no reveal
   toggle: it would have been the one feature that puts plaintext on a display,
   for a benefit a retry already covers.
-- **`--stdin` refuses when any standard stream is a terminal.** That is what
-  stops a pipe becoming a habit, because a secret typed into a shell command
-  lands in shell history. The drill accepts no stdin at all.
+- **`--stdin` refuses when stdin is a terminal.** The precise threat is an
+  echoing read: a secret typed into one lands on the screen and in scrollback.
+  No stream check can see the command line, so the pipe's discipline — a vault
+  at the other end, never an echo — is stated in `rote help stdin` and nowhere
+  enforced. The drill accepts no stdin at all.
 - **`rekey` proves the current secret before accepting a new one.** Without it a
   verifier could be replaced by one somebody else knows, and the reading would
   still say memorised. `--force` is a re-enrollment and the log records it as one.
@@ -125,7 +148,15 @@ Things a future edit must not undo.
   red for `FLASH` and comes back; nothing red stays on the screen, and the try
   count increments in the slot it already occupied. A mark that stays is a mark
   every later glance has to re-read, and a menu that must be answered turns a
-  mistyped character into an interrogation.
+  mistyped character into an interrogation. Once the cold tries are spent the
+  field stays, saying *out of tries*, with the lookup still on offer: a typed
+  answer is flashed and refused rather than judged, escape leaves. The one
+  moment a person most needs the vault is after the third miss, and it is also
+  the entry that checks the vault against the verifier.
+- **A double entry that differs asks again, for as many rounds as the drill
+  allows tries**, and a proof that fails does the same. A blind field gives no
+  other way to find the slip, and a command that exits on it makes the person
+  retype everything from the start.
 - **A lapse is the ladder going back to the foot, and nothing else is one.**
   Practice and probes move no schedule, so a first-try failure there is a *miss*,
   and `stats` counts it as one — a failed probe is still banded, because it is
@@ -188,6 +219,11 @@ Things a future edit must not undo.
   `ROTE_CONFIG`, `ROTE_UI` and `ROTE_HOST`. There is deliberately **no seam that
   lowers the KDF cost**: the suite seeds a store instead, and mints one verifier
   at the shipped parameters for the whole run.
+- **`doctor` enforces the placement rule and reports orphans.** A verifier file
+  under the log tree is Broken however healthy the rest is; a verifier held for
+  a slug that is retired or unknown is Soft, because an oracle nobody drills is
+  cost with no benefit. Both are readings of the paths and the two files, and
+  neither hashes anything.
 - Publishing and testing carry no per-relic scripts. Do not reintroduce
   `scripts/publish.sh` or `scripts/test.sh`.
 

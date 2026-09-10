@@ -185,9 +185,7 @@ fn run(cli: Cli) -> Result<u8> {
         // The whole colour ladder in one place: `Auto` honours `NO_COLOR`,
         // `CLICOLOR_FORCE`, `TERM=dumb` and tty-ness through `anstream`, which
         // is the same one clap itself walks.
-        style: Style {
-            colour: ColorChoice::Auto.use_color(format),
-        },
+        style: ColorChoice::Auto.style(format),
     };
     let mut out = anstream::stdout();
     match cli.command {

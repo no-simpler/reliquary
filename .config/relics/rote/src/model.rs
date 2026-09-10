@@ -53,8 +53,9 @@ pub struct SlugState {
     /// only reading that says anything while the step is still at the foot.
     pub first_unaided: Option<Date>,
     /// Whether the last aided entry was refused. Typing what the vault shows and
-    /// being told wrong means the verifier and the item have diverged. Cleared
-    /// by the next pass of any kind.
+    /// being told wrong means the verifier and the item have diverged. A blank
+    /// aided entry says nothing either way. Cleared by the next pass of any
+    /// kind.
     pub aided_mismatch: bool,
 }
 
@@ -93,10 +94,22 @@ impl SlugState {
         }
     }
 
-    /// Days since the last scheduled review.
+    /// Days since the schedule's anchor: the last review or probe, else
+    /// enrollment. What the schedule counted from, so the first review after
+    /// enrollment measures against something rather than nothing.
     pub fn actual_interval(&self, today: Date) -> Option<u32> {
-        self.last_review
-            .map(|last| ladder::days_between(last, today))
+        Some(ladder::days_between(self.anchor, today))
+    }
+
+    /// The day the schedule next asks for this slug, a horizon aside.
+    pub fn due(&self) -> Date {
+        ladder::due_day(self.anchor, self.step)
+    }
+
+    /// Whole days past the due day, zero while not yet due. The one reading of
+    /// lateness, for the doctor's grace and for nothing else to recompute.
+    pub fn days_overdue(&self, today: Date) -> u32 {
+        ladder::days_between(self.due(), today)
     }
 }
 
@@ -228,10 +241,12 @@ fn apply_attempt(slug: &mut SlugState, record: &Record, event: &Attempted) {
         Class::Practice | Class::Aided => {}
     }
     match (event.class, event.outcome) {
-        (Class::Aided, Outcome::Pass) => slug.aided_mismatch = false,
-        (Class::Aided, _) => slug.aided_mismatch = true,
+        // The answer was in front of the person and the verifier refused it:
+        // the one signal that the item and the verifier have parted. A blank
+        // aided entry offered nothing, so it says nothing.
+        (Class::Aided, Outcome::Fail) => slug.aided_mismatch = true,
         (_, Outcome::Pass) => slug.aided_mismatch = false,
-        _ => {}
+        (_, Outcome::Fail | Outcome::Blank | Outcome::Skip | Outcome::Abort) => {}
     }
     if event.class.scores() {
         slug.step = Step::from_recorded(event.step_after);
@@ -535,6 +550,36 @@ mod tests {
         assert_eq!(slug.last_attempt, Some(date(2026, 9, 12)));
         assert_eq!(slug.effective_interval(date(2026, 9, 13)), Some(1));
         assert_eq!(slug.actual_interval(date(2026, 9, 13)), Some(2));
+        assert_eq!(slug.due(), date(2026, 9, 12));
+        assert_eq!(slug.days_overdue(date(2026, 9, 13)), 1);
+        assert_eq!(slug.days_overdue(date(2026, 9, 11)), 0);
+    }
+
+    #[test]
+    fn a_slug_never_reviewed_measures_against_its_enrollment() {
+        let state = State::replay(&[added(date(2026, 9, 1), "a", false)]);
+        let slug = state.get(&slug("a")).unwrap();
+        assert_eq!(slug.actual_interval(date(2026, 9, 11)), Some(10));
+        assert_eq!(slug.due(), date(2026, 9, 2));
+        assert_eq!(slug.days_overdue(date(2026, 9, 11)), 9);
+    }
+
+    #[test]
+    fn a_blank_aided_entry_is_not_a_disagreement() {
+        let state = State::replay(&[
+            added(date(2026, 9, 1), "a", false),
+            attempt(
+                date(2026, 9, 2),
+                "a",
+                Class::Aided,
+                Outcome::Blank,
+                2,
+                Some(1),
+                0,
+                0,
+            ),
+        ]);
+        assert!(!state.get(&slug("a")).unwrap().aided_mismatch);
     }
 
     #[test]

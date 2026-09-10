@@ -4,12 +4,15 @@
 //! binary on a two-second budget, so nothing here hashes anything: the report is
 //! a reading of the log and of the parameters the verifiers already carry.
 
+use std::collections::BTreeSet;
+
 use jiff::civil::Date;
 use relic_core::finding::{Detail, Finding, FixHint, Report, Severity, StationId, Summary};
+use relic_core::style::{Style, Tint};
 
 use crate::ladder::{Gate, Standing};
 use crate::model::State;
-use crate::store::{Issue, Journal, Verifiers};
+use crate::store::{Issue, Journal, Paths, Verifiers};
 use crate::verifier::M_COST_KIB;
 
 /// Days past due before an outstanding review is worth reporting. A drill taken
@@ -29,13 +32,70 @@ pub fn report(
     journal: &Journal,
     state: &State,
     verifiers: &Verifiers,
+    paths: &Paths,
     today: Date,
     host: &str,
 ) -> Report {
     let mut findings = Vec::new();
+    findings.extend(placement_findings(paths));
     findings.extend(log_findings(journal, host));
     findings.extend(slug_findings(state, verifiers, today));
+    findings.extend(orphan_findings(state, verifiers, paths));
     Report::ran(station(), findings)
+}
+
+/// The placement rule, enforced rather than trusted: a verifier is an
+/// offline-attackable oracle, and the log tree replicates to two providers and
+/// keeps prior versions. A config that puts one inside the other is broken
+/// however healthy everything else is.
+fn placement_findings(paths: &Paths) -> Vec<Finding> {
+    if !paths.verifiers().starts_with(&paths.log_dir) {
+        return Vec::new();
+    }
+    vec![
+        station()
+            .broken(summary(
+                "the verifier file sits inside the log tree, which replicates offsite and keeps prior versions",
+            ))
+            .detailed_with(Detail::new(format!(
+                "{}\nunder {}",
+                paths.verifiers(),
+                paths.log_dir
+            )))
+            .fixed_by(FixHint::lossy(
+                "point state elsewhere in the config, then rote rekey --force each slug",
+            )),
+    ]
+}
+
+/// A verifier the schedule has no use for: its slug is retired, or the log has
+/// never heard of it. An oracle nobody drills is cost with no benefit, and a
+/// verifier that outlived its retirement is one a removal missed.
+fn orphan_findings(state: &State, verifiers: &Verifiers, paths: &Paths) -> Vec<Finding> {
+    let scheduled: BTreeSet<&str> = state
+        .scheduled()
+        .into_iter()
+        .map(|slug| slug.slug.as_str())
+        .collect();
+    let orphans: Vec<String> = verifiers
+        .names()
+        .filter(|name| !scheduled.contains(name))
+        .map(str::to_owned)
+        .collect();
+    if orphans.is_empty() {
+        return Vec::new();
+    }
+    vec![
+        station()
+            .soft(summary(
+                "a verifier is held for a slug that is not on the schedule",
+            ))
+            .detailed_with(Detail::new(orphans.join("\n")))
+            .fixed_by(FixHint::lossy(&format!(
+                "remove the entry from {}",
+                paths.verifiers()
+            ))),
+    ]
 }
 
 /// A report for the case where the log could not be read at all. Not knowing is
@@ -118,10 +178,7 @@ fn slug_findings(state: &State, verifiers: &Verifiers, today: Date) -> Vec<Findi
     for slug in scheduled {
         match slug.standing(today) {
             Standing::Due => {
-                let late = slug
-                    .last_review
-                    .map_or(0, |last| crate::ladder::days_between(last, today))
-                    .saturating_sub(slug.step.interval());
+                let late = slug.days_overdue(today);
                 if late > GRACE_DAYS {
                     found
                         .overdue
@@ -236,22 +293,7 @@ impl Found {
 /// The human shape: one line per finding, with the verdict last.
 ///
 /// A terminal block is read from the bottom, so the grade goes there.
-pub fn render(report: &Report, color: bool) -> String {
-    const RESET: &str = "\x1b[0m";
-    const BOLD: &str = "\x1b[1m";
-    const DIM: &str = "\x1b[2m";
-    const RED: &str = "\x1b[31m";
-    const GREEN: &str = "\x1b[32m";
-    const YELLOW: &str = "\x1b[33m";
-
-    let paint = |text: &str, code: &str| {
-        if color {
-            format!("{code}{text}{RESET}")
-        } else {
-            text.to_owned()
-        }
-    };
-
+pub fn render(report: &Report, style: Style) -> String {
     let mut lines = Vec::new();
     let findings = match &report.outcome {
         relic_core::finding::Outcome::Ran(findings) => findings.as_slice(),
@@ -260,36 +302,35 @@ pub fn render(report: &Report, color: bool) -> String {
         }
     };
     for finding in findings {
-        let code = match finding.severity {
-            Severity::Broken => RED,
-            Severity::Soft => YELLOW,
-            Severity::Note => DIM,
+        let tint = match finding.severity {
+            Severity::Broken => Tint::Red,
+            Severity::Soft => Tint::Yellow,
+            Severity::Note => Tint::Dim,
         };
         lines.push(format!(
             "{}  {}",
-            paint(&finding.severity.to_string(), code),
+            style.paint(tint, &finding.severity.to_string()),
             finding.summary
         ));
         if let Some(detail) = &finding.detail {
             for line in detail.as_str().lines() {
-                lines.push(paint(&format!("        {line}"), DIM));
+                lines.push(style.dim(&format!("        {line}")));
             }
         }
         if let Some(fix) = &finding.fix {
-            lines.push(paint(&format!("        fix: {fix}"), DIM));
+            lines.push(style.dim(&format!("        fix: {fix}")));
         }
     }
     let grade = report.grade();
     let verdict = match grade {
-        relic_core::finding::Grade::Ok => paint("==> rote ok", GREEN),
-        relic_core::finding::Grade::Soft => paint(
-            &format!("!!> rote degraded — {} to look at", findings.len()),
-            YELLOW,
-        ),
-        relic_core::finding::Grade::Broken => paint(
-            &format!("!!> rote BROKEN — {} to look at", findings.len()),
-            BOLD,
-        ),
+        relic_core::finding::Grade::Ok => style.green("==> rote ok"),
+        relic_core::finding::Grade::Soft => style.yellow(&format!(
+            "!!> rote degraded — {} to look at",
+            findings.len()
+        )),
+        relic_core::finding::Grade::Broken => {
+            style.bold(&format!("!!> rote BROKEN — {} to look at", findings.len()))
+        }
     };
     lines.push(verdict);
     lines.join("\n")
@@ -300,12 +341,29 @@ mod tests {
     use jiff::civil::{Date, date};
     use relic_core::finding::{Grade, Outcome, Severity};
 
-    use super::{GRACE_DAYS, report, unreadable};
+    use super::{GRACE_DAYS, unreadable};
     use crate::ladder::Class;
-    use crate::log::{Added, Attempted, Digest, Event, Line, Record, SCHEMA, SessionId};
+    use crate::log::{Added, Attempted, Digest, Event, Line, Record, Retired, SCHEMA, SessionId};
     use crate::model::State;
-    use crate::store::{Journal, Verifiers};
+    use crate::store::{Journal, Paths, Verifiers};
     use crate::verifier::Verifier;
+
+    fn paths() -> Paths {
+        Paths {
+            log_dir: "/x/ark/rote".into(),
+            state_dir: "/x/state/rote".into(),
+        }
+    }
+
+    fn report(
+        journal: &Journal,
+        state: &State,
+        verifiers: &Verifiers,
+        today: Date,
+        host: &str,
+    ) -> relic_core::finding::Report {
+        super::report(journal, state, verifiers, &paths(), today, host)
+    }
 
     const PHC: &str = "$argon2id$v=19$m=262144,t=4,p=1$CQkJCQkJCQkJCQkJCQkJCQ$\
                        PdWLZDvNGYPMYWPfbSZq7yZO0eFRHmiGnLTuNBAxUC0";
@@ -401,6 +459,76 @@ mod tests {
         );
         assert_eq!(findings(&report).len(), 1);
         assert_eq!(report.grade(), Grade::Ok, "a note is read, never counted");
+    }
+
+    #[test]
+    fn a_slug_never_reviewed_still_falls_overdue() {
+        let lines = vec![added(date(2026, 9, 1), "a")];
+        let late = report(
+            &Journal::default(),
+            &State::replay(&lines),
+            &verifiers(&[("a", PHC)]),
+            date(2026, 9, 30),
+            "Mac",
+        );
+        assert!(
+            findings(&late).iter().any(|f| f.1.contains("overdue")),
+            "{:?}",
+            findings(&late)
+        );
+        assert_eq!(late.grade(), Grade::Soft);
+    }
+
+    #[test]
+    fn a_verifier_inside_the_log_tree_is_broken() {
+        let inside = Paths {
+            log_dir: "/x/ark/rote".into(),
+            state_dir: "/x/ark/rote/state".into(),
+        };
+        let report = super::report(
+            &Journal::default(),
+            &State::default(),
+            &Verifiers::default(),
+            &inside,
+            date(2026, 9, 10),
+            "Mac",
+        );
+        assert_eq!(report.grade(), Grade::Broken);
+        assert!(
+            findings(&report)
+                .iter()
+                .any(|f| f.1.contains("inside the log tree")),
+            "{:?}",
+            findings(&report)
+        );
+    }
+
+    #[test]
+    fn a_verifier_for_a_retired_or_unknown_slug_is_soft() {
+        let lines = vec![
+            added(date(2026, 9, 1), "a"),
+            added(date(2026, 9, 1), "b"),
+            line(
+                date(2026, 9, 2),
+                Event::Retire(Retired {
+                    slug: "b".parse().unwrap(),
+                }),
+            ),
+        ];
+        let report = report(
+            &Journal::default(),
+            &State::replay(&lines),
+            &verifiers(&[("a", PHC), ("b", PHC), ("ghost", PHC)]),
+            date(2026, 9, 2),
+            "Mac",
+        );
+        let found = findings(&report);
+        let orphan = found
+            .iter()
+            .find(|f| f.1.contains("not on the schedule"))
+            .expect("an orphan finding");
+        assert_eq!(orphan.0, Severity::Soft);
+        assert_eq!(report.grade(), Grade::Soft);
     }
 
     #[test]

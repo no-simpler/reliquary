@@ -35,12 +35,11 @@ use crossterm::terminal::{
     Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use crossterm::{cursor, execute, queue};
+use relic_core::style::Style;
+use zeroize::Zeroize as _;
 
 use super::card::{self, Card};
 use super::{Input, Key, Screen};
-
-/// Exit status for a sitting cut short by a signal.
-const INTERRUPTED: i32 = 2;
 
 /// The narrowest terminal a card fits in, with a column either side.
 const MIN_COLS: usize = card::WIDTH + 2;
@@ -151,7 +150,7 @@ pub fn is_interactive() -> bool {
 /// The terminal, held in dialog mode for as long as this value lives.
 pub struct Terminal {
     armed_at: Instant,
-    color: bool,
+    style: Style,
     anchor: usize,
     last: Vec<String>,
     last_caret: Option<(usize, usize)>,
@@ -164,7 +163,7 @@ impl Terminal {
     /// # Errors
     ///
     /// When this is not a terminal, or the terminal refuses raw mode.
-    pub fn enter(color: bool) -> Result<Self> {
+    pub fn enter(style: Style) -> Result<Self> {
         if !is_interactive() {
             return Err(anyhow!(
                 "this has to be typed at a terminal, so there is nothing to run here"
@@ -183,7 +182,7 @@ impl Terminal {
         ALT.store(true, Ordering::SeqCst);
         Ok(Self {
             armed_at: Instant::now(),
-            color,
+            style,
             anchor: 0,
             last: Vec::new(),
             last_caret: None,
@@ -301,7 +300,7 @@ fn watch_signals() {
     std::thread::spawn(move || {
         if signals.forever().next().is_some() {
             restore();
-            std::process::exit(INTERRUPTED);
+            std::process::exit(i32::from(crate::exit::INCOMPLETE));
         }
     });
 }
@@ -314,7 +313,14 @@ impl Input for Terminal {
     fn next(&mut self) -> Result<Option<Key>> {
         loop {
             let event = self.event()?;
-            if let Some(key) = key_of(&event) {
+            let key = key_of(&event);
+            // A refused paste is, more often than not, the secret itself, read
+            // out of the vault. crossterm hands it over as a String it would
+            // otherwise drop with the bytes still in it.
+            if let Event::Paste(mut text) = event {
+                text.zeroize();
+            }
+            if let Some(key) = key {
                 return Ok(Some(key));
             }
         }
@@ -326,8 +332,8 @@ impl Input for Terminal {
 }
 
 impl Screen for Terminal {
-    fn color(&self) -> bool {
-        self.color
+    fn style(&self) -> Style {
+        self.style
     }
 
     fn anchor(&mut self, height: usize) {

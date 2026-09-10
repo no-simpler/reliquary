@@ -47,7 +47,9 @@ KEYS
   Ctrl-L is offered only after a cold attempt is on record, and does nothing
   before then. Consulting the vault first and typing what it says would make the
   reading a transcription, and the whole point is that the cold attempt is
-  recorded either way.
+  recorded either way. It stays on offer once the cold tries are spent: the
+  field says out of tries, a typed answer is refused rather than judged, and
+  ctrl-l or escape are what is left.
 
   A paste is refused rather than accepted. A drill answered from a vault
   measures nothing.
@@ -63,7 +65,8 @@ INTERVALS
   questions.
 
     scheduled   what the ladder asked for
-    actual      days since the previous scheduled review
+    actual      days since the schedule's anchor: the previous review or
+                probe, else enrollment
     effective   days since the previous entry of any kind
 
   Effective is the honest one, and it is what every statistic and the cutover
@@ -134,9 +137,10 @@ STDIN
   line. rekey wants the current secret first, then the new one, unless --force
   is given, in which case it wants only the new one.
 
-  Both refuse to run when any standard stream is a terminal. That is what stops
-  the pipe becoming a habit, because a secret typed into a shell command lands
-  in shell history.
+  Both refuse to run when stdin is a terminal, because a secret typed into an
+  echoing read lands on the screen and in scrollback. What no stream check can
+  see is the command line itself: a secret written into one lands in shell
+  history, so the pipe's other end should be a vault, never an echo.
 
   The drill itself never reads stdin. It has to be typed at a terminal, and a
   paste is refused.

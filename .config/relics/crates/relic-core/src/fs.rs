@@ -58,8 +58,30 @@ impl Drop for Scratch {
 /// Any [`io::Error`] the write, the rename or the temporary raises. It names the
 /// path it is about; callers add the verb.
 pub fn write_atomic(path: &Utf8Path, contents: &str) -> io::Result<()> {
+    write_with(path, contents, None)
+}
+
+/// [`write_atomic`], with the file private to its owner from the moment it
+/// exists.
+///
+/// The mode is set at creation rather than after the rename, so there is no
+/// window in which the new contents are readable at the directory's default
+/// mode. For a file that holds a verifier or a credential, that window is the
+/// whole point.
+///
+/// # Errors
+///
+/// As [`write_atomic`].
+pub fn write_atomic_private(path: &Utf8Path, contents: &str) -> io::Result<()> {
+    write_with(path, contents, Some(PRIVATE_MODE))
+}
+
+/// Owner read and write, nothing for anyone else.
+const PRIVATE_MODE: u32 = 0o600;
+
+fn write_with(path: &Utf8Path, contents: &str, mode: Option<u32>) -> io::Result<()> {
     let dir = path.parent().unwrap_or(Utf8Path::new("."));
-    let (mut scratch, mut file) = create_scratch(path, dir)?;
+    let (mut scratch, mut file) = create_scratch(path, dir, mode)?;
 
     file.write_all(contents.as_bytes())?;
     file.sync_all()?;
@@ -86,7 +108,11 @@ pub fn write_atomic(path: &Utf8Path, contents: &str) -> io::Result<()> {
 /// The leading dot keeps it out of any directory scan that globs or filters by
 /// extension — both stores enumerate their own directories, and a temporary that
 /// looks like a record is a record as far as they are concerned.
-fn create_scratch(path: &Utf8Path, dir: &Utf8Path) -> io::Result<(Scratch, File)> {
+fn create_scratch(
+    path: &Utf8Path,
+    dir: &Utf8Path,
+    mode: Option<u32>,
+) -> io::Result<(Scratch, File)> {
     let stem = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no file name to replace"))?;
@@ -99,11 +125,13 @@ fn create_scratch(path: &Utf8Path, dir: &Utf8Path) -> io::Result<(Scratch, File)
     for _ in 0..64 {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let candidate = dir.join(format!(".{stem}.tmp.{pid}.{n}"));
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&candidate)
-        {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        if let Some(mode) = mode {
+            use fs_err::os::unix::fs::OpenOptionsExt as _;
+            options.mode(mode);
+        }
+        match options.open(&candidate) {
             Ok(file) => {
                 return Ok((
                     Scratch {
@@ -129,7 +157,19 @@ fn create_scratch(path: &Utf8Path, dir: &Utf8Path) -> io::Result<(Scratch, File)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt as _;
     use std::sync::Barrier;
+
+    #[test]
+    fn a_private_write_is_private_from_the_first_byte() {
+        let dir = scratch_dir("private");
+        let path = dir.join("secret.toml");
+        write_atomic_private(&path, "phc = \"x\"").expect("private write");
+        let mode = fs::metadata(&path).expect("metadata").permissions().mode();
+        assert_eq!(mode & 0o777, PRIVATE_MODE);
+        assert_eq!(fs::read_to_string(&path).expect("read"), "phc = \"x\"");
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     fn scratch_dir(name: &str) -> Utf8PathBuf {
         let dir = crate::path::utf8(std::env::temp_dir())

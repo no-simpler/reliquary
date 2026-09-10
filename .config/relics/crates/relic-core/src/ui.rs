@@ -146,6 +146,14 @@ impl ColorChoice {
             }
         }
     }
+
+    /// The same decision, carried as a [`crate::style::Style`].
+    #[must_use]
+    pub fn style(self, format: Format) -> crate::style::Style {
+        crate::style::Style {
+            colour: self.use_color(format),
+        }
+    }
 }
 
 #[cfg(test)]

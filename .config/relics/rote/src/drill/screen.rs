@@ -12,11 +12,12 @@
 //! carries it alone.
 
 use jiff::civil::Date;
+use relic_core::style::{Style, Tint};
 
 use super::{Item, Landed, Sitting};
 use crate::ladder::{Class, Step};
 use crate::slug::Slug;
-use crate::tui::card::{BOLD, CONTENT, Card, DIM, GREEN, Piece, RED, Reveal, Tone, YELLOW, join};
+use crate::tui::card::{CONTENT, Card, Piece, Reveal, Tone, join};
 
 /// What points at the slug being asked about.
 const MARKER: &str = "▸ ";
@@ -40,8 +41,6 @@ pub enum RowState {
     Active {
         /// Which try.
         attempt: u8,
-        /// Tries after this one.
-        left: u8,
     },
     /// Submitted, and the verifier is working.
     Checking,
@@ -56,10 +55,6 @@ pub enum RowState {
     Failed {
         /// Which try.
         attempt: u8,
-        /// Tries after this one.
-        left: u8,
-        /// Whether this one moved the ladder.
-        scored: bool,
     },
     /// Passed over.
     Skipped,
@@ -148,13 +143,13 @@ impl<'a> Frame<'a> {
     }
 }
 
-pub fn card(frame: &Frame<'_>, color: bool) -> Card {
+pub fn card(frame: &Frame<'_>, style: Style) -> Card {
     let title = if frame.sitting.is_some() {
         "done"
     } else {
         "rote"
     };
-    let mut card = Card::new(title, crate::tui::card::stamp(frame.today), color);
+    let mut card = Card::new(title, crate::tui::card::stamp(frame.today), style);
     card.reserve(frame.rows.len().saturating_add(SLOTS));
     let names = frame
         .rows
@@ -164,33 +159,33 @@ pub fn card(frame: &Frame<'_>, color: bool) -> Card {
         .unwrap_or(0);
 
     if frame.rows.is_empty() {
-        card.say("nothing to drill", DIM);
+        card.say("nothing to drill", Tint::Dim);
     }
     for (index, row) in frame.rows.iter().enumerate() {
-        card.line(row_line(row, names, frame.active == Some(index), color));
+        card.line(row_line(row, names, frame.active == Some(index), style));
     }
 
     if let Some(row) = frame.active.and_then(|index| frame.rows.get(index)) {
         card.gap();
-        card.say(intention(row), DIM);
+        card.say(intention(row), Tint::Dim);
         // The drill is blind, so there is nothing typed for the field to show.
         // It is asked for anyway, through the one place in the binary where a
         // typed secret becomes something on a screen.
         card.entry(0, Reveal::Blind, frame.tone);
         card.gap();
-        card.line(under(frame, color));
+        card.line(under(frame, style));
     }
 
     if let Some(sitting) = frame.sitting {
-        card.gap().say(tally(sitting), BOLD);
+        card.gap().say(tally(sitting), Tint::Bold);
         for note in frame.notes {
-            card.say(note.clone(), DIM);
+            card.say(note.clone(), Tint::Dim);
         }
         let last = frame.rows.len().saturating_add(SLOTS).saturating_sub(1);
         while card.lines() < last {
             card.gap();
         }
-        card.say("press any key", DIM);
+        card.say("press any key", Tint::Dim);
     }
     card
 }
@@ -200,70 +195,70 @@ pub fn card(frame: &Frame<'_>, color: bool) -> Card {
 ///
 /// Enter submits and escape leaves, which nobody has to be told. The lookup is
 /// neither, and it is only ever on offer once a cold attempt is on record.
-fn under(frame: &Frame<'_>, color: bool) -> Piece {
+fn under(frame: &Frame<'_>, style: Style) -> Piece {
     let left = frame.status.clone().unwrap_or_default();
     let right = if frame.lookup { "^L  look it up" } else { "" };
     let gap = CONTENT
         .saturating_sub(left.chars().count())
         .saturating_sub(right.chars().count());
     join(&[
-        Piece::painted(left, DIM, color),
+        Piece::painted(left, Tint::Dim, style),
         Piece::plain(" ".repeat(gap)),
-        Piece::painted(right, DIM, color),
+        Piece::painted(right, Tint::Dim, style),
     ])
 }
 
 /// One slug's line: a marker, its name, where it stands on the ladder, and one
 /// glyph of standing with whatever that glyph needs qualifying by.
-fn row_line(row: &Row, names: usize, active: bool, color: bool) -> Piece {
+fn row_line(row: &Row, names: usize, active: bool, style: Style) -> Piece {
     let marker = if active { MARKER } else { "  " };
     let (glyph, tint) = icon(row);
     join(&[
-        Piece::painted(marker, DIM, color),
+        Piece::painted(marker, Tint::Dim, style),
         Piece::painted(
             format!(
                 "{:<width$}",
                 row.slug.as_str(),
                 width = names.saturating_add(2)
             ),
-            BOLD,
-            color,
+            Tint::Bold,
+            style,
         ),
-        Piece::painted(format!("{:<CHIP$}", chip(row)), DIM, color),
-        Piece::painted(format!("{glyph:<ICON$}"), tint, color),
-        detail(row, color),
+        Piece::painted(format!("{:<CHIP$}", chip(row)), Tint::Dim, style),
+        Piece::painted(format!("{glyph:<ICON$}"), tint, style),
+        detail(row, style),
     ])
 }
 
 /// The one character that says where a row stands.
-fn icon(row: &Row) -> (&'static str, &'static str) {
+fn icon(row: &Row) -> (&'static str, Tint) {
     match row.state {
         // The marker already says which row is being asked about, and a row
         // nobody has reached says nothing at all.
-        RowState::Pending | RowState::Active { .. } => (" ", DIM),
-        RowState::Checking => ("·", DIM),
-        RowState::Passed { .. } => ("✓", GREEN),
-        RowState::Failed { .. } => ("✗", RED),
-        RowState::Skipped | RowState::Aborted => ("–", DIM),
-        RowState::Unverifiable => ("!", YELLOW),
+        RowState::Pending | RowState::Active { .. } => (" ", Tint::Dim),
+        RowState::Checking => ("·", Tint::Dim),
+        RowState::Passed { .. } => ("✓", Tint::Green),
+        RowState::Failed { .. } => ("✗", Tint::Red),
+        RowState::Skipped | RowState::Aborted => ("–", Tint::Dim),
+        RowState::Unverifiable => ("!", Tint::Yellow),
     }
 }
 
 /// What the glyph cannot say on its own.
-fn detail(row: &Row, color: bool) -> Piece {
+fn detail(row: &Row, style: Style) -> Piece {
     match row.state {
         RowState::Passed { total_ms, retries } => {
-            let mut text = seconds(total_ms);
+            let mut text = crate::render::seconds(total_ms);
             if retries > 0 {
                 use std::fmt::Write as _;
                 let _ = write!(text, "   x{}", retries.saturating_add(1));
             }
-            Piece::painted(text, DIM, color)
+            Piece::painted(text, Tint::Dim, style)
         }
-        RowState::Failed { attempt, .. } if attempt > 1 => {
-            Piece::painted(format!("x{attempt}"), DIM, color)
+        RowState::Failed { attempt } if attempt > 1 => {
+            Piece::painted(format!("x{attempt}"), Tint::Dim, style)
         }
-        RowState::Unverifiable => Piece::painted("no verifier", DIM, color),
+        RowState::Unverifiable => Piece::painted("no verifier", Tint::Dim, style),
         RowState::Pending
         | RowState::Active { .. }
         | RowState::Checking
@@ -273,18 +268,19 @@ fn detail(row: &Row, color: bool) -> Piece {
     }
 }
 
+/// The class and the interval, spelled the way `status` and `log` spell them.
 fn chip(row: &Row) -> String {
     let class = match row.class {
         Class::Review => "review",
         Class::Practice => "practice",
         Class::Probe => "probe",
         // An aided entry has no position of its own and moves nothing, so the
-        // day and the cap would be reporting somebody else's business. What it
-        // measures is on the line above the field; the chip need not say it
-        // twice.
+        // interval and the cap would be reporting somebody else's business.
+        // What it measures is on the line above the field; the chip need not
+        // say it twice.
         Class::Aided => return "aided".to_owned(),
     };
-    let mut text = format!("{class} · day {}", row.step.interval());
+    let mut text = format!("{class} · {}d", row.step.interval());
     if row.step.at_cap() {
         text.push_str(" · at cap");
     }
@@ -297,10 +293,6 @@ fn chip(row: &Row) -> String {
 /// What this prompt is asking for, said where and when it applies.
 ///
 /// The discipline is one line — the drill runs before the lookup — and this is
-/// the only place it reaches a person at the moment it is due.
-/// What this prompt is asking for, said where and when it applies.
-///
-/// The discipline is one line — the drill runs before the lookup — and this is
 /// the only place it reaches a person at the moment it is due. It names the way
 /// out too, because conceding by submitting nothing is the one thing here that
 /// is not already a convention.
@@ -309,16 +301,6 @@ fn intention(row: &Row) -> &'static str {
         "from memory — submit nothing to concede"
     } else {
         "looked up, so this one measures nothing"
-    }
-}
-
-fn seconds(total_ms: Option<u64>) -> String {
-    match total_ms {
-        Some(ms) => format!(
-            "{:.1}s",
-            f64::from(u32::try_from(ms).unwrap_or(u32::MAX)) / 1000.0
-        ),
-        None => "—".to_owned(),
     }
 }
 
@@ -375,6 +357,7 @@ fn alone(landing: Landed) -> &'static str {
 #[cfg(test)]
 mod tests {
     use jiff::civil::date;
+    use relic_core::style::Style;
 
     use super::{Frame, Row, RowState, SLOTS, card};
     use crate::drill::{Sitting, Taken};
@@ -397,20 +380,13 @@ mod tests {
     fn every_state() -> Vec<RowState> {
         vec![
             RowState::Pending,
-            RowState::Active {
-                attempt: 3,
-                left: 0,
-            },
+            RowState::Active { attempt: 3 },
             RowState::Checking,
             RowState::Passed {
                 total_ms: Some(12_345),
                 retries: 2,
             },
-            RowState::Failed {
-                attempt: 2,
-                left: 1,
-                scored: true,
-            },
+            RowState::Failed { attempt: 2 },
             RowState::Skipped,
             RowState::Aborted,
             RowState::Unverifiable,
@@ -422,7 +398,12 @@ mod tests {
         let mut out = Vec::new();
         for tone in [Tone::Calm, Tone::Alarm] {
             for lookup in [false, true] {
-                for status in [None, Some("try 3 of 3".to_owned())] {
+                for status in [
+                    None,
+                    Some("try 3 of 3".to_owned()),
+                    Some("out of tries".to_owned()),
+                    Some("that is longer than a secret this tool will take".to_owned()),
+                ] {
                     let mut frame = Frame::running(date(2026, 9, 10), rows, Some(0));
                     frame.tone = tone;
                     frame.lookup = lookup;
@@ -443,7 +424,7 @@ mod tests {
                     row("flagship-login", class, state),
                 ];
                 for frame in every_frame(&rows) {
-                    for line in card(&frame, false).render() {
+                    for line in card(&frame, Style::PLAIN).render() {
                         assert_eq!(line.chars().count(), WIDTH, "{state:?} {class:?} {line}");
                     }
                 }
@@ -462,7 +443,7 @@ mod tests {
                 .collect();
             for frame in every_frame(&rows) {
                 assert_eq!(
-                    card(&frame, false).render().len(),
+                    card(&frame, Style::PLAIN).render().len(),
                     wanted,
                     "{state:?} changed the height"
                 );
@@ -476,7 +457,7 @@ mod tests {
         for state in every_state() {
             let rows = vec![row("a", Class::Review, state)];
             for frame in every_frame(&rows) {
-                if let Some((line, column)) = card(&frame, false).caret() {
+                if let Some((line, column)) = card(&frame, Style::PLAIN).caret() {
                     seen.insert((line, column));
                 }
             }
@@ -505,85 +486,82 @@ mod tests {
             ),
         ];
         let sitting = Sitting::default();
-        let running = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
-        let done = card(&Frame::done(date(2026, 9, 10), &rows, &sitting, &[]), false);
+        let running = card(
+            &Frame::running(date(2026, 9, 10), &rows, Some(0)),
+            Style::PLAIN,
+        );
+        let done = card(
+            &Frame::done(date(2026, 9, 10), &rows, &sitting, &[]),
+            Style::PLAIN,
+        );
         assert_eq!(running.render().len(), done.render().len());
     }
 
     #[test]
     fn no_real_content_ever_reaches_the_truncation_net() {
         for state in every_state() {
-            let rows = vec![row("flagship-login", Class::Aided, state)];
-            for frame in every_frame(&rows) {
-                let text = card(&frame, false).render().join("\n");
-                assert!(!text.contains('…'), "{state:?} was cut: {text}");
+            for class in [Class::Review, Class::Aided] {
+                let mut wide = row("flagship-login", class, state);
+                wide.stretch = true;
+                for frame in every_frame(&[wide]) {
+                    let text = card(&frame, Style::PLAIN).render().join("\n");
+                    assert!(!text.contains('…'), "{state:?} was cut: {text}");
+                }
             }
         }
     }
 
     #[test]
     fn the_prompt_says_what_it_wants_and_how_to_concede() {
-        let rows = vec![row(
-            "a",
-            Class::Review,
-            RowState::Active {
-                attempt: 1,
-                left: 2,
-            },
-        )];
-        let text = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false)
-            .render()
-            .join("\n");
+        let rows = vec![row("a", Class::Review, RowState::Active { attempt: 1 })];
+        let text = card(
+            &Frame::running(date(2026, 9, 10), &rows, Some(0)),
+            Style::PLAIN,
+        )
+        .render()
+        .join("\n");
         assert!(text.contains("from memory"), "{text}");
         assert!(text.contains("submit nothing to concede"), "{text}");
     }
 
     #[test]
     fn an_aided_prompt_says_it_measures_nothing() {
-        let rows = vec![row(
-            "a",
-            Class::Aided,
-            RowState::Active {
-                attempt: 1,
-                left: 0,
-            },
-        )];
-        let text = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false)
-            .render()
-            .join("\n");
+        let rows = vec![row("a", Class::Aided, RowState::Active { attempt: 1 })];
+        let text = card(
+            &Frame::running(date(2026, 9, 10), &rows, Some(0)),
+            Style::PLAIN,
+        )
+        .render()
+        .join("\n");
         assert!(text.contains("measures nothing"), "{text}");
     }
 
     #[test]
     fn the_lookup_is_named_only_where_it_is_on_offer() {
-        let rows = vec![row(
-            "a",
-            Class::Review,
-            RowState::Active {
-                attempt: 1,
-                left: 2,
-            },
-        )];
+        let rows = vec![row("a", Class::Review, RowState::Active { attempt: 1 })];
         let mut frame = Frame::running(date(2026, 9, 10), &rows, Some(0));
-        assert!(!card(&frame, false).render().join("\n").contains("^L"));
+        assert!(
+            !card(&frame, Style::PLAIN)
+                .render()
+                .join("\n")
+                .contains("^L")
+        );
         frame.lookup = true;
-        assert!(card(&frame, false).render().join("\n").contains("^L"));
+        assert!(
+            card(&frame, Style::PLAIN)
+                .render()
+                .join("\n")
+                .contains("^L")
+        );
     }
 
     #[test]
     fn nothing_on_the_card_spells_out_what_a_key_already_says() {
-        let rows = vec![row(
-            "a",
-            Class::Review,
-            RowState::Active {
-                attempt: 2,
-                left: 1,
-            },
-        )];
+        let rows = vec![row("a", Class::Review, RowState::Active { attempt: 2 })];
         let mut frame = Frame::running(date(2026, 9, 10), &rows, Some(0));
         frame.lookup = true;
         frame.status = Some("try 2 of 3".to_owned());
-        let text = card(&frame, false).render().join("\n");
+        let text = card(&frame, Style::PLAIN).render().join("\n");
         for spelled_out in ["[enter]", "[s]", "try again", "move on", "lapse recorded"] {
             assert!(!text.contains(spelled_out), "{spelled_out:?} in {text}");
         }
@@ -591,19 +569,37 @@ mod tests {
 
     #[test]
     fn a_miss_shows_a_count_rather_than_a_verdict() {
-        let rows = vec![row(
-            "a",
-            Class::Review,
-            RowState::Active {
-                attempt: 2,
-                left: 1,
-            },
-        )];
+        let rows = vec![row("a", Class::Review, RowState::Active { attempt: 2 })];
         let mut frame = Frame::running(date(2026, 9, 10), &rows, Some(0));
         frame.status = Some("try 2 of 3".to_owned());
-        let text = card(&frame, false).render().join("\n");
+        let text = card(&frame, Style::PLAIN).render().join("\n");
         assert!(text.contains("try 2 of 3"), "{text}");
         assert!(!text.contains("wrong"), "{text}");
+    }
+
+    #[test]
+    fn the_chip_spells_the_interval_the_way_the_tables_do() {
+        let mut climbing = row("a", Class::Review, RowState::Pending);
+        climbing.step = Step::from_recorded(2);
+        let text = card(
+            &Frame::running(date(2026, 9, 10), &[climbing], None),
+            Style::PLAIN,
+        )
+        .render()
+        .join("\n");
+        assert!(text.contains("review · 2d"), "{text}");
+        assert!(!text.contains("day 2"), "{text}");
+        assert!(!text.contains("at cap"), "{text}");
+
+        let mut capped = row("a", Class::Review, RowState::Pending);
+        capped.stretch = true;
+        let text = card(
+            &Frame::running(date(2026, 9, 10), &[capped], None),
+            Style::PLAIN,
+        )
+        .render()
+        .join("\n");
+        assert!(text.contains("review · 7d · at cap · stretch"), "{text}");
     }
 
     #[test]
@@ -616,9 +612,12 @@ mod tests {
                 retries: 1,
             },
         )];
-        let text = card(&Frame::running(date(2026, 9, 10), &rows, None), false)
-            .render()
-            .join("\n");
+        let text = card(
+            &Frame::running(date(2026, 9, 10), &rows, None),
+            Style::PLAIN,
+        )
+        .render()
+        .join("\n");
         assert!(text.contains('✓'), "{text}");
         assert!(text.contains("1.4s"), "{text}");
         assert!(text.contains("x2"), "{text}");
@@ -627,23 +626,22 @@ mod tests {
     #[test]
     fn a_slug_with_no_verifier_says_what_to_do_about_it() {
         let rows = vec![row("a", Class::Review, RowState::Unverifiable)];
-        let text = card(&Frame::running(date(2026, 9, 10), &rows, None), false)
-            .render()
-            .join("\n");
+        let text = card(
+            &Frame::running(date(2026, 9, 10), &rows, None),
+            Style::PLAIN,
+        )
+        .render()
+        .join("\n");
         assert!(text.contains("no verifier"), "{text}");
     }
 
     #[test]
     fn the_prompt_opens_a_field_and_puts_the_cursor_in_it() {
-        let rows = vec![row(
-            "a",
-            Class::Review,
-            RowState::Active {
-                attempt: 1,
-                left: 2,
-            },
-        )];
-        let drawn = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
+        let rows = vec![row("a", Class::Review, RowState::Active { attempt: 1 })];
+        let drawn = card(
+            &Frame::running(date(2026, 9, 10), &rows, Some(0)),
+            Style::PLAIN,
+        );
         assert!(drawn.caret().is_some(), "the field takes the cursor");
         let lines = drawn.render();
         assert!(lines.iter().any(|line| line.contains('╭')), "{lines:?}");
@@ -653,23 +651,19 @@ mod tests {
     #[test]
     fn a_row_that_is_not_at_the_prompt_opens_no_field() {
         let rows = vec![row("a", Class::Review, RowState::Pending)];
-        let drawn = card(&Frame::running(date(2026, 9, 10), &rows, None), false);
+        let drawn = card(
+            &Frame::running(date(2026, 9, 10), &rows, None),
+            Style::PLAIN,
+        );
         assert_eq!(drawn.caret(), None);
     }
 
     #[test]
-    fn color_changes_the_bytes_and_not_the_shape() {
-        let rows = vec![row(
-            "a",
-            Class::Review,
-            RowState::Active {
-                attempt: 1,
-                left: 2,
-            },
-        )];
+    fn colour_changes_the_bytes_and_not_the_shape() {
+        let rows = vec![row("a", Class::Review, RowState::Active { attempt: 1 })];
         let frame = Frame::running(date(2026, 9, 10), &rows, Some(0));
-        let plain = card(&frame, false).render();
-        let painted = card(&frame, true).render();
+        let plain = card(&frame, Style::PLAIN).render();
+        let painted = card(&frame, Style::COLOUR).render();
         assert_eq!(plain.len(), painted.len());
         for (a, b) in plain.iter().zip(painted.iter()) {
             assert!(b.len() >= a.len());
@@ -704,7 +698,7 @@ mod tests {
         let notes = vec!["escrow-p  cutover ready — 4 passes at 7d".to_owned()];
         let text = card(
             &Frame::done(date(2026, 9, 10), &rows, &sitting, &notes),
-            false,
+            Style::PLAIN,
         )
         .render()
         .join("\n");
@@ -806,7 +800,7 @@ mod tests {
 
     #[test]
     fn an_empty_sitting_says_so_rather_than_drawing_an_empty_box() {
-        let text = card(&Frame::running(date(2026, 9, 10), &[], None), false)
+        let text = card(&Frame::running(date(2026, 9, 10), &[], None), Style::PLAIN)
             .render()
             .join("\n");
         assert!(text.contains("nothing to drill"), "{text}");
@@ -822,9 +816,12 @@ mod tests {
                 retries: 0,
             },
         )];
-        let text = card(&Frame::running(date(2026, 9, 10), &rows, None), false)
-            .render()
-            .join("\n");
+        let text = card(
+            &Frame::running(date(2026, 9, 10), &rows, None),
+            Style::PLAIN,
+        )
+        .render()
+        .join("\n");
         assert!(text.contains('—'), "{text}");
     }
 }

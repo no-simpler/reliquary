@@ -101,7 +101,7 @@ fn dispatch() -> Result<ExitCode> {
         &reports,
         Style {
             format,
-            color: cli.color.use_color(format),
+            color: cli.color.style(format),
             quiet: cli.quiet,
         },
     )?;

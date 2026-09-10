@@ -25,8 +25,8 @@ pub struct Ctx {
     pub style: Style,
     /// The output shape.
     pub format: Format,
-    /// Whether to paint.
-    pub color: bool,
+    /// Whether to paint, carried as the thing that spends it.
+    pub paint: relic_core::style::Style,
     /// Whether to say only what was asked for.
     pub quiet: bool,
     /// One reading of the clock for the whole command.
@@ -62,7 +62,7 @@ pub fn open_context(global: &Global) -> Result<Ctx> {
     };
     Ok(Ctx {
         style: global.style.unwrap_or(config.style),
-        color: global.color.use_color(format),
+        paint: global.color.style(format),
         format,
         quiet: global.quiet,
         now: Timestamp::now(),
@@ -180,7 +180,7 @@ pub fn tick(ctx: &Ctx) -> Result<()> {
         .and_then(|session| session::seen(&ctx.paths, session));
     if shown.as_deref() != Some(digest.as_str()) {
         drew = true;
-        if let Some(text) = card::draw(&gathered.notices, width(ctx), ctx.style, ctx.color) {
+        if let Some(text) = card::draw(&gathered.notices, width(ctx), ctx.style, ctx.paint) {
             println!("{text}");
         }
         if let Some(session) = session.as_deref() {
@@ -229,7 +229,7 @@ pub fn show_card(ctx: &Ctx) -> Result<()> {
     if ctx.format != Format::Human {
         return render::list(ctx, &gathered.notices);
     }
-    match card::draw(&gathered.notices, width(ctx), ctx.style, ctx.color) {
+    match card::draw(&gathered.notices, width(ctx), ctx.style, ctx.paint) {
         Some(text) => println!("{text}"),
         None if !ctx.quiet => println!("the coop is empty"),
         None => {}
@@ -347,7 +347,7 @@ pub fn run_doctor(ctx: &Ctx) -> Result<u8> {
             serde_json::to_string_pretty(&report).context("serialising the report")?
         );
     } else {
-        println!("{}", doctor::render(&report, ctx.color));
+        println!("{}", doctor::render(&report, ctx.paint));
     }
     Ok(report.grade().exit_code())
 }

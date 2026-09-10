@@ -10,6 +10,7 @@ pub mod card;
 pub mod term;
 
 use anyhow::Result;
+use relic_core::style::{Style, Tint};
 
 pub use card::Card;
 
@@ -57,8 +58,8 @@ pub trait Input {
 
 /// Where the card is drawn.
 pub trait Screen {
-    /// Whether color is wanted, so a caller can build its pieces.
-    fn color(&self) -> bool;
+    /// Whether colour is wanted, so a caller can build its pieces.
+    fn style(&self) -> Style;
 
     /// Declare how tall the card will ordinarily be, so the dialog can be
     /// placed once and stay there.
@@ -152,6 +153,29 @@ pub enum Refusal {
     None,
     /// A paste arrived and was refused.
     Paste,
+    /// The buffer is full and a character was refused. Said rather than
+    /// swallowed: a secret silently cut short would enroll a verifier for
+    /// something nobody typed, which is exactly what the pipe path refuses.
+    Full,
+}
+
+impl Refusal {
+    /// What the line under the field says about it, or nothing.
+    pub fn status(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::Paste => Some("type it, do not paste it"),
+            Self::Full => Some("that is longer than a secret this tool will take"),
+        }
+    }
+
+    /// What the field looks like while it is being said.
+    pub fn tone(self) -> card::Tone {
+        match self {
+            Self::None => card::Tone::Calm,
+            Self::Paste | Self::Full => card::Tone::Alarm,
+        }
+    }
 }
 
 /// Read one secret, blind.
@@ -182,7 +206,9 @@ pub fn read_secret(
                 if ttfk.is_none() {
                     ttfk = Some(console.elapsed_ms());
                 }
-                secret.push(character);
+                if !secret.push(character) {
+                    refuse(console, card, Refusal::Full)?;
+                }
             }
             Key::Backspace => {
                 if secret.pop() {
@@ -216,13 +242,22 @@ pub fn read_secret(
             Key::Lookup => {}
             Key::Paste => {
                 refused = refused.saturating_add(1);
-                let drawn = card(Refusal::Paste);
-                console.flash(&drawn)?;
-                let calm = card(Refusal::None);
-                console.paint(&calm)?;
+                refuse(console, card, Refusal::Paste)?;
             }
         }
     }
+}
+
+/// A flash and back to calm: the shape every refusal takes.
+fn refuse(
+    console: &mut dyn Console,
+    card: &mut dyn FnMut(Refusal) -> Card,
+    refusal: Refusal,
+) -> Result<()> {
+    let drawn = card(refusal);
+    console.flash(&drawn)?;
+    let calm = card(Refusal::None);
+    console.paint(&calm)
 }
 
 /// Lines a one-secret dialog holds: a heading, air, the intention, the three of
@@ -235,6 +270,9 @@ pub struct Ask<'a> {
     pub heading: &'a str,
     /// What this prompt is for, said where it applies.
     pub intention: &'a str,
+    /// What the line under the field says while nothing is being refused: the
+    /// last round's verdict, or nothing.
+    pub status: Option<&'a str>,
 }
 
 /// Put one prompt on the screen and read the answer.
@@ -247,33 +285,18 @@ pub struct Ask<'a> {
 ///
 /// When the terminal cannot be read or written.
 pub fn ask(console: &mut dyn Console, today: jiff::civil::Date, prompt: &Ask<'_>) -> Result<Typed> {
-    let color = console.color();
+    let style = console.style();
     let mut build = |refusal: Refusal| {
-        let alarm = refusal == Refusal::Paste;
-        let mut drawn = Card::new("rote", card::stamp(today), color);
+        let mut drawn = Card::new("rote", card::stamp(today), style);
         drawn.reserve(ASK_SLOTS);
-        drawn.say(prompt.heading, card::BOLD).gap();
-        if !prompt.intention.is_empty() {
-            drawn.say(prompt.intention, card::DIM);
-        }
-        drawn.entry(
-            0,
-            card::Reveal::Blind,
-            if alarm {
-                card::Tone::Alarm
-            } else {
-                card::Tone::Calm
-            },
-        );
+        drawn.say(prompt.heading, Tint::Bold).gap();
+        // Unconditional, so an empty intention pads its line rather than moving
+        // the field up into it.
+        drawn.say(prompt.intention, Tint::Dim);
+        drawn.entry(0, card::Reveal::Blind, refusal.tone());
         drawn.gap();
-        drawn.say(
-            if alarm {
-                "type it, do not paste it"
-            } else {
-                ""
-            },
-            card::DIM,
-        );
+        let under = refusal.status().or(prompt.status).unwrap_or("");
+        drawn.say(under, Tint::Dim);
         drawn
     };
     let opening = build(Refusal::None);
@@ -295,16 +318,154 @@ pub fn outcome(
     today: jiff::civil::Date,
     heading: &str,
     text: &str,
-    code: &str,
+    tint: Tint,
 ) -> Result<()> {
-    let color = console.color();
-    let mut drawn = Card::new("done", card::stamp(today), color);
+    let style = console.style();
+    let mut drawn = Card::new("done", card::stamp(today), style);
     drawn.reserve(ASK_SLOTS);
     // The heading is where it always was, and what happened is where everything
     // else that changes has been: on the line under the field.
-    drawn.say(heading, card::BOLD);
+    drawn.say(heading, Tint::Bold);
     drawn.pad_to(ASK_SLOTS.saturating_sub(1));
-    drawn.split(text, "press any key", code);
+    drawn.split(text, "press any key", tint);
     console.paint(&drawn)?;
     console.hold()
+}
+
+#[cfg(test)]
+mod tests {
+    use jiff::civil::date;
+    use relic_core::style::Style;
+
+    use super::{Ask, Card, Input, Key, Refusal, Screen, Typed, ask, read_secret};
+    use crate::secret::CAPACITY;
+
+    /// A scripted terminal that records every card it is handed.
+    struct Fake {
+        keys: Vec<Key>,
+        at: usize,
+        frames: Vec<Vec<String>>,
+        flashes: usize,
+        anchored: usize,
+    }
+
+    impl Fake {
+        fn new(keys: Vec<Key>) -> Self {
+            Self {
+                keys,
+                at: 0,
+                frames: Vec::new(),
+                flashes: 0,
+                anchored: 0,
+            }
+        }
+    }
+
+    impl Input for Fake {
+        fn arm(&mut self) {}
+
+        fn next(&mut self) -> anyhow::Result<Option<Key>> {
+            let key = self.keys.get(self.at).copied();
+            self.at = self.at.saturating_add(1);
+            Ok(key)
+        }
+
+        fn elapsed_ms(&self) -> u64 {
+            0
+        }
+    }
+
+    impl Screen for Fake {
+        fn style(&self) -> Style {
+            Style::PLAIN
+        }
+
+        fn anchor(&mut self, height: usize) {
+            self.anchored = height;
+        }
+
+        fn paint(&mut self, card: &Card) -> anyhow::Result<()> {
+            self.frames.push(card.render());
+            Ok(())
+        }
+
+        fn flash(&mut self, card: &Card) -> anyhow::Result<()> {
+            self.flashes = self.flashes.saturating_add(1);
+            self.paint(card)
+        }
+
+        fn hold(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn typing(text: &str) -> Vec<Key> {
+        let mut keys: Vec<Key> = text.chars().map(Key::Char).collect();
+        keys.push(Key::Enter);
+        keys
+    }
+
+    #[test]
+    fn a_full_buffer_refuses_the_character_and_says_so() {
+        let mut keys: Vec<Key> = std::iter::repeat_n(Key::Char('x'), CAPACITY + 3).collect();
+        keys.push(Key::Enter);
+        let mut console = Fake::new(keys);
+        let mut refusals = Vec::new();
+        let typed = read_secret(&mut console, false, &mut |refusal| {
+            refusals.push(refusal);
+            Card::new("rote", "x", Style::PLAIN)
+        })
+        .unwrap();
+        let Typed::Submitted(entry) = typed else {
+            panic!("submitted");
+        };
+        assert_eq!(
+            entry.secret.expose().len(),
+            CAPACITY,
+            "nothing past the capacity"
+        );
+        assert_eq!(console.flashes, 3, "each refused character is a flash");
+        assert!(refusals.contains(&Refusal::Full));
+        assert!(
+            refusals.contains(&Refusal::None),
+            "and the card calms down after"
+        );
+    }
+
+    #[test]
+    fn an_empty_intention_does_not_move_the_field() {
+        let prompt = |intention: &'static str| {
+            let mut console = Fake::new(typing("x"));
+            let ask_for = Ask {
+                heading: "enroll a",
+                intention,
+                status: None,
+            };
+            ask(&mut console, date(2026, 9, 10), &ask_for).unwrap();
+            let first = console.frames.first().unwrap().clone();
+            first
+                .iter()
+                .position(|line| line.contains('╭') && !line.contains("rote"))
+                .unwrap()
+        };
+        assert_eq!(prompt("type it twice"), prompt(""));
+    }
+
+    #[test]
+    fn the_status_sits_under_the_field_and_a_refusal_overrides_it() {
+        let mut console = Fake::new(vec![Key::Paste, Key::Char('x'), Key::Enter]);
+        let ask_for = Ask {
+            heading: "enroll a",
+            intention: "again",
+            status: Some("the two entries differ"),
+        };
+        ask(&mut console, date(2026, 9, 10), &ask_for).unwrap();
+        let opening = console.frames.first().unwrap().join("\n");
+        assert!(opening.contains("the two entries differ"), "{opening}");
+        let flashed = console.frames.get(1).unwrap().join("\n");
+        assert!(flashed.contains("do not paste"), "{flashed}");
+        assert!(!flashed.contains("entries differ"), "{flashed}");
+        let calm = console.frames.get(2).unwrap().join("\n");
+        assert!(calm.contains("the two entries differ"), "{calm}");
+    }
 }

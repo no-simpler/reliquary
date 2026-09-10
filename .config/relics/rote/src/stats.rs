@@ -203,8 +203,8 @@ impl Stats {
             // An aided entry is not a first attempt at anything — it follows a
             // miss — so it never reaches the first-attempt filter below.
             if !entry.class.unaided() {
-                if attempted(entry) {
-                    stats.aided.record(entry.outcome == Outcome::Pass);
+                if let Some(accepted) = aided_verdict(entry) {
+                    stats.aided.record(accepted);
                 }
                 continue;
             }
@@ -262,9 +262,15 @@ impl Stats {
     }
 }
 
-/// Whether anything was put in front of anyone at this prompt.
-fn attempted(entry: &Attempted) -> bool {
-    !matches!(entry.outcome, Outcome::Skip | Outcome::Abort)
+/// What an aided entry says about the vault and the verifier: accepted, refused,
+/// or nothing. A blank offered no answer, so it is evidence of no disagreement
+/// and is not counted as one.
+fn aided_verdict(entry: &Attempted) -> Option<bool> {
+    match entry.outcome {
+        Outcome::Pass => Some(true),
+        Outcome::Fail => Some(false),
+        Outcome::Blank | Outcome::Skip | Outcome::Abort => None,
+    }
 }
 
 /// Whether an entry counts toward a rate, and whether it passed.
@@ -318,7 +324,9 @@ fn per_slug(all: &[(Date, &Attempted)], in_window: &[(Date, &Attempted)]) -> Vec
                 in_window
                     .iter()
                     .filter(|(_, entry)| {
-                        entry.slug == slug && !entry.class.unaided() && attempted(entry)
+                        entry.slug == slug
+                            && !entry.class.unaided()
+                            && aided_verdict(entry).is_some()
                     })
                     .count(),
             )
@@ -560,6 +568,18 @@ mod tests {
             }
         );
         assert!(stats.lapses.is_empty());
+    }
+
+    #[test]
+    fn a_blank_aided_entry_is_neither_accepted_nor_refused() {
+        let stats = gather(&[line(&Entry {
+            class: Class::Aided,
+            outcome: Outcome::Blank,
+            attempt: 2,
+            ..Entry::default()
+        })]);
+        assert_eq!(stats.aided, Retention::default());
+        assert_eq!(stats.slugs.first().unwrap().aided, 0);
     }
 
     #[test]
