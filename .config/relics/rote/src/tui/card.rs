@@ -23,11 +23,17 @@ const CHROME: usize = 8;
 /// How much of [`WIDTH`] a line of content may occupy.
 pub const CONTENT: usize = WIDTH - CHROME;
 
-/// What is drawn where a secret is being typed.
-const CURSOR: &str = "▉";
+/// Where the content starts, past the border and the gutter.
+const CONTENT_COL: usize = 4;
 
-/// The marker that opens an entry line.
-const CARET: &str = "▸ ";
+/// Where text starts inside the entry field: its own border, then a space.
+const FIELD_TEXT_COL: usize = CONTENT_COL + 2;
+
+/// The border and the blank line above the first line of body.
+const BODY_OFFSET: usize = 2;
+
+/// The text area inside the entry field, past its border and padding.
+pub const FIELD: usize = CONTENT - 4;
 
 /// What a truncated line ends with. Reaching for this means the content and
 /// [`CONTENT`] have drifted apart, which is a defect rather than a layout.
@@ -102,26 +108,20 @@ pub enum Reveal {
     Blind,
 }
 
-/// The one place a secret being typed is drawn.
-///
-/// Every prompt in the binary comes through here, so what an entry looks like
-/// is one function rather than a habit repeated at each call site.
-pub fn entry_line(typed: usize, reveal: Reveal, hint: &str, color: bool) -> Piece {
-    let shown = match reveal {
-        // The count is taken and not used, which is what blind means. It is
-        // carried so that revealing something is a change to this match and to
-        // nothing else.
-        Reveal::Blind => {
-            let _ = typed;
-            String::new()
+impl Reveal {
+    /// What stands in the field for a buffer this long.
+    ///
+    /// The one place a typed secret becomes something on a screen. The count is
+    /// taken and not used, which is what blind means; it is carried so that
+    /// revealing something is a change to this match and to nothing else.
+    fn shown(self, typed: usize) -> String {
+        match self {
+            Self::Blind => {
+                let _ = typed;
+                String::new()
+            }
         }
-    };
-    join(&[
-        Piece::painted(CARET, DIM, color),
-        Piece::painted(shown, BOLD, color),
-        Piece::painted(CURSOR, BOLD, color),
-        Piece::painted(hint.to_owned(), DIM, color),
-    ])
+    }
 }
 
 /// The date, as every card stamps it.
@@ -136,6 +136,7 @@ pub struct Card {
     stamp: String,
     color: bool,
     body: Vec<Piece>,
+    caret: Option<(usize, usize)>,
 }
 
 impl Card {
@@ -146,7 +147,46 @@ impl Card {
             stamp: stamp.into(),
             color,
             body: Vec::new(),
+            caret: None,
         }
+    }
+
+    /// Where the terminal's own cursor belongs, in rendered coordinates.
+    ///
+    /// The card draws no caret of its own. A real cursor blinks, follows the
+    /// reader's own terminal settings, and cannot be overlapped by text the way
+    /// a glyph on a shared line can.
+    pub fn caret(&self) -> Option<(usize, usize)> {
+        self.caret
+    }
+
+    /// Add the entry field: its own delimited area, and nothing else on the
+    /// line.
+    ///
+    /// It draws no air of its own, so a caller composes one blank line before
+    /// the label-and-field block and the label sits directly above the field it
+    /// labels. Instructions never share the line: a hint beside somewhere a
+    /// secret is typed is a hint that will one day be overlapped by what is
+    /// typed into it.
+    pub fn entry(&mut self, typed: usize, reveal: Reveal) -> &mut Self {
+        let shown = reveal.shown(typed);
+        let filled = shown.chars().count().min(FIELD);
+        self.say(format!("╭{}╮", "─".repeat(FIELD + 2)), DIM);
+        let interior = join(&[
+            Piece::painted("│ ", DIM, self.color),
+            Piece::painted(format!("{shown:<FIELD$}"), BOLD, self.color),
+            Piece::painted(" │", DIM, self.color),
+        ]);
+        self.body.push(interior);
+        self.caret = Some((
+            self.body
+                .len()
+                .saturating_sub(1)
+                .saturating_add(BODY_OFFSET),
+            FIELD_TEXT_COL.saturating_add(filled),
+        ));
+        self.say(format!("╰{}╯", "─".repeat(FIELD + 2)), DIM);
+        self
     }
 
     /// Add a line.
@@ -187,8 +227,8 @@ impl Card {
     }
 
     fn top(&self) -> String {
-        let left = format!("┌─ {} ", self.title);
-        let right = format!(" {} ─┐", self.stamp);
+        let left = format!("╭─ {} ", self.title);
+        let right = format!(" {} ─╮", self.stamp);
         let fill = WIDTH
             .saturating_sub(left.chars().count())
             .saturating_sub(right.chars().count());
@@ -196,7 +236,7 @@ impl Card {
     }
 
     fn bottom(&self) -> String {
-        self.paint(&format!("└{}┘", "─".repeat(WIDTH.saturating_sub(2))), DIM)
+        self.paint(&format!("╰{}╯", "─".repeat(WIDTH.saturating_sub(2))), DIM)
     }
 
     /// One content line between two borders.
@@ -238,7 +278,7 @@ fn clip(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CONTENT, Card, Piece, Reveal, WIDTH, entry_line};
+    use super::{CONTENT, Card, Piece, Reveal, WIDTH};
 
     fn card() -> Card {
         Card::new("rote", "Thu 10 Sep", false)
@@ -282,15 +322,41 @@ mod tests {
     }
 
     #[test]
-    fn the_entry_line_says_nothing_about_what_was_typed() {
-        let empty = entry_line(0, Reveal::Blind, "", false);
+    fn the_field_says_nothing_about_what_was_typed() {
+        let mut empty = card();
+        empty.entry(0, Reveal::Blind);
         for typed in [1_usize, 7, 64, 4096] {
+            let mut drawn = card();
+            drawn.entry(typed, Reveal::Blind);
             assert_eq!(
-                entry_line(typed, Reveal::Blind, "", false).width(),
-                empty.width(),
-                "{typed} characters changed the line"
+                drawn.render(),
+                empty.render(),
+                "{typed} characters changed the field"
             );
+            assert_eq!(drawn.caret(), empty.caret(), "{typed} moved the cursor");
         }
+    }
+
+    #[test]
+    fn the_cursor_lands_inside_the_field_and_nowhere_else() {
+        let mut drawn = card();
+        drawn.say("a label", super::DIM).entry(0, Reveal::Blind);
+        let (row, column) = drawn.caret().expect("a field takes the cursor");
+        let lines = drawn.render();
+        let line: Vec<char> = lines[row].chars().collect();
+        assert_eq!(line[column], ' ', "the cursor must sit on the text area");
+        assert_eq!(
+            line[column - 2],
+            '│',
+            "two columns left is the field border"
+        );
+    }
+
+    #[test]
+    fn a_card_with_no_field_takes_no_cursor() {
+        let mut drawn = card();
+        drawn.say("nothing to type here", super::DIM);
+        assert_eq!(drawn.caret(), None);
     }
 
     #[test]

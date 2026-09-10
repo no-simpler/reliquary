@@ -451,6 +451,11 @@ fn retiring_takes_the_slug_off_the_schedule_and_the_verifier_with_it() {
         rote.json(&["status", "--all", "--json"])["slugs"][0]["retired"],
         true
     );
+    // Listed, but not as something that will be asked for again.
+    rote.run(&["status", "--all"])
+        .assert()
+        .success()
+        .stdout(contains("retired"));
     rote.run(&["retire", "a"])
         .assert()
         .failure()

@@ -10,9 +10,10 @@ use jiff::civil::Date;
 use super::{Item, Sitting};
 use crate::ladder::{Class, Step};
 use crate::slug::Slug;
-use crate::tui::card::{
-    BOLD, CONTENT, Card, DIM, GREEN, Piece, RED, Reveal, YELLOW, entry_line, join,
-};
+use crate::tui::card::{BOLD, CONTENT, Card, DIM, GREEN, Piece, RED, Reveal, YELLOW, join};
+
+/// What points at the slug being asked about.
+const MARKER: &str = "▸ ";
 
 /// Where one slug has got to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,16 +157,26 @@ pub fn card(frame: &Frame<'_>, color: bool) -> Card {
         card.say("nothing to drill", DIM);
     }
 
+    // The list, then the prompt under it. Threading the field between the rows
+    // would put it in the middle of the list as soon as there are three slugs,
+    // and carry whatever is said about it away from where it is typed.
     for (index, row) in frame.rows.iter().enumerate() {
-        for piece in row_lines(row, names, color) {
+        for piece in row_lines(row, names, frame.active == Some(index), color) {
             card.line(piece);
         }
-        if frame.active == Some(index) {
-            if let Some(text) = intention(row) {
-                card.say(text, DIM);
-            }
-            card.line(prompt_line(row, color));
+    }
+    if let Some(row) = frame.active.and_then(|index| frame.rows.get(index)) {
+        card.gap();
+        if let Some(text) = intention(row) {
+            card.say(text, DIM);
         }
+        if let Some(text) = attempt_note(row) {
+            card.say(text, DIM);
+        }
+        // The drill is blind, so there is nothing typed for the field to show.
+        // It is asked for anyway, through the one place in the binary where a
+        // typed secret becomes something on a screen.
+        card.entry(0, Reveal::Blind);
     }
 
     match frame.notice {
@@ -206,10 +217,22 @@ pub fn card(frame: &Frame<'_>, color: bool) -> Card {
 /// A sentence-shaped outcome does not fit beside a name and a chip, so it takes
 /// the line below rather than pushing the box wider than every other card in the
 /// binary.
-fn row_lines(row: &Row, names: usize, color: bool) -> Vec<Piece> {
-    let indent = names.saturating_add(2);
+fn row_lines(row: &Row, names: usize, active: bool, color: bool) -> Vec<Piece> {
+    let marker = if active { MARKER } else { "  " };
+    let indent = names
+        .saturating_add(2)
+        .saturating_add(marker.chars().count());
     let head = join(&[
-        Piece::painted(format!("{:<indent$}", row.slug.as_str()), BOLD, color),
+        Piece::painted(marker, DIM, color),
+        Piece::painted(
+            format!(
+                "{:<width$}",
+                row.slug.as_str(),
+                width = names.saturating_add(2)
+            ),
+            BOLD,
+            color,
+        ),
         Piece::painted(chip(row), DIM, color),
     ]);
     let state = state_piece(row, color);
@@ -251,7 +274,7 @@ fn intention(row: &Row) -> Option<String> {
             Some("look it up now, then type it — this one measures nothing".to_owned())
         }
         RowState::Active { attempt: 1, .. } => {
-            Some("from memory only — empty entry if there is nothing".to_owned())
+            Some("from memory only — submit an empty field if memory draws a blank".to_owned())
         }
         RowState::Active { .. }
         | RowState::Pending
@@ -312,10 +335,11 @@ fn state_piece(row: &Row, color: bool) -> Piece {
     }
 }
 
-fn prompt_line(row: &Row, color: bool) -> Piece {
-    let hint = match row.state {
+/// Which try this is, on its own line above the field.
+fn attempt_note(row: &Row) -> Option<String> {
+    match row.state {
         RowState::Active { attempt, left } if attempt > 1 => {
-            format!("   try {attempt}, {left} after this")
+            Some(format!("try {attempt}, {left} after this"))
         }
         RowState::Active { .. }
         | RowState::Pending
@@ -324,12 +348,8 @@ fn prompt_line(row: &Row, color: bool) -> Piece {
         | RowState::Failed { .. }
         | RowState::Skipped
         | RowState::Aborted
-        | RowState::Unverifiable => String::new(),
-    };
-    // The drill is blind, so there is nothing typed for the entry line to know
-    // about. It is asked for anyway, through the one function every prompt in
-    // the binary draws itself with.
-    entry_line(0, Reveal::Blind, &hint, color)
+        | RowState::Unverifiable => None,
+    }
 }
 
 fn seconds(total_ms: Option<u64>) -> String {
@@ -476,7 +496,10 @@ mod tests {
         let lines = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false).render();
         let text = lines.join("\n");
         assert!(text.contains("from memory only"), "{text}");
-        assert!(text.contains("empty entry if there is nothing"), "{text}");
+        assert!(
+            text.contains("submit an empty field if memory draws a blank"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -575,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn the_prompt_shows_a_cursor_and_never_an_echo() {
+    fn the_prompt_opens_a_field_and_puts_the_cursor_in_it() {
         let rows = vec![row(
             "a",
             Class::Review,
@@ -584,8 +607,18 @@ mod tests {
                 left: 2,
             },
         )];
-        let lines = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false).render();
-        assert!(lines.iter().any(|line| line.contains("▸ ▉")), "{lines:?}");
+        let drawn = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
+        assert!(drawn.caret().is_some(), "the field takes the cursor");
+        let lines = drawn.render();
+        assert!(lines.iter().any(|line| line.contains('╭')), "{lines:?}");
+        assert!(lines.iter().any(|line| line.contains('╰')), "{lines:?}");
+    }
+
+    #[test]
+    fn a_row_that_is_not_at_the_prompt_opens_no_field() {
+        let rows = vec![row("a", Class::Review, RowState::Pending)];
+        let drawn = card(&Frame::running(date(2026, 9, 10), &rows, None), false);
+        assert_eq!(drawn.caret(), None);
     }
 
     #[test]

@@ -103,13 +103,29 @@ Things a future edit must not undo.
   nothing due, and no verifier for anything in the plan — stay inline: a screen
   that opens to say *nothing* and then demands a keypress is hostile on the most
   frequent path there is.
-- **One entry loop, and one entry line.** `tui::read_secret` is the only loop
-  that accepts a typed secret, and `card::entry_line` the only place one is
-  drawn. Revealing anything — per-character masking is defensible — is a change
-  to `Reveal` and to nothing else. The typed count is already passed in and
-  deliberately unused, so that change costs no call site. Word-boundary masking
-  is never defensible: seven word lengths is most of a diceware phrase's search
-  space.
+- **One entry loop, one field, one place a secret becomes pixels.**
+  `tui::read_secret` is the only loop that accepts a typed secret, `Card::entry`
+  the only thing that draws one, and `Reveal::shown` the only function that turns
+  a buffer into something on a screen. Revealing anything — per-character masking
+  is defensible — is a change to that one match. The typed count is already
+  passed in and deliberately unused, so that change costs no call site.
+  Word-boundary masking is never defensible: seven word lengths is most of a
+  diceware phrase's search space.
+- **The field is its own delimited area and shares its line with nothing.** A
+  hint beside where a secret is typed is a hint that will one day be overlapped
+  by what is typed into it — so instructions sit on their own lines above, with
+  one blank line before the label-and-field block.
+- **The caret is the terminal's own cursor**, moved into the field and shown
+  there. It blinks the way every other password field on the machine blinks,
+  follows the reader's own cursor settings, costs no animation loop, and cannot
+  be overlapped by text the way a glyph on a shared line can. The card draws no
+  caret; it reports where one belongs.
+- **A command opens a dialog once.** `cmd::dialog` is the only caller of
+  `Terminal::enter` outside the sitting. Raw mode and the alternate screen are
+  process-wide, so a second `Terminal`, even one immediately discarded, restores
+  the terminal under the live one and turns echo on beneath the next prompt.
+  `Terminal::enter` refuses a second, loudly, because that failure mode is
+  otherwise silent and leaks the secret to the screen.
 - **Every card is `card::WIDTH` wide.** A box that resizes as content comes and
   goes reads as instability and makes the eye re-find the border. Height is the
   axis that varies, and `Screen::anchor` fixes the top edge so that variation

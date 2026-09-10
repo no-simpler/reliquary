@@ -375,11 +375,7 @@ fn add(ctx: &Context, args: &AddArgs) -> Result<u8> {
         );
     }
     let today = ctx.today();
-    let mut dialog = if args.stdin {
-        None
-    } else {
-        Some(open(ctx.color)?)
-    };
+    let mut dialog = dialog(args.stdin, ctx.color)?;
     let secret = match dialog.as_mut() {
         None => piped(1)?.into_iter().next().unwrap_or_else(Secret::new),
         Some(console) => {
@@ -451,11 +447,7 @@ fn rekey(ctx: &Context, args: &RekeyArgs) -> Result<u8> {
     let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
     let today = ctx.today();
     let heading = format!("rekey {}", args.slug);
-    let mut dialog = if args.stdin {
-        None
-    } else {
-        Some(open(ctx.color)?)
-    };
+    let mut dialog = dialog(args.stdin, ctx.color)?;
 
     let mut piped_secrets = if args.stdin {
         piped(if args.force { 1 } else { 2 })?.into_iter()
@@ -480,24 +472,23 @@ fn rekey(ctx: &Context, args: &RekeyArgs) -> Result<u8> {
     let secret = if let Some(secret) = piped_secrets.next() {
         secret
     } else {
-        {
-            let console = dialog.get_or_insert(open(ctx.color)?);
-            let Some(first) = typed(console, today, &heading, "the new secret, typed twice")?
-            else {
-                return abandoned(console, today);
-            };
-            let Some(again) = typed(console, today, &heading, "again")? else {
-                return abandoned(console, today);
-            };
-            if !first.same_as(&again) {
-                return refused(
-                    console,
-                    today,
-                    "the two entries differ, so nothing was replaced",
-                );
-            }
-            first
+        let Some(console) = dialog.as_mut() else {
+            bail!("--stdin wants a new secret on its own line");
+        };
+        let Some(first) = typed(console, today, &heading, "the new secret, typed twice")? else {
+            return abandoned(console, today);
+        };
+        let Some(again) = typed(console, today, &heading, "again")? else {
+            return abandoned(console, today);
+        };
+        if !first.same_as(&again) {
+            return refused(
+                console,
+                today,
+                "the two entries differ, so nothing was replaced",
+            );
         }
+        first
     };
     if secret.is_empty() {
         return match dialog.as_mut() {
@@ -659,9 +650,17 @@ fn prove(
     }
 }
 
-/// Open the screen a secret is typed on.
-fn open(color: bool) -> Result<term::Terminal> {
-    term::Terminal::enter(color)
+/// The screen a secret is typed on, or nothing when this is a pipe.
+///
+/// The only place a dialog is opened. Raw mode and the alternate screen are
+/// process-wide, so a command that opens a second one puts the terminal back
+/// under the first — and holding that to one call site is what keeps a later
+/// edit from reintroducing it. `Terminal::enter` refuses a second all the same.
+fn dialog(stdin: bool, color: bool) -> Result<Option<term::Terminal>> {
+    if stdin {
+        return Ok(None);
+    }
+    term::Terminal::enter(color).map(Some)
 }
 
 /// Ask for one secret. `None` means the dialog was abandoned rather than
@@ -883,6 +882,11 @@ fn verifier_word(slug: &SlugState, verifiers: &Verifiers) -> &'static str {
 }
 
 fn next_word(slug: &SlugState, today: Date) -> String {
+    // A retired slug is only ever listed by --all, and its schedule is a
+    // leftover: nothing will ask for it again.
+    if slug.retired {
+        return "retired".to_owned();
+    }
     match slug.standing(today) {
         Standing::Due => "due".to_owned(),
         Standing::Probe => "probe due".to_owned(),

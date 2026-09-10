@@ -26,6 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use anyhow::{Context as _, Result, anyhow};
+use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
     DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers,
@@ -72,7 +73,12 @@ static HOOK: Once = Once::new();
 fn restore() {
     let mut out = std::io::stdout();
     if ALT.swap(false, Ordering::SeqCst) {
-        let _ = execute!(out, LeaveAlternateScreen, cursor::Show);
+        let _ = execute!(
+            out,
+            SetCursorStyle::DefaultUserShape,
+            LeaveAlternateScreen,
+            cursor::Show
+        );
     }
     if RAW.swap(false, Ordering::SeqCst) {
         let _ = execute!(out, DisableBracketedPaste);
@@ -144,6 +150,7 @@ pub struct Terminal {
     color: bool,
     anchor: usize,
     last: Vec<String>,
+    last_caret: Option<(usize, usize)>,
     _raw: RawMode,
 }
 
@@ -175,20 +182,26 @@ impl Terminal {
             color,
             anchor: 0,
             last: Vec::new(),
+            last_caret: None,
             _raw: raw,
         })
     }
 
-    /// Draw the lines held from the last paint, wherever the terminal is now.
+    /// Draw what was last painted, wherever the terminal is now.
     fn repaint(&mut self) -> Result<()> {
         let lines = std::mem::take(&mut self.last);
-        let result = self.blit(&lines);
+        let result = self.blit(&lines, self.last_caret);
         self.last = lines;
         result
     }
 
-    /// Place lines on the alternate screen.
-    fn blit(&mut self, lines: &[String]) -> Result<()> {
+    /// Place a card on the alternate screen.
+    ///
+    /// The cursor is the terminal's own, moved into the entry field and shown
+    /// there, so it blinks the way every other password field on the machine
+    /// blinks and nothing has to animate it. Where there is nothing to type, it
+    /// is hidden rather than parked somewhere meaningless.
+    fn blit(&mut self, lines: &[String], caret: Option<(usize, usize)>) -> Result<()> {
         let (cols, rows) = size();
         if cols < MIN_COLS || rows < MIN_ROWS.max(lines.len()) {
             return cramped(cols, rows, lines.len());
@@ -196,7 +209,7 @@ impl Terminal {
         let left = cols.saturating_sub(card::WIDTH) / 2;
         let top = place(rows, self.anchor, lines.len());
         let mut out = std::io::stdout();
-        queue!(out, Clear(ClearType::All))?;
+        queue!(out, cursor::Hide, Clear(ClearType::All))?;
         for (offset, line) in lines.iter().enumerate() {
             let row = u16::try_from(top.saturating_add(offset)).unwrap_or(u16::MAX);
             let column = u16::try_from(left).unwrap_or(u16::MAX);
@@ -204,6 +217,16 @@ impl Terminal {
                 out,
                 cursor::MoveTo(column, row),
                 crossterm::style::Print(line)
+            )?;
+        }
+        if let Some((row, column)) = caret {
+            let row = u16::try_from(top.saturating_add(row)).unwrap_or(u16::MAX);
+            let column = u16::try_from(left.saturating_add(column)).unwrap_or(u16::MAX);
+            queue!(
+                out,
+                cursor::MoveTo(column, row),
+                SetCursorStyle::BlinkingBlock,
+                cursor::Show
             )?;
         }
         out.flush()?;
@@ -309,8 +332,10 @@ impl Screen for Terminal {
 
     fn paint(&mut self, card: &Card) -> Result<()> {
         let lines = card.render();
-        let result = self.blit(&lines);
+        let caret = card.caret();
+        let result = self.blit(&lines, caret);
         self.last = lines;
+        self.last_caret = caret;
         result
     }
 

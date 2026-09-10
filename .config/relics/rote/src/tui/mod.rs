@@ -202,11 +202,11 @@ pub fn ask(console: &mut dyn Console, today: jiff::civil::Date, prompt: &Ask<'_>
     let color = console.color();
     let build = |nudge: Option<Nudge>| {
         let mut drawn = Card::new("rote", card::stamp(today), color);
-        drawn.say(prompt.heading, card::BOLD);
+        drawn.say(prompt.heading, card::BOLD).gap();
         if !prompt.intention.is_empty() {
             drawn.say(prompt.intention, card::DIM);
         }
-        drawn.line(card::entry_line(0, card::Reveal::Blind, "", color));
+        drawn.entry(0, card::Reveal::Blind);
         if nudge == Some(Nudge::PasteRefused) {
             drawn
                 .gap()

@@ -199,9 +199,10 @@ impl Sitting {
     }
 }
 
-/// What a card holds beyond one line per row: the active slug's intention and
-/// prompt, and the four lines of border and padding.
-const ANCHOR_EXTRA: usize = 6;
+/// What a card holds beyond one line per row: the air under the list, the active
+/// slug's intention, the four lines the entry field takes with its own air, and
+/// the four of border and padding.
+const ANCHOR_EXTRA: usize = 10;
 
 /// Run the sitting.
 ///
@@ -221,8 +222,8 @@ pub fn run(
 ) -> Result<Sitting> {
     let mut rows: Vec<screen::Row> = plan.items.iter().map(screen::Row::pending).collect();
     let mut sitting = Sitting::default();
-    // A row each, the intention and the prompt under whichever is active, and
-    // the box. Set here rather than by the caller, so no path into a sitting can
+    // A row each, the intention and the field under whichever is active, and the
+    // box. Set here rather than by the caller, so no path into a sitting can
     // forget it and let the dialog move under the person typing into it.
     console.anchor(plan.items.len().saturating_add(ANCHOR_EXTRA));
 
