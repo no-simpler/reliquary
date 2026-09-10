@@ -127,7 +127,10 @@ Things a future edit must not undo.
   every later glance has to re-read, and a menu that must be answered turns a
   mistyped character into an interrogation.
 - **A lapse is the ladder going back to the foot, and nothing else is one.**
-  Practice and probes move no schedule, so a first-try failure there is a *miss*.
+  Practice and probes move no schedule, so a first-try failure there is a *miss*,
+  and `stats` counts it as one — a failed probe is still banded, because it is
+  the only decay data at that horizon, but it is not a lapse. The card, `stats`
+  and `rote guide probes` say the same thing or one of them is wrong.
   `Sitting::landings` buckets each slug once and the buckets are disjoint, so the
   closing count adds up to what was drilled instead of setting a count of classes
   beside a count of one outcome. A lone slug is described rather than counted.
@@ -187,6 +190,21 @@ Things a future edit must not undo.
   at the shipped parameters for the whole run.
 - Publishing and testing carry no per-relic scripts. Do not reintroduce
   `scripts/publish.sh` or `scripts/test.sh`.
+
+## Verifying the dialog
+
+The card, the placement, the cursor and the refusal of a paste only exist at a
+terminal, so `assert_cmd` cannot reach them: without a tty `Terminal::enter`
+bails before any of it runs. Drive the published binary under `pty.fork` with
+`TIOCSWINSZ` for the size, replay the output stream, and assert on what a person
+would actually have seen. Two defects were found that way and by nothing else: a
+discarded `Terminal` restoring the screen under the live one, which echoed the
+new secret during `rekey`, and a resize leaving a broken box until the next
+keystroke.
+
+**The check that matters most is a grep of the raw stream for the typed secret**,
+including its prefixes — that is what caught the echo. Use tokens that cannot
+collide with the card's own words; `new` and `one` both appear in it.
 
 ## Measured, so it is not re-derived
 

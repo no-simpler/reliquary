@@ -226,18 +226,25 @@ impl Stats {
                 Class::Practice => stats.practice.record(passed),
                 Class::Probe | Class::Aided => {}
             }
-            if entry.class.scores() || entry.class == Class::Probe {
-                if let Some(bucket) = stats.bucket_for(entry.effective_interval_days) {
-                    bucket.retention.record(passed);
-                }
-                if !passed {
-                    stats.lapses.push(Lapse {
-                        slug: entry.slug.clone(),
-                        day: *day,
-                        scheduled: entry.scheduled_interval_days,
-                        effective: entry.effective_interval_days,
-                    });
-                }
+            // A probe is a cold reading at a chosen horizon, so it belongs in
+            // the bands: it is the only source of decay data out at that
+            // distance, which is the whole reason for taking one.
+            if (entry.class.scores() || entry.class == Class::Probe)
+                && let Some(bucket) = stats.bucket_for(entry.effective_interval_days)
+            {
+                bucket.retention.record(passed);
+            }
+            // It is not a lapse, though. A lapse is the ladder going back to the
+            // foot, and a probe moves the ladder in neither direction — the
+            // horizon was asked for, so failing it is a reading rather than a
+            // slip in the schedule.
+            if entry.class.scores() && !passed {
+                stats.lapses.push(Lapse {
+                    slug: entry.slug.clone(),
+                    day: *day,
+                    scheduled: entry.scheduled_interval_days,
+                    effective: entry.effective_interval_days,
+                });
             }
         }
         stats.punctuality.median_lateness = median(&mut lateness);
@@ -666,6 +673,7 @@ mod tests {
             ..Entry::default()
         })]);
         assert_eq!(stats.retention.total, 0);
+        assert!(stats.lapses.is_empty());
         assert_eq!(
             stats
                 .buckets
@@ -676,6 +684,40 @@ mod tests {
                 .total,
             1
         );
+    }
+
+    #[test]
+    fn a_failed_probe_is_a_reading_rather_than_a_lapse() {
+        // rote guide probes: the horizon was chosen, so failing it is not a
+        // slip in the schedule. It is still decay data, and still banded.
+        let stats = gather(&[line(&Entry {
+            class: Class::Probe,
+            outcome: Outcome::Fail,
+            effective: Some(60),
+            ..Entry::default()
+        })]);
+        assert!(stats.lapses.is_empty(), "{:?}", stats.lapses);
+        assert_eq!(
+            stats
+                .buckets
+                .iter()
+                .find(|bucket| bucket.label == "31d+")
+                .unwrap()
+                .retention
+                .total,
+            1,
+            "a failed probe is still the only decay data at that horizon"
+        );
+    }
+
+    #[test]
+    fn a_failed_practice_entry_is_not_a_lapse_either() {
+        let stats = gather(&[line(&Entry {
+            class: Class::Practice,
+            outcome: Outcome::Fail,
+            ..Entry::default()
+        })]);
+        assert!(stats.lapses.is_empty(), "{:?}", stats.lapses);
     }
 
     #[test]
