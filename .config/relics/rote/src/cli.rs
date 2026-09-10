@@ -32,6 +32,10 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
 
+    /// Declare this sitting aided: the answer was looked up first.
+    #[arg(long)]
+    pub aided: bool,
+
     #[command(flatten)]
     pub global: Global,
 }

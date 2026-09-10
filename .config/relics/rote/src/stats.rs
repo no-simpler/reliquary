@@ -101,6 +101,9 @@ pub struct SlugStats {
     pub trend: Trend,
     /// Recent time-to-first-keystroke, oldest first, for a sparkline.
     pub recent_ttfk: Vec<u64>,
+    /// First-attempt aided entries in the window. Not recall, so it sits beside
+    /// the retention figure rather than inside it.
+    pub aided: u32,
 }
 
 /// A first-attempt failure on an entry that scored.
@@ -146,6 +149,10 @@ pub struct Stats {
     /// Pass rate over practice, reported separately so it can be compared
     /// rather than confused.
     pub practice: Retention,
+    /// Aided entries, and how many of them the verifier accepted. A refusal here
+    /// is not a memory reading at all: it means what the vault holds and what
+    /// the verifier expects have diverged.
+    pub aided: Retention,
     /// Retention by effective interval.
     pub buckets: Vec<Bucket>,
     /// Per slug.
@@ -178,6 +185,7 @@ impl Stats {
             window_days: window,
             retention: Retention::default(),
             practice: Retention::default(),
+            aided: Retention::default(),
             buckets: BANDS
                 .iter()
                 .map(|(label, _, _)| Bucket {
@@ -192,6 +200,14 @@ impl Stats {
 
         let mut lateness: Vec<u64> = Vec::new();
         for (day, entry) in &in_window {
+            // An aided entry is not a first attempt at anything — it follows a
+            // miss — so it never reaches the first-attempt filter below.
+            if !entry.class.unaided() {
+                if attempted(entry) {
+                    stats.aided.record(entry.outcome == Outcome::Pass);
+                }
+                continue;
+            }
             let Some(passed) = scored(entry) else {
                 continue;
             };
@@ -208,7 +224,7 @@ impl Stats {
                     }
                 }
                 Class::Practice => stats.practice.record(passed),
-                Class::Probe => {}
+                Class::Probe | Class::Aided => {}
             }
             if entry.class.scores() || entry.class == Class::Probe {
                 if let Some(bucket) = stats.bucket_for(entry.effective_interval_days) {
@@ -239,18 +255,27 @@ impl Stats {
     }
 }
 
+/// Whether anything was put in front of anyone at this prompt.
+fn attempted(entry: &Attempted) -> bool {
+    !matches!(entry.outcome, Outcome::Skip | Outcome::Abort)
+}
+
 /// Whether an entry counts toward a rate, and whether it passed.
 ///
 /// Only the first try scores: a second entry in the same sitting is primed by
 /// the first and measures transcription rather than recall. A skip or an abort
-/// put nothing in front of anyone.
+/// put nothing in front of anyone. A blank did: conceding is a failure of
+/// recall, not an absence of one.
+///
+/// This says nothing about class. An aided entry has an outcome like any other,
+/// and every caller that claims to measure recall filters it out first.
 fn scored(entry: &Attempted) -> Option<bool> {
     if entry.attempt != 1 {
         return None;
     }
     match entry.outcome {
         Outcome::Pass => Some(true),
-        Outcome::Fail => Some(false),
+        Outcome::Fail | Outcome::Blank => Some(false),
         Outcome::Skip | Outcome::Abort => None,
     }
 }
@@ -272,11 +297,25 @@ fn per_slug(all: &[(Date, &Attempted)], in_window: &[(Date, &Attempted)]) -> Vec
                 }
             }
 
+            // Latency is a claim about recall, so an aided entry — which
+            // measures transcription — never enters the series.
             let firsts: Vec<&Attempted> = all
                 .iter()
-                .filter(|(_, entry)| entry.slug == slug && scored(entry).is_some())
+                .filter(|(_, entry)| {
+                    entry.slug == slug && entry.class.unaided() && scored(entry).is_some()
+                })
                 .map(|(_, entry)| *entry)
                 .collect();
+
+            let aided = u32::try_from(
+                in_window
+                    .iter()
+                    .filter(|(_, entry)| {
+                        entry.slug == slug && !entry.class.unaided() && attempted(entry)
+                    })
+                    .count(),
+            )
+            .unwrap_or(u32::MAX);
             let mut ttfk: Vec<u64> = firsts.iter().filter_map(|e| e.ttfk_ms).collect();
             let mut total: Vec<u64> = firsts.iter().filter_map(|e| e.total_ms).collect();
             let recent: Vec<u64> = ttfk
@@ -294,6 +333,7 @@ fn per_slug(all: &[(Date, &Attempted)], in_window: &[(Date, &Attempted)]) -> Vec
                 ttfk_ms: median(&mut ttfk),
                 total_ms: median(&mut total),
                 recent_ttfk: recent,
+                aided,
             }
         })
         .collect()
@@ -433,6 +473,103 @@ mod tests {
 
     fn gather(lines: &[Line]) -> Stats {
         Stats::gather(lines, date(2026, 9, 10), super::WINDOW_DAYS)
+    }
+
+    #[test]
+    fn an_aided_entry_is_kept_out_of_retention_and_out_of_the_latency_series() {
+        let stats = gather(&[
+            line(&Entry::default()),
+            line(&Entry {
+                class: Class::Aided,
+                ttfk: Some(50),
+                ..Entry::default()
+            }),
+        ]);
+        assert_eq!(
+            stats.retention,
+            Retention {
+                passes: 1,
+                total: 1
+            }
+        );
+        assert_eq!(
+            stats.aided,
+            Retention {
+                passes: 1,
+                total: 1
+            }
+        );
+        let slug = stats.slugs.first().unwrap();
+        assert_eq!(slug.aided, 1);
+        assert_eq!(
+            slug.ttfk_ms,
+            Some(1_000),
+            "transcription speed is not recall speed"
+        );
+        assert!(
+            stats
+                .buckets
+                .iter()
+                .all(|bucket| bucket.retention.total <= 1),
+            "an aided entry never lands in an interval band"
+        );
+    }
+
+    #[test]
+    fn an_aided_entry_is_counted_though_it_is_never_the_first_try() {
+        let stats = gather(&[
+            line(&Entry {
+                outcome: Outcome::Fail,
+                ..Entry::default()
+            }),
+            line(&Entry {
+                class: Class::Aided,
+                attempt: 2,
+                ..Entry::default()
+            }),
+        ]);
+        assert_eq!(
+            stats.aided,
+            Retention {
+                passes: 1,
+                total: 1
+            }
+        );
+        assert_eq!(stats.slugs.first().unwrap().aided, 1);
+    }
+
+    #[test]
+    fn a_refused_aided_entry_reads_as_a_disagreement_rather_than_a_lapse() {
+        let stats = gather(&[line(&Entry {
+            class: Class::Aided,
+            outcome: Outcome::Fail,
+            ..Entry::default()
+        })]);
+        assert_eq!(
+            stats.aided,
+            Retention {
+                passes: 0,
+                total: 1
+            }
+        );
+        assert!(stats.lapses.is_empty());
+    }
+
+    #[test]
+    fn a_blank_counts_against_retention() {
+        let stats = gather(&[line(&Entry {
+            outcome: Outcome::Blank,
+            ttfk: None,
+            ..Entry::default()
+        })]);
+        assert_eq!(
+            stats.retention,
+            Retention {
+                passes: 0,
+                total: 1
+            }
+        );
+        assert_eq!(stats.lapses.len(), 1);
     }
 
     #[test]

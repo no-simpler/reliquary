@@ -18,6 +18,11 @@ use predicates::str::contains;
 use sha2::{Digest as _, Sha256};
 use tempfile::TempDir;
 
+/// The schema the seeded records claim. A duplicate of the binary's own, like
+/// the memory cost below: the suite drives the shipped binary and cannot reach
+/// into it for a constant.
+const SCHEMA: u32 = 2;
+
 /// A scratch machine: its own log, its own state, its own home.
 struct Rote {
     _dir: TempDir,
@@ -78,7 +83,7 @@ impl Rote {
     /// Append one already-shaped event, chained to what is there.
     fn seed(&mut self, day: &str, event: &serde_json::Value) {
         let record = serde_json::json!({
-            "v": 1,
+            "v": SCHEMA,
             "at": format!("{day}T08:00:00Z"),
             "day": day,
             "host": "Scratch",
@@ -541,6 +546,76 @@ fn practising_inside_the_interval_stops_the_gate_and_says_why() {
 }
 
 #[test]
+fn an_aided_entry_buys_nothing_and_costs_nothing() {
+    let mut rote = Rote::new();
+    rote.add(&days_ago(40), "a", false);
+    for ago in [28, 21, 14] {
+        rote.attempt(&days_ago(ago), "a", "review", "pass", 7, 4, 4);
+    }
+    rote.attempt(&days_ago(1), "a", "aided", "pass", 1, 4, 4);
+
+    let slug = &rote.json(&["status", "--json"])["slugs"][0];
+    assert_eq!(slug["step"], 4, "an aided entry cannot move the ladder");
+    assert_eq!(
+        slug["cap_passes"], 3,
+        "nor retract evidence already gathered"
+    );
+    assert_eq!(slug["gate"], "ready");
+    assert_eq!(
+        slug["stood_alone"],
+        days_ago(28),
+        "the memory started at the first cold pass"
+    );
+
+    let stats = rote.json(&["stats", "--json"]);
+    assert_eq!(stats["retention"]["total"], 3);
+    assert_eq!(stats["aided"]["total"], 1);
+    assert_eq!(stats["slugs"][0]["total"], 3);
+    assert_eq!(stats["slugs"][0]["aided"], 1);
+}
+
+#[test]
+fn a_slug_that_has_only_ever_been_aided_has_not_stood_alone() {
+    let mut rote = Rote::new();
+    rote.add(&days_ago(3), "escrow-p", true);
+    rote.attempt(&days_ago(2), "escrow-p", "review", "blank", 1, 0, 0);
+    rote.attempt(&days_ago(2), "escrow-p", "aided", "pass", 1, 1, 0);
+
+    let slug = &rote.json(&["status", "--json"])["slugs"][0];
+    assert_eq!(slug["stood_alone"], serde_json::Value::Null);
+    rote.run(&["status"])
+        .assert()
+        .stdout(contains("has not stood alone yet"));
+
+    let report = rote.json(&["doctor", "--format", "json"]);
+    let summaries = report["outcome"]["ran"].to_string();
+    assert!(
+        summaries.contains("never been recalled without the answer in front of it"),
+        "doctor said: {summaries}"
+    );
+}
+
+#[test]
+fn a_refused_aided_entry_reports_the_vault_and_the_verifier_apart() {
+    let mut rote = Rote::new();
+    rote.add(&days_ago(3), "a", false);
+    rote.attempt(&days_ago(1), "a", "aided", "fail", 1, 0, 0);
+
+    assert_eq!(
+        rote.json(&["status", "--json"])["slugs"][0]["aided_mismatch"],
+        true
+    );
+    let report = rote.json(&["doctor", "--format", "json"]);
+    assert!(
+        report["outcome"]["ran"]
+            .to_string()
+            .contains("hold different secrets"),
+        "doctor said: {}",
+        report["outcome"]["ran"]
+    );
+}
+
+#[test]
 fn true_retention_keeps_practice_out_of_it() {
     let mut rote = Rote::new();
     rote.add(&days_ago(40), "a", false);
@@ -734,7 +809,9 @@ fn a_malformed_line_is_kept_and_reported_rather_than_dropped() {
 fn a_record_from_a_newer_schema_stops_the_writer() {
     let mut rote = Rote::new();
     rote.add(&today(), "a", false);
-    let text = rote.log().replace("\"v\":1", "\"v\":2");
+    let text = rote
+        .log()
+        .replace(&format!("\"v\":{SCHEMA}"), &format!("\"v\":{}", SCHEMA + 1));
     std::fs::write(rote.log_path(), text).expect("an edited log");
 
     rote.run(&["retire", "a"])

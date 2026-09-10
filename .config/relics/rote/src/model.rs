@@ -15,7 +15,7 @@ use jiff::Timestamp;
 use jiff::civil::Date;
 
 use crate::ladder::{self, Class, Step};
-use crate::log::{Event, Line, Outcome, Record};
+use crate::log::{Attempted, Event, Line, Outcome, Record};
 use crate::slug::Slug;
 
 /// What the log says about one slug.
@@ -48,6 +48,14 @@ pub struct SlugState {
     /// the cap. A pass below the cap leaves it alone — it is not evidence in
     /// either direction — and a failure clears it.
     pub cap_passes: u32,
+    /// The day the slug first stood alone: a first-attempt pass with the answer
+    /// nowhere in front of the person. The honest start of the memory, and the
+    /// only reading that says anything while the step is still at the foot.
+    pub first_unaided: Option<Date>,
+    /// Whether the last aided entry was refused. Typing what the vault shows and
+    /// being told wrong means the verifier and the item have diverged. Cleared
+    /// by the next pass of any kind.
+    pub aided_mismatch: bool,
 }
 
 impl SlugState {
@@ -151,6 +159,8 @@ impl State {
                         last_attempt_at: None,
                         hold_until: None,
                         cap_passes: 0,
+                        first_unaided: None,
+                        aided_mismatch: false,
                     },
                 );
             }
@@ -167,6 +177,8 @@ impl State {
                     slug.last_attempt_at = None;
                     slug.hold_until = None;
                     slug.cap_passes = 0;
+                    slug.first_unaided = None;
+                    slug.aided_mismatch = false;
                     slug.retired = false;
                 }
             }
@@ -181,51 +193,67 @@ impl State {
                 }
             }
             Event::Attempt(event) => {
-                let Some(slug) = self.slugs.get_mut(&event.slug) else {
-                    return;
-                };
-                match event.outcome {
-                    // Nothing was typed, so nothing was exposed: neither the
-                    // schedule nor the retention interval moves.
-                    Outcome::Skip | Outcome::Abort => return,
-                    Outcome::Pass | Outcome::Fail => {}
-                }
-                slug.last_attempt = Some(record.day);
-                slug.last_attempt_at = Some(record.at);
-                match event.class {
-                    Class::Review => {
-                        slug.last_review = Some(record.day);
-                        slug.anchor = record.day;
-                    }
-                    Class::Probe => {
-                        // The horizon is spent, and the schedule counts from the
-                        // cold entry that ended it.
-                        slug.anchor = record.day;
-                        slug.hold_until = None;
-                    }
-                    Class::Practice => {}
-                }
-                if event.class.scores() {
-                    slug.step = Step::from_recorded(event.step_after);
-                }
-                if event.attempt == 1 {
-                    match event.class {
-                        Class::Review | Class::Probe => match event.outcome {
-                            Outcome::Pass => {
-                                let reached = event
-                                    .effective_interval_days
-                                    .is_some_and(|days| days >= ladder::cap_days());
-                                if reached {
-                                    slug.cap_passes = slug.cap_passes.saturating_add(1);
-                                }
-                            }
-                            Outcome::Fail => slug.cap_passes = 0,
-                            Outcome::Skip | Outcome::Abort => {}
-                        },
-                        Class::Practice => {}
-                    }
+                if let Some(slug) = self.slugs.get_mut(&event.slug) {
+                    apply_attempt(slug, record, event);
                 }
             }
+        }
+    }
+}
+
+/// What one entry does to a slug.
+///
+/// Split out of [`State::apply`] because it is the only arm with a shape of its
+/// own: four classes and five outcomes, each answering a different question.
+fn apply_attempt(slug: &mut SlugState, record: &Record, event: &Attempted) {
+    match event.outcome {
+        // Nothing was typed, so nothing was exposed: neither the
+        // schedule nor the retention interval moves.
+        Outcome::Skip | Outcome::Abort => return,
+        Outcome::Pass | Outcome::Fail | Outcome::Blank => {}
+    }
+    slug.last_attempt = Some(record.day);
+    slug.last_attempt_at = Some(record.at);
+    match event.class {
+        Class::Review => {
+            slug.last_review = Some(record.day);
+            slug.anchor = record.day;
+        }
+        Class::Probe => {
+            // The horizon is spent, and the schedule counts from the
+            // cold entry that ended it.
+            slug.anchor = record.day;
+            slug.hold_until = None;
+        }
+        Class::Practice | Class::Aided => {}
+    }
+    match (event.class, event.outcome) {
+        (Class::Aided, Outcome::Pass) => slug.aided_mismatch = false,
+        (Class::Aided, _) => slug.aided_mismatch = true,
+        (_, Outcome::Pass) => slug.aided_mismatch = false,
+        _ => {}
+    }
+    if event.class.scores() {
+        slug.step = Step::from_recorded(event.step_after);
+    }
+    if event.attempt == 1 {
+        if event.class.unaided() && event.outcome == Outcome::Pass && slug.first_unaided.is_none() {
+            slug.first_unaided = Some(record.day);
+        }
+        match event.class {
+            Class::Review | Class::Probe => match event.outcome {
+                Outcome::Pass => {
+                    let reached = event
+                        .effective_interval_days
+                        .is_some_and(|days| days >= ladder::cap_days());
+                    if reached {
+                        slug.cap_passes = slug.cap_passes.saturating_add(1);
+                    }
+                }
+                Outcome::Fail | Outcome::Blank => slug.cap_passes = 0,
+                Outcome::Skip | Outcome::Abort => {}
+            },
+            Class::Practice | Class::Aided => {}
         }
     }
 }
@@ -303,6 +331,141 @@ mod tests {
                 step_after,
             }),
         )
+    }
+
+    #[test]
+    fn an_aided_entry_moves_nothing_but_the_retention_interval() {
+        let state = State::replay(&[
+            added(date(2026, 9, 1), "escrow-p", true),
+            attempt(
+                date(2026, 9, 8),
+                "escrow-p",
+                Class::Review,
+                Outcome::Pass,
+                1,
+                Some(7),
+                4,
+                4,
+            ),
+            attempt(
+                date(2026, 9, 9),
+                "escrow-p",
+                Class::Aided,
+                Outcome::Pass,
+                2,
+                Some(1),
+                4,
+                4,
+            ),
+        ]);
+        let slug = state.get(&slug("escrow-p")).unwrap();
+        assert_eq!(slug.step, Step::cap());
+        assert_eq!(
+            slug.cap_passes, 1,
+            "the aided entry neither adds evidence nor retracts it"
+        );
+        assert_eq!(
+            slug.last_review,
+            Some(date(2026, 9, 8)),
+            "an aided entry is not a review"
+        );
+        assert_eq!(
+            slug.last_attempt,
+            Some(date(2026, 9, 9)),
+            "but the answer was in front of a person, so the next entry is one-day evidence"
+        );
+    }
+
+    #[test]
+    fn standing_alone_is_the_first_cold_first_attempt_pass() {
+        let state = State::replay(&[
+            added(date(2026, 9, 1), "escrow-p", true),
+            attempt(
+                date(2026, 9, 2),
+                "escrow-p",
+                Class::Aided,
+                Outcome::Pass,
+                1,
+                Some(1),
+                0,
+                0,
+            ),
+            attempt(
+                date(2026, 9, 3),
+                "escrow-p",
+                Class::Review,
+                Outcome::Pass,
+                1,
+                Some(1),
+                0,
+                1,
+            ),
+            attempt(
+                date(2026, 9, 4),
+                "escrow-p",
+                Class::Review,
+                Outcome::Pass,
+                1,
+                Some(1),
+                1,
+                2,
+            ),
+        ]);
+        let slug = state.get(&slug("escrow-p")).unwrap();
+        assert_eq!(slug.first_unaided, Some(date(2026, 9, 3)));
+    }
+
+    #[test]
+    fn a_refused_aided_entry_stands_until_something_passes() {
+        let mut lines = vec![
+            added(date(2026, 9, 1), "escrow-p", true),
+            attempt(
+                date(2026, 9, 2),
+                "escrow-p",
+                Class::Aided,
+                Outcome::Fail,
+                2,
+                Some(1),
+                0,
+                0,
+            ),
+        ];
+        let state = State::replay(&lines);
+        assert!(state.get(&slug("escrow-p")).unwrap().aided_mismatch);
+
+        lines.push(attempt(
+            date(2026, 9, 3),
+            "escrow-p",
+            Class::Review,
+            Outcome::Pass,
+            1,
+            Some(1),
+            0,
+            1,
+        ));
+        let state = State::replay(&lines);
+        assert!(!state.get(&slug("escrow-p")).unwrap().aided_mismatch);
+    }
+
+    #[test]
+    fn a_blank_lapses_the_ladder_like_any_other_failure() {
+        let state = State::replay(&[
+            added(date(2026, 9, 1), "escrow-p", true),
+            attempt(
+                date(2026, 9, 8),
+                "escrow-p",
+                Class::Review,
+                Outcome::Blank,
+                1,
+                Some(7),
+                4,
+                0,
+            ),
+        ]);
+        let slug = state.get(&slug("escrow-p")).unwrap();
+        assert_eq!(slug.step, Step::FIRST);
+        assert_eq!(slug.cap_passes, 0);
+        assert_eq!(slug.first_unaided, None);
     }
 
     #[test]

@@ -52,6 +52,10 @@ THE LADDER
   One entry per sitting scores. A second entry a minute later is primed by the
   first and measures transcription rather than recall, so the retries exist to
   tell a slipped key from a real loss, and nothing more.
+
+  The drill runs before the lookup. The card says so at the prompt, because that
+  is where the rule applies, and it offers the lookup afterwards rather than
+  pretending nobody needs one.
 ";
 
 const IRREGULARITY: &str = "\
@@ -99,6 +103,25 @@ CUSTODY
   cannot tell that the answer was on a second screen, and does not pretend to.
   It assumes good faith, which is reasonable for a tool with one user who wants
   the measurement to be true.
+
+  What it owes that person is a clear intention and somewhere to put the truth.
+  The prompt asks for memory only, and for an empty entry when memory gives
+  nothing, so that conceding is a keystroke rather than a reason to type
+  something to get past the screen. A blank is a failure of recall and counts as
+  one; typed nonsense would count as the same thing while looking like an
+  attempt.
+
+  After a miss the card offers the lookup. Take it and the next entry is aided:
+  recorded in full, out of retention, out of the latency series, out of the
+  buckets, and unable to move the ladder. Week one is aided almost entirely, and
+  that is the honest shape of week one rather than a fault in it. rote status
+  reports the day a slug first stood alone, which is where its memory actually
+  starts. rote --aided says the same about a sitting begun after a lookup.
+
+  An aided entry earns its keep twice. Typing what the vault shows and being
+  told wrong is the one routine signal that the item and the verifier have
+  drifted apart, which otherwise goes unnoticed until the drill is rehearsing a
+  secret nothing else uses.
 
   The slug is the title of the matching 1Password item, by convention and not
   by integration. Nothing is stored, nothing goes out of sync, and the drill

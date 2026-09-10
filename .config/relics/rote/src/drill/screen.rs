@@ -84,6 +84,11 @@ impl Row {
 pub enum Notice {
     /// A paste arrived and was refused.
     PasteRefused,
+    /// The entry was refused, and the next one is being chosen.
+    Choose {
+        /// Whether there are tries left to offer.
+        retry: bool,
+    },
 }
 
 /// What to draw.
@@ -193,17 +198,32 @@ pub fn render(frame: &Frame<'_>, color: bool) -> Vec<String> {
     for (index, row) in frame.rows.iter().enumerate() {
         body.push(row_line(row, names, color));
         if frame.active == Some(index) {
+            if let Some(text) = intention(row) {
+                body.push(Piece::painted(text, DIM, color));
+            }
             body.push(prompt_line(row, color));
         }
     }
 
-    if let Some(Notice::PasteRefused) = frame.notice {
-        body.push(Piece::plain(""));
-        body.push(Piece::painted(
-            "a paste was refused — the drill has to be typed",
-            YELLOW,
-            color,
-        ));
+    match frame.notice {
+        Some(Notice::PasteRefused) => {
+            body.push(Piece::plain(""));
+            body.push(Piece::painted(
+                "a paste was refused — the drill has to be typed",
+                YELLOW,
+                color,
+            ));
+        }
+        Some(Notice::Choose { retry }) => {
+            body.push(Piece::plain(""));
+            let text = if retry {
+                "[enter] try again from memory   [l] look it up, then type it   [s] move on"
+            } else {
+                "[l] look it up, then type it   [enter] move on"
+            };
+            body.push(Piece::painted(text, YELLOW, color));
+        }
+        None => {}
     }
 
     if let Some(sitting) = frame.sitting {
@@ -260,6 +280,9 @@ fn chip(row: &Row) -> String {
         Class::Review => "review",
         Class::Practice => "practice",
         Class::Probe => "probe",
+        // An aided entry has no position of its own and moves nothing, so the
+        // day and the cap would be reporting somebody else's business.
+        Class::Aided => return format!("{:<28}", "aided · not a reading"),
     };
     let mut text = format!("{class} · day {}", row.step.interval());
     if row.step.at_cap() {
@@ -269,6 +292,29 @@ fn chip(row: &Row) -> String {
         text.push_str(" · stretch");
     }
     format!("{text:<28}")
+}
+
+/// What this prompt is asking for, said where and when it applies.
+///
+/// The discipline is one line — the drill runs before the lookup — and this is
+/// the only place it reaches a person at the moment it is due.
+fn intention(row: &Row) -> Option<String> {
+    match row.state {
+        RowState::Active { .. } if !row.class.unaided() => {
+            Some("look it up now, then type it — this one measures nothing".to_owned())
+        }
+        RowState::Active { attempt: 1, .. } => {
+            Some("from memory only — empty entry if there is nothing".to_owned())
+        }
+        RowState::Active { .. }
+        | RowState::Pending
+        | RowState::Checking
+        | RowState::Passed { .. }
+        | RowState::Failed { .. }
+        | RowState::Skipped
+        | RowState::Aborted
+        | RowState::Unverifiable => None,
+    }
 }
 
 fn state_piece(row: &Row, color: bool) -> Piece {
@@ -287,6 +333,14 @@ fn state_piece(row: &Row, color: bool) -> Piece {
                 }
             }
             Piece::painted(text, GREEN, color)
+        }
+        RowState::Failed {
+            left,
+            scored,
+            attempt: _,
+        } if !row.class.unaided() => {
+            let _ = (left, scored);
+            Piece::painted("✗  the vault and the verifier disagree", YELLOW, color)
         }
         RowState::Failed {
             left,
@@ -351,6 +405,7 @@ fn tally(sitting: &Sitting) -> String {
             Class::Review => reviews = reviews.saturating_add(1),
             Class::Practice => practice = practice.saturating_add(1),
             Class::Probe => probes = probes.saturating_add(1),
+            Class::Aided => {}
         }
     }
     let mut parts = Vec::new();
@@ -453,6 +508,95 @@ mod tests {
         for line in &lines {
             assert_eq!(line.chars().count(), width, "{line}");
         }
+    }
+
+    #[test]
+    fn the_first_prompt_says_what_it_is_asking_for() {
+        let rows = vec![row(
+            "a",
+            Class::Review,
+            RowState::Active {
+                attempt: 1,
+                left: 2,
+            },
+        )];
+        let lines = render(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
+        let text = lines.join("\n");
+        assert!(text.contains("from memory only"), "{text}");
+        assert!(text.contains("empty entry if there is nothing"), "{text}");
+    }
+
+    #[test]
+    fn a_retry_is_not_told_again_what_the_first_try_was_told() {
+        let rows = vec![row(
+            "a",
+            Class::Review,
+            RowState::Active {
+                attempt: 2,
+                left: 1,
+            },
+        )];
+        let lines = render(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
+        assert!(!lines.join("\n").contains("from memory only"));
+    }
+
+    #[test]
+    fn an_aided_prompt_says_it_measures_nothing() {
+        let rows = vec![row(
+            "a",
+            Class::Aided,
+            RowState::Active {
+                attempt: 2,
+                left: 0,
+            },
+        )];
+        let lines = render(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
+        let text = lines.join("\n");
+        assert!(text.contains("look it up now"), "{text}");
+        assert!(text.contains("aided · not a reading"), "{text}");
+    }
+
+    #[test]
+    fn the_offer_after_a_miss_drops_the_retry_when_there_are_none_left() {
+        let rows = vec![row(
+            "a",
+            Class::Review,
+            RowState::Failed {
+                attempt: 3,
+                left: 0,
+                scored: false,
+            },
+        )];
+        let mut frame = Frame::running(date(2026, 9, 10), &rows, Some(0));
+        frame.notice = Some(Notice::Choose { retry: false });
+        let text = render(&frame, false).join("\n");
+        assert!(text.contains("[l] look it up"), "{text}");
+        assert!(!text.contains("try again from memory"), "{text}");
+
+        frame.notice = Some(Notice::Choose { retry: true });
+        assert!(
+            render(&frame, false)
+                .join("\n")
+                .contains("try again from memory")
+        );
+    }
+
+    #[test]
+    fn a_refused_aided_entry_names_the_disagreement_rather_than_a_lapse() {
+        let rows = vec![row(
+            "a",
+            Class::Aided,
+            RowState::Failed {
+                attempt: 2,
+                left: 0,
+                scored: false,
+            },
+        )];
+        let text = render(&Frame::running(date(2026, 9, 10), &rows, None), false).join("\n");
+        assert!(
+            text.contains("the vault and the verifier disagree"),
+            "{text}"
+        );
     }
 
     #[test]

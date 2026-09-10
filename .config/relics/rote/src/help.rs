@@ -64,6 +64,14 @@ RECORDS
   first keystroke, the time from there to submission, the corrections, any
   refused pastes, the three intervals, and the ladder step either side.
 
+  Four classes: review, practice, probe, aided. Only a review moves the ladder.
+  An aided entry is one where the answer was looked up first, so it is kept out
+  of every figure that claims to measure recall.
+
+  Five outcomes: pass, fail, blank, skip, abandoned. A blank is an empty entry,
+  which is a failure of recall and is counted as one. A skip and an abandonment
+  put nothing in front of anyone and are counted as nothing.
+
   It does not record the input, its length, or any prefix. Nothing in the log is
   a secret, and the verifiers are not in it.
 

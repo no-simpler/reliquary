@@ -124,7 +124,7 @@ pub fn run(cli: &Cli) -> Result<u8> {
 
     let ctx = open_context(&cli.global)?;
     match &cli.command {
-        None => sitting(&ctx, Mode::Daily(ctx.config.filler()), &[]),
+        None => sitting(&ctx, Mode::Daily(ctx.config.filler()), &[], cli.aided),
         Some(Command::Practice(args)) => practice(&ctx, args),
         Some(Command::Status(args)) => status(&ctx, args),
         Some(Command::Stats(args)) => stats(&ctx, args),
@@ -175,10 +175,10 @@ fn help_topic(topic: Option<&str>) -> Result<()> {
 // The sitting.
 
 fn practice(ctx: &Context, args: &PracticeArgs) -> Result<u8> {
-    sitting(ctx, Mode::Practice, &args.slugs)
+    sitting(ctx, Mode::Practice, &args.slugs, false)
 }
 
-fn sitting(ctx: &Context, mode: Mode, only: &[Slug]) -> Result<u8> {
+fn sitting(ctx: &Context, mode: Mode, only: &[Slug], aided: bool) -> Result<u8> {
     let mut store = Store::open(ctx.paths.clone())?;
     let state = State::replay(store.journal().lines());
     let verifiers = Verifiers::load(&ctx.paths.verifiers())?;
@@ -190,7 +190,14 @@ fn sitting(ctx: &Context, mode: Mode, only: &[Slug]) -> Result<u8> {
         }
     }
 
-    let plan = drill::plan(&state, &verifiers, today, mode, only);
+    let mut plan = drill::plan(&state, &verifiers, today, mode, only);
+    if aided {
+        // Declared up front, because the lookup already happened. Every entry in
+        // the sitting is a transcription and none of it is a reading.
+        for item in &mut plan.items {
+            item.class = Class::Aided;
+        }
+    }
     if plan.is_empty() {
         write_cache(ctx, &state, today)?;
         if !ctx.quiet {
@@ -234,7 +241,7 @@ fn sitting(ctx: &Context, mode: Mode, only: &[Slug]) -> Result<u8> {
                 slug: item.slug.clone(),
                 session: session.clone(),
                 version: item.version,
-                class: item.class,
+                class: entry.class,
                 attempt: entry.attempt,
                 outcome: entry.outcome,
                 ttfk_ms: entry.ttfk_ms,
@@ -272,6 +279,15 @@ fn sitting(ctx: &Context, mode: Mode, only: &[Slug]) -> Result<u8> {
 fn closing_notes(plan: &drill::Plan, after: &State) -> Vec<String> {
     let mut notes = Vec::new();
     for item in &plan.items {
+        if after
+            .get(&item.slug)
+            .is_some_and(|slug| slug.aided_mismatch)
+        {
+            notes.push(format!(
+                "{}  the vault and the verifier disagree — confirm the item, then rote rekey",
+                item.slug
+            ));
+        }
         let Some(slug) = after.get(&item.slug) else {
             continue;
         };
@@ -604,6 +620,8 @@ fn status(ctx: &Context, args: &ScheduleArgs) -> Result<u8> {
                     "standing": standing_word(slug.standing(today)),
                     "due": due_day(slug, today).map(|d| d.to_string()),
                     "cap_passes": slug.cap_passes,
+                    "stood_alone": slug.first_unaided.map(|d| d.to_string()),
+                    "aided_mismatch": slug.aided_mismatch,
                     "gate": gate_word(slug.gate()),
                     "verifier": verifier_word(slug, &verifiers),
                 })
@@ -616,12 +634,15 @@ fn status(ctx: &Context, args: &ScheduleArgs) -> Result<u8> {
         return Ok(CLEAN);
     }
 
-    let mut table = Table::new(&["SLUG", "STEP", "EVERY", "LAST", "NEXT", "VERIFIER", "GATE"]);
+    let mut table = Table::new(&[
+        "SLUG", "STEP", "EVERY", "STOOD", "LAST", "NEXT", "VERIFIER", "GATE",
+    ]);
     for slug in &slugs {
         table.push(vec![
             slug.slug.to_string(),
             format!("{}/{}", slug.step.get(), ladder::LADDER.len() - 1),
             format!("{}d", slug.step.interval()),
+            since(slug.first_unaided, today),
             since(slug.last_attempt, today),
             next_word(slug, today),
             verifier_word(slug, &verifiers).to_owned(),
@@ -654,6 +675,18 @@ fn status_notes(slugs: &[&SlugState], today: Date) -> Vec<String> {
         if let Standing::Held { until } = slug.standing(today) {
             notes.push(format!(
                 "{}: held for a stretch probe until {until}",
+                slug.slug
+            ));
+        }
+        if slug.first_unaided.is_none() && !slug.retired {
+            notes.push(format!(
+                "{}: has not stood alone yet — no unaided first-attempt pass on record",
+                slug.slug
+            ));
+        }
+        if slug.aided_mismatch {
+            notes.push(format!(
+                "{}: an aided entry was refused — the vault and the verifier disagree",
                 slug.slug
             ));
         }
@@ -736,10 +769,19 @@ fn stats(ctx: &Context, args: &MeasurementArgs) -> Result<u8> {
         return Ok(CLEAN);
     }
 
-    let mut table = Table::new(&["SLUG", "RETENTION", "TTFK", "TYPING", "RECENT", "TREND"]);
+    let mut table = Table::new(&[
+        "SLUG",
+        "AIDED",
+        "RETENTION",
+        "TTFK",
+        "TYPING",
+        "RECENT",
+        "TREND",
+    ]);
     for slug in &stats.slugs {
         table.push(vec![
             slug.slug.to_string(),
+            slug.aided.to_string(),
             rate(slug.retention),
             millis(slug.ttfk_ms),
             millis(slug.total_ms),
@@ -749,7 +791,7 @@ fn stats(ctx: &Context, args: &MeasurementArgs) -> Result<u8> {
     }
 
     let mut notes = Vec::new();
-    if stats.retention.total == 0 && stats.practice.total == 0 {
+    if stats.retention.total == 0 && stats.practice.total == 0 && stats.aided.total == 0 {
         notes.push(format!("no entries in the last {}d", stats.window_days));
     } else {
         notes.push(format!(
@@ -757,6 +799,18 @@ fn stats(ctx: &Context, args: &MeasurementArgs) -> Result<u8> {
             rate(stats.retention),
             rate(stats.practice)
         ));
+        if stats.aided.total > 0 {
+            let refused = stats.aided.total.saturating_sub(stats.aided.passes);
+            notes.push(format!(
+                "{} aided, in no figure above{}",
+                stats.aided.total,
+                if refused > 0 {
+                    format!(" · {refused} refused, so the vault and the verifier disagree")
+                } else {
+                    String::new()
+                }
+            ));
+        }
         if stats.punctuality.total > 0 {
             notes.push(format!(
                 "punctuality {} taken within a day of falling due{}",
@@ -804,6 +858,7 @@ fn stats_json(stats: &Stats) -> serde_json::Value {
         "window_days": stats.window_days,
         "retention": {"passes": stats.retention.passes, "total": stats.retention.total},
         "practice": {"passes": stats.practice.passes, "total": stats.practice.total},
+        "aided": {"passes": stats.aided.passes, "total": stats.aided.total},
         "punctuality": {
             "on_time": stats.punctuality.on_time,
             "total": stats.punctuality.total,
@@ -818,6 +873,7 @@ fn stats_json(stats: &Stats) -> serde_json::Value {
             "slug": slug.slug.as_str(),
             "passes": slug.retention.passes,
             "total": slug.retention.total,
+            "aided": slug.aided,
             "ttfk_ms": slug.ttfk_ms,
             "total_ms": slug.total_ms,
             "trend": trend_text(slug.trend),
@@ -948,15 +1004,22 @@ fn event_text(event: &Event) -> String {
                 Class::Review => "review",
                 Class::Practice => "practice",
                 Class::Probe => "probe",
+                Class::Aided => "aided",
             };
             let outcome = match entry.outcome {
                 Outcome::Pass => "pass",
                 Outcome::Fail => "fail",
+                Outcome::Blank => "blank",
                 Outcome::Skip => "skip",
                 Outcome::Abort => "abandoned",
             };
             let mut text = format!("{class} · {outcome} · try {}", entry.attempt);
-            if let Some(days) = entry.effective_interval_days {
+            // A lookup has no interval worth naming: whatever elapsed, the
+            // answer was on the screen.
+            if let Some(days) = entry
+                .effective_interval_days
+                .filter(|_| entry.class.unaided())
+            {
                 let _ = std::fmt::Write::write_fmt(&mut text, format_args!(" · {days}d cold"));
             }
             if entry.stretch {

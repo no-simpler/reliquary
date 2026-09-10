@@ -88,6 +88,11 @@ Things a future edit must not undo.
   still say memorised. `--force` is a re-enrolment and the log records it as one.
 - **Bracketed paste is enabled so a paste can be refused.** A drill answered
   from a vault measures nothing.
+- **The lookup is only ever offered after an entry is recorded.** There is no
+  standalone verb for an aided entry and there should not be: one would let the
+  vault be consulted before anything is written, and the cold attempt — the
+  whole reading — would go unrecorded. `--aided` is the declaration for a
+  sitting that already went that way, not a shortcut past it.
 - **The terminal is put back three ways**, because each covers a way of leaving
   the others do not: an RAII guard, a panic hook, and a `signal-hook` thread. A
   default-disposition `SIGTERM` runs no destructor, and a terminal left in raw

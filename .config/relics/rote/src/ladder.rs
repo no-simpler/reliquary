@@ -83,6 +83,12 @@ pub enum Class {
     /// it leaves the step alone: the horizon was chosen, so failing it is a
     /// reading rather than a lapse in the schedule.
     Probe,
+    /// The answer was consulted before it was typed. Not recall, so it is
+    /// evidence of nothing about the memory and is kept out of every figure
+    /// that claims to measure one. It is still recorded in full: it is the
+    /// legitimate shape of a week-one entry, and the only routine check that
+    /// the verifier and the vault item still agree.
+    Aided,
 }
 
 impl Class {
@@ -90,8 +96,13 @@ impl Class {
     pub fn scores(self) -> bool {
         match self {
             Self::Review => true,
-            Self::Practice | Self::Probe => false,
+            Self::Practice | Self::Probe | Self::Aided => false,
         }
+    }
+
+    /// Whether an entry of this class measured recall at all.
+    pub fn unaided(self) -> bool {
+        !matches!(self, Self::Aided)
     }
 }
 

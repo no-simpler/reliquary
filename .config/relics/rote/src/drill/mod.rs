@@ -117,7 +117,7 @@ impl Item {
         }
         match outcome {
             Outcome::Pass => self.step.advanced(),
-            Outcome::Fail => Step::FIRST,
+            Outcome::Fail | Outcome::Blank => Step::FIRST,
             Outcome::Skip | Outcome::Abort => self.step,
         }
     }
@@ -256,7 +256,7 @@ impl Sitting {
     pub fn lapses(&self) -> usize {
         self.taken
             .iter()
-            .filter(|taken| taken.attempt == 1 && taken.outcome == Outcome::Fail)
+            .filter(|taken| taken.attempt == 1 && taken.class.unaided() && taken.outcome.lapsed())
             .count()
     }
 }
@@ -323,65 +323,79 @@ fn ask_about(
     today: Date,
 ) -> Result<bool> {
     let mut resolved: Option<Step> = None;
-    for attempt in 1..=max_attempts {
-        let left = max_attempts.saturating_sub(attempt);
+    let mut class = item.class;
+    let mut attempt: u8 = 0;
+    loop {
+        attempt = attempt.saturating_add(1);
+        let aided = !class.unaided();
+        let left = if aided {
+            0
+        } else {
+            max_attempts.saturating_sub(attempt)
+        };
         set(rows, index, screen::RowState::Active { attempt, left });
         console.paint(&screen::Frame::running(today, rows, Some(index)))?;
 
-        let (secret, ttfk, total, corrections, refused) = match read(console, today, rows, index)? {
-            Typed::Submitted {
-                secret,
-                ttfk_ms,
-                total_ms,
-                corrections,
-                paste_refused,
-            } => (secret, ttfk_ms, total_ms, corrections, paste_refused),
+        let entry = match read(console, today, rows, index)? {
+            Typed::Submitted(entry) => entry,
             Typed::Skipped => {
                 set(rows, index, screen::RowState::Skipped);
                 sitting
                     .taken
-                    .push(nothing(item, index, attempt, Outcome::Skip));
+                    .push(nothing(item, index, class, attempt, Outcome::Skip));
                 return Ok(false);
             }
             Typed::Aborted => {
                 set(rows, index, screen::RowState::Aborted);
                 sitting
                     .taken
-                    .push(nothing(item, index, attempt, Outcome::Abort));
+                    .push(nothing(item, index, class, attempt, Outcome::Abort));
                 sitting.aborted = true;
                 return Ok(true);
             }
         };
 
-        set(rows, index, screen::RowState::Checking);
-        console.paint(&screen::Frame::running(today, rows, Some(index)))?;
-        let accepted = verify(item, &secret)?;
-        drop(secret);
-
-        let outcome = if accepted {
-            Outcome::Pass
+        // An empty entry is a concession, and the verifier has nothing to say
+        // about it. Conceding is what the card asks for in place of typing
+        // something to get past the prompt.
+        let outcome = if entry.secret.is_empty() {
+            Outcome::Blank
         } else {
-            Outcome::Fail
+            set(rows, index, screen::RowState::Checking);
+            console.paint(&screen::Frame::running(today, rows, Some(index)))?;
+            if verify(item, &entry.secret)? {
+                Outcome::Pass
+            } else {
+                Outcome::Fail
+            }
         };
-        let step_after = *resolved.get_or_insert_with(|| item.step_after(outcome));
+        drop(entry.secret);
+
+        // An aided entry cannot move the ladder, so it carries whatever this
+        // sitting already decided rather than a position of its own.
+        let step_after = if aided {
+            resolved.unwrap_or(item.step)
+        } else {
+            *resolved.get_or_insert_with(|| item.step_after(outcome))
+        };
         sitting.taken.push(Taken {
             item: index,
-            class: item.class,
+            class,
             attempt,
             outcome,
-            ttfk_ms: ttfk,
-            total_ms: total,
-            corrections,
-            paste_refused: refused,
+            ttfk_ms: entry.ttfk_ms,
+            total_ms: entry.total_ms,
+            corrections: entry.corrections,
+            paste_refused: entry.paste_refused,
             step_after,
         });
 
-        if accepted {
+        if outcome == Outcome::Pass {
             set(
                 rows,
                 index,
                 screen::RowState::Passed {
-                    total_ms: total,
+                    total_ms: entry.total_ms,
                     retries: attempt.saturating_sub(1),
                 },
             );
@@ -393,22 +407,84 @@ fn ask_about(
             screen::RowState::Failed {
                 attempt,
                 left,
-                scored: attempt == 1,
+                scored: attempt == 1 && !aided,
             },
         );
-        if left == 0 {
+        if aided {
+            // The answer was in front of the person and the verifier refused it
+            // anyway. Nothing further to ask, and something else to look at.
             return Ok(false);
         }
-        console.paint(&screen::Frame::running(today, rows, Some(index)))?;
+
+        match after_miss(console, today, rows, index, left > 0)? {
+            Choice::Retry => {}
+            Choice::Look => {
+                class = Class::Aided;
+                if let Some(row) = rows.get_mut(index) {
+                    row.class = Class::Aided;
+                }
+            }
+            Choice::Move => return Ok(false),
+            Choice::Abort => {
+                set(rows, index, screen::RowState::Aborted);
+                sitting.aborted = true;
+                return Ok(true);
+            }
+        }
     }
-    Ok(false)
+}
+
+/// Offer the lookup, and read the answer.
+fn after_miss(
+    console: &mut dyn Console,
+    today: Date,
+    rows: &[screen::Row],
+    index: usize,
+    retry: bool,
+) -> Result<Choice> {
+    let mut frame = screen::Frame::running(today, rows, Some(index));
+    frame.notice = Some(screen::Notice::Choose { retry });
+    console.paint(&frame)?;
+    choose(console, retry)
+}
+
+/// What to do after a miss.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Choice {
+    /// Try again, from memory.
+    Retry,
+    /// Go and look it up, then type it as an aided entry.
+    Look,
+    /// Leave it there and go on to the next slug.
+    Move,
+    /// Abandon the sitting.
+    Abort,
+}
+
+/// Read the one keystroke that decides what happens after a miss.
+///
+/// Anything unrecognised is ignored rather than guessed at: this prompt decides
+/// what the next record claims to measure.
+fn choose(console: &mut dyn Console, retry: bool) -> Result<Choice> {
+    loop {
+        let Some(key) = console.next()? else {
+            return Ok(Choice::Abort);
+        };
+        match key {
+            Key::Enter => return Ok(if retry { Choice::Retry } else { Choice::Move }),
+            Key::Char('l' | 'L') => return Ok(Choice::Look),
+            Key::Char('s' | 'S') | Key::Escape => return Ok(Choice::Move),
+            Key::Interrupt => return Ok(Choice::Abort),
+            Key::Char(_) | Key::Backspace | Key::Clear | Key::Paste => {}
+        }
+    }
 }
 
 /// An entry where nothing was typed, so nothing was measured.
-fn nothing(item: &Item, index: usize, attempt: u8, outcome: Outcome) -> Taken {
+fn nothing(item: &Item, index: usize, class: Class, attempt: u8, outcome: Outcome) -> Taken {
     Taken {
         item: index,
-        class: item.class,
+        class,
         attempt,
         outcome,
         ttfk_ms: None,
@@ -427,15 +503,18 @@ fn set(rows: &mut [screen::Row], index: usize, state: screen::RowState) {
 
 /// What one prompt produced.
 enum Typed {
-    Submitted {
-        secret: Secret,
-        ttfk_ms: Option<u64>,
-        total_ms: Option<u64>,
-        corrections: u32,
-        paste_refused: u32,
-    },
+    Submitted(Entry),
     Skipped,
     Aborted,
+}
+
+/// One submitted entry, before anything has judged it.
+struct Entry {
+    secret: Secret,
+    ttfk_ms: Option<u64>,
+    total_ms: Option<u64>,
+    corrections: u32,
+    paste_refused: u32,
 }
 
 fn read(
@@ -474,13 +553,13 @@ fn read(
             Key::Enter => {
                 let elapsed = console.elapsed_ms();
                 let total = ttfk.map(|start| elapsed.saturating_sub(start));
-                return Ok(Typed::Submitted {
+                return Ok(Typed::Submitted(Entry {
                     secret,
                     ttfk_ms: ttfk,
                     total_ms: total,
                     corrections,
                     paste_refused: refused,
-                });
+                }));
             }
             Key::Escape => return Ok(Typed::Skipped),
             Key::Interrupt => return Ok(Typed::Aborted),
@@ -617,6 +696,11 @@ mod tests {
         (sitting, console)
     }
 
+    /// Answers to the offer that follows a miss.
+    const RETRY: (Key, u64) = (Key::Enter, 0);
+    const LOOK: (Key, u64) = (Key::Char('l'), 0);
+    const MOVE_ON: (Key, u64) = (Key::Char('s'), 0);
+
     fn one(class: Class) -> Plan {
         Plan {
             items: vec![item("a", class, Step::cap())],
@@ -729,6 +813,7 @@ mod tests {
     fn a_lapse_resets_the_step_and_the_retry_does_not_undo_it() {
         let plan = one(Class::Review);
         let mut keys = typing("wrong", 500);
+        keys.push(RETRY);
         keys.extend(typing("right", 2_000));
         let attempts = std::cell::Cell::new(0u32);
         let (sitting, _) = drive(&plan, keys, 3, &|_| {
@@ -755,9 +840,90 @@ mod tests {
         let mut keys = vec![];
         for _ in 0..5 {
             keys.extend(typing("nope", 100));
+            keys.push(RETRY);
         }
         let (sitting, _) = drive(&plan, keys, 3, &|_| false);
         assert_eq!(sitting.taken.len(), 3);
+        assert!(!sitting.aborted);
+    }
+
+    #[test]
+    fn an_empty_entry_is_a_blank_and_the_verifier_is_never_asked() {
+        let plan = one(Class::Review);
+        let asked = std::cell::Cell::new(0u32);
+        let mut console = Fake::new(vec![(Key::Enter, 100), MOVE_ON]);
+        let sitting = super::run(
+            &plan,
+            2,
+            &mut console,
+            &|_item, _secret| {
+                asked.set(asked.get().saturating_add(1));
+                Ok(true)
+            },
+            date(2026, 9, 10),
+        )
+        .unwrap();
+        let taken = sitting.taken.first().unwrap();
+        assert_eq!(taken.outcome, Outcome::Blank);
+        assert_eq!(taken.step_after, Step::FIRST, "conceding is a lapse");
+        assert_eq!(asked.get(), 0, "there was nothing to check");
+        assert_eq!(sitting.lapses(), 1);
+    }
+
+    #[test]
+    fn looking_it_up_makes_the_next_entry_aided_and_ends_the_item() {
+        let plan = one(Class::Review);
+        let mut keys = typing("wrong", 100);
+        keys.push(LOOK);
+        keys.extend(typing("right", 2_000));
+        // A third entry would be asked for if the aided one did not end it.
+        keys.extend(typing("again", 4_000));
+        let attempts = std::cell::Cell::new(0u32);
+        let (sitting, _) = drive(&plan, keys, 3, &|_| {
+            attempts.set(attempts.get().saturating_add(1));
+            attempts.get() > 1
+        });
+        assert_eq!(sitting.taken.len(), 2);
+        let cold = sitting.taken.first().unwrap();
+        let aided = sitting.taken.get(1).unwrap();
+        assert_eq!(cold.class, Class::Review);
+        assert_eq!(aided.class, Class::Aided);
+        assert_eq!(aided.outcome, Outcome::Pass);
+        assert_eq!(
+            aided.step_after,
+            Step::FIRST,
+            "the cold attempt decided the step, and the lookup cannot undo it"
+        );
+        assert_eq!(sitting.lapses(), 1, "an aided pass is not a rescue");
+    }
+
+    #[test]
+    fn an_aided_entry_that_is_refused_says_so_and_asks_nothing_further() {
+        let plan = one(Class::Review);
+        let mut keys = typing("wrong", 100);
+        keys.push(LOOK);
+        keys.extend(typing("also-wrong", 2_000));
+        keys.extend(typing("never-reached", 4_000));
+        let (sitting, _) = drive(&plan, keys, 3, &|_| false);
+        assert_eq!(sitting.taken.len(), 2);
+        let aided = sitting.taken.get(1).unwrap();
+        assert_eq!(aided.class, Class::Aided);
+        assert_eq!(aided.outcome, Outcome::Fail);
+        assert_eq!(
+            sitting.lapses(),
+            1,
+            "the cold miss is the lapse; the aided one is a reading about the vault"
+        );
+    }
+
+    #[test]
+    fn moving_on_after_a_miss_leaves_the_slug_where_it_fell() {
+        let plan = one(Class::Review);
+        let mut keys = typing("wrong", 100);
+        keys.push(MOVE_ON);
+        keys.extend(typing("never-reached", 2_000));
+        let (sitting, _) = drive(&plan, keys, 3, &|_| false);
+        assert_eq!(sitting.taken.len(), 1);
         assert!(!sitting.aborted);
     }
 

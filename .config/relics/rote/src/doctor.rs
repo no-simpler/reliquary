@@ -113,11 +113,7 @@ fn slug_findings(state: &State, verifiers: &Verifiers, today: Date) -> Vec<Findi
     if scheduled.is_empty() {
         return vec![station().note(summary("no slugs are being drilled"))];
     }
-    let mut findings = Vec::new();
-    let mut overdue = Vec::new();
-    let mut missing = Vec::new();
-    let mut weak = Vec::new();
-    let mut ready = Vec::new();
+    let mut found = Found::default();
 
     for slug in scheduled {
         match slug.standing(today) {
@@ -127,7 +123,9 @@ fn slug_findings(state: &State, verifiers: &Verifiers, today: Date) -> Vec<Findi
                     .map_or(0, |last| crate::ladder::days_between(last, today))
                     .saturating_sub(slug.step.interval());
                 if late > GRACE_DAYS {
-                    overdue.push(format!("{}: {late} days past due", slug.slug));
+                    found
+                        .overdue
+                        .push(format!("{}: {late} days past due", slug.slug));
                 }
             }
             Standing::Probe | Standing::Held { .. } | Standing::Waiting { .. } => {}
@@ -136,56 +134,103 @@ fn slug_findings(state: &State, verifiers: &Verifiers, today: Date) -> Vec<Findi
             Ok(Some(verifier)) => {
                 if verifier.meets_floor().is_ok_and(|meets| !meets) {
                     let cost = verifier.m_cost_kib().unwrap_or(0);
-                    weak.push(format!(
+                    found.weak.push(format!(
                         "{}: {cost} KiB, against a floor of {M_COST_KIB} KiB",
                         slug.slug
                     ));
                 }
             }
-            Ok(None) => missing.push(slug.slug.to_string()),
-            Err(error) => weak.push(format!("{}: {error}", slug.slug)),
+            Ok(None) => found.missing.push(slug.slug.to_string()),
+            Err(error) => found.weak.push(format!("{}: {error}", slug.slug)),
         }
         if let Gate::Ready { passes } = slug.gate() {
-            ready.push(format!("{}: {passes} cold passes at the cap", slug.slug));
+            found
+                .ready
+                .push(format!("{}: {passes} cold passes at the cap", slug.slug));
+        }
+        if slug.critical && slug.first_unaided.is_none() {
+            found.unproven.push(slug.slug.to_string());
+        }
+        if slug.aided_mismatch {
+            found.mismatched.push(slug.slug.to_string());
         }
     }
 
-    if !weak.is_empty() {
-        findings.push(
-            station()
-                .broken(summary(
-                    "a verifier is weaker than the artifact it verifies, which makes it the cheaper attack path",
-                ))
-                .detailed_with(Detail::new(weak.join("\n")))
-                .fixed_by(FixHint::lossy("rote rekey the slug named below")),
-        );
+    found.into_findings()
+}
+
+/// What the scan collected, one list per finding it can produce.
+#[derive(Default)]
+struct Found {
+    overdue: Vec<String>,
+    missing: Vec<String>,
+    weak: Vec<String>,
+    ready: Vec<String>,
+    unproven: Vec<String>,
+    mismatched: Vec<String>,
+}
+
+impl Found {
+    fn into_findings(self) -> Vec<Finding> {
+        let mut findings = Vec::new();
+        if !self.weak.is_empty() {
+            findings.push(
+                station()
+                    .broken(summary(
+                        "a verifier is weaker than the artifact it verifies, which makes it the cheaper attack path",
+                    ))
+                    .detailed_with(Detail::new(self.weak.join("\n")))
+                    .fixed_by(FixHint::lossy("rote rekey the slug named below")),
+            );
+        }
+        if !self.missing.is_empty() {
+            findings.push(
+                station()
+                    .soft(summary(
+                        "a slug on the schedule has no verifier on this machine",
+                    ))
+                    .detailed_with(Detail::new(self.missing.join("\n")))
+                    .fixed_by(FixHint::lossy("rote rekey --force the slug named below")),
+            );
+        }
+        if !self.overdue.is_empty() {
+            findings.push(
+                station()
+                    .soft(summary("a drill is overdue"))
+                    .detailed_with(Detail::new(self.overdue.join("\n")))
+                    .fixed_by(FixHint::lossy("rote")),
+            );
+        }
+        if !self.mismatched.is_empty() {
+            findings.push(
+                station()
+                    .soft(summary(
+                        "an aided entry was refused, so the vault and the verifier hold different secrets",
+                    ))
+                    .detailed_with(Detail::new(self.mismatched.join("\n")))
+                    .fixed_by(FixHint::lossy(
+                        "confirm which one is current, then rote rekey",
+                    )),
+            );
+        }
+        if !self.unproven.is_empty() {
+            findings.push(
+                station()
+                    .note(summary(
+                        "a critical slug has never been recalled without the answer in front of it",
+                    ))
+                    .detailed_with(Detail::new(self.unproven.join("\n"))),
+            );
+        }
+        if !self.ready.is_empty() {
+            findings.push(
+                station()
+                    .note(summary("a slug has cleared the cutover gate"))
+                    .detailed_with(Detail::new(self.ready.join("\n"))),
+            );
+        }
+        findings
     }
-    if !missing.is_empty() {
-        findings.push(
-            station()
-                .soft(summary(
-                    "a slug on the schedule has no verifier on this machine",
-                ))
-                .detailed_with(Detail::new(missing.join("\n")))
-                .fixed_by(FixHint::lossy("rote rekey --force the slug named below")),
-        );
-    }
-    if !overdue.is_empty() {
-        findings.push(
-            station()
-                .soft(summary("a drill is overdue"))
-                .detailed_with(Detail::new(overdue.join("\n")))
-                .fixed_by(FixHint::lossy("rote")),
-        );
-    }
-    if !ready.is_empty() {
-        findings.push(
-            station()
-                .note(summary("a slug has cleared the cutover gate"))
-                .detailed_with(Detail::new(ready.join("\n"))),
-        );
-    }
-    findings
 }
 
 /// The human shape: one line per finding, with the verdict last.

@@ -27,7 +27,7 @@ use crate::ladder::Class;
 use crate::slug::Slug;
 
 /// The schema this binary writes and understands.
-pub const SCHEMA: u32 = 1;
+pub const SCHEMA: u32 = 2;
 
 /// A SHA-256 over one log line, rendered as lowercase hex.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,10 +263,21 @@ pub enum Outcome {
     Pass,
     /// The verifier refused it.
     Fail,
+    /// Nothing was offered. A failure of recall like any other, kept apart from
+    /// [`Outcome::Fail`] because producing a wrong answer and having none are
+    /// different readings, and the week-one curve runs through both.
+    Blank,
     /// Passed over deliberately.
     Skip,
     /// The session was abandoned at this prompt.
     Abort,
+}
+
+impl Outcome {
+    /// Whether recall was reached for. A blank is a failure, not an absence.
+    pub fn lapsed(self) -> bool {
+        matches!(self, Self::Fail | Self::Blank)
+    }
 }
 
 /// One typed entry.
