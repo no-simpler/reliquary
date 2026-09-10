@@ -127,7 +127,7 @@ pub enum Standing {
 
 /// Where a slug stands, given its anchor day, its step, and any stretch horizon.
 ///
-/// `anchor` is the day of the last scheduled review, or of enrolment when there
+/// `anchor` is the day of the last scheduled review, or of enrollment when there
 /// has been none.
 pub fn standing(today: Date, anchor: Date, step: Step, hold_until: Option<Date>) -> Standing {
     if let Some(until) = hold_until {
@@ -186,7 +186,7 @@ pub enum Gate {
 ///
 /// `cap_passes` counts consecutive first-attempt passes whose **effective**
 /// interval reached the cap — the interval since the previous entry of any
-/// kind, so practising a slug daily cannot dress a one-day recall up as a
+/// kind, so practicing a slug daily cannot dress a one-day recall up as a
 /// seven-day one.
 pub fn gate(step: Step, cap_passes: u32) -> Gate {
     if !step.at_cap() {

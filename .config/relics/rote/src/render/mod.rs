@@ -1,7 +1,7 @@
 //! One row model, three renderers.
 //!
 //! Columns run in order of increasing variability, so the widest cell is last
-//! and never has to be padded. Colour is resolved once, at the edge, and passed
+//! and never has to be padded. Color is resolved once, at the edge, and passed
 //! down: a renderer that probes the terminal for itself is a second opinion
 //! where there should be one.
 

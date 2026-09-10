@@ -2,7 +2,7 @@
 //!
 //! Building a card is a pure function from content to lines, so the whole
 //! visual design is under snapshot test and the terminal adapter only has to
-//! place what it is handed. Colour is resolved here, at build time, because a
+//! place what it is handed. Color is resolved here, at build time, because a
 //! piece is the smallest thing that knows whether it is an outcome or an aside.
 //!
 //! The width is fixed for every card in the binary. A box that resizes as
@@ -29,6 +29,17 @@ const CONTENT_COL: usize = 4;
 /// Where text starts inside the entry field: its own border, then a space.
 const FIELD_TEXT_COL: usize = CONTENT_COL + 2;
 
+/// What a field looks like, which is the only thing on a card that changes
+/// color to say something happened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    /// Nothing to report.
+    Calm,
+    /// Something was refused. Shown for a moment and then dropped: a mark that
+    /// stays makes every later glance re-read it.
+    Alarm,
+}
+
 /// The border and the blank line above the first line of body.
 const BODY_OFFSET: usize = 2;
 
@@ -46,7 +57,7 @@ pub const RED: &str = "\x1b[31m";
 pub const GREEN: &str = "\x1b[32m";
 pub const YELLOW: &str = "\x1b[33m";
 
-/// A piece of text, and the same text with colour on it.
+/// A piece of text, and the same text with color on it.
 #[derive(Clone, Debug)]
 pub struct Piece {
     plain: String,
@@ -54,7 +65,7 @@ pub struct Piece {
 }
 
 impl Piece {
-    /// Text that carries no colour of its own.
+    /// Text that carries no color of its own.
     pub fn plain(text: impl Into<String>) -> Self {
         let text = text.into();
         Self {
@@ -80,11 +91,6 @@ impl Piece {
     /// How many columns this occupies.
     pub fn width(&self) -> usize {
         self.plain.chars().count()
-    }
-
-    /// Whether there is nothing to draw.
-    pub fn is_blank(&self) -> bool {
-        self.plain.trim().is_empty()
     }
 }
 
@@ -137,6 +143,7 @@ pub struct Card {
     color: bool,
     body: Vec<Piece>,
     caret: Option<(usize, usize)>,
+    reserved: Option<usize>,
 }
 
 impl Card {
@@ -148,7 +155,19 @@ impl Card {
             color,
             body: Vec::new(),
             caret: None,
+            reserved: None,
         }
+    }
+
+    /// Fix the body at this many lines, whatever a given state puts in it.
+    ///
+    /// Every state of one window is then the same rectangle in the same place,
+    /// so a transition moves nothing and the eye keeps its bearings. Short
+    /// states are padded; a state that overruns is cut, which is the signal
+    /// that the layout or the wording wants shortening rather than the box.
+    pub fn reserve(&mut self, lines: usize) -> &mut Self {
+        self.reserved = Some(lines);
+        self
     }
 
     /// Where the terminal's own cursor belongs, in rendered coordinates.
@@ -168,14 +187,18 @@ impl Card {
     /// labels. Instructions never share the line: a hint beside somewhere a
     /// secret is typed is a hint that will one day be overlapped by what is
     /// typed into it.
-    pub fn entry(&mut self, typed: usize, reveal: Reveal) -> &mut Self {
+    pub fn entry(&mut self, typed: usize, reveal: Reveal, tone: Tone) -> &mut Self {
         let shown = reveal.shown(typed);
         let filled = shown.chars().count().min(FIELD);
-        self.say(format!("╭{}╮", "─".repeat(FIELD + 2)), DIM);
+        let edge = match tone {
+            Tone::Calm => DIM,
+            Tone::Alarm => RED,
+        };
+        self.say(format!("╭{}╮", "─".repeat(FIELD + 2)), edge);
         let interior = join(&[
-            Piece::painted("│ ", DIM, self.color),
+            Piece::painted("│ ", edge, self.color),
             Piece::painted(format!("{shown:<FIELD$}"), BOLD, self.color),
-            Piece::painted(" │", DIM, self.color),
+            Piece::painted(" │", edge, self.color),
         ]);
         self.body.push(interior);
         self.caret = Some((
@@ -185,7 +208,7 @@ impl Card {
                 .saturating_add(BODY_OFFSET),
             FIELD_TEXT_COL.saturating_add(filled),
         ));
-        self.say(format!("╰{}╯", "─".repeat(FIELD + 2)), DIM);
+        self.say(format!("╰{}╯", "─".repeat(FIELD + 2)), edge);
         self
     }
 
@@ -210,20 +233,52 @@ impl Card {
 
     /// How many lines the card occupies, border and padding included.
     pub fn height(&self) -> usize {
-        self.body.len().saturating_add(4)
+        self.reserved.unwrap_or(self.body.len()).saturating_add(4)
+    }
+
+    /// Add a line with something at each end.
+    ///
+    /// Two reserved areas on one line, so what is said on the left can change
+    /// without moving what sits on the right.
+    pub fn split(&mut self, left: &str, right: &str, code: &str) -> &mut Self {
+        let gap = CONTENT
+            .saturating_sub(left.chars().count())
+            .saturating_sub(right.chars().count());
+        let piece = join(&[
+            Piece::painted(left.to_owned(), code, self.color),
+            Piece::plain(" ".repeat(gap)),
+            Piece::painted(right.to_owned(), DIM, self.color),
+        ]);
+        self.body.push(piece);
+        self
+    }
+
+    /// Pad out to a given line, so what comes next lands in its own slot.
+    pub fn pad_to(&mut self, line: usize) -> &mut Self {
+        while self.body.len() < line {
+            self.gap();
+        }
+        self
+    }
+
+    /// How many lines of body have been put in so far.
+    pub fn lines(&self) -> usize {
+        self.body.len()
     }
 
     /// Draw it.
     pub fn render(&self) -> Vec<String> {
-        let mut lines = Vec::with_capacity(self.height());
-        lines.push(self.top());
-        lines.push(self.edge(&Piece::plain(String::new())));
-        for piece in &self.body {
-            lines.push(self.edge(piece));
+        let lines = self.reserved.unwrap_or(self.body.len());
+        let blank = Piece::plain(String::new());
+        let mut out = Vec::with_capacity(self.height());
+        out.push(self.top());
+        out.push(self.edge(&blank));
+        for index in 0..lines {
+            out.push(self.edge(self.body.get(index).unwrap_or(&blank)));
         }
-        lines.push(self.edge(&Piece::plain(String::new())));
-        lines.push(self.bottom());
-        lines
+        out.push(self.edge(&blank));
+        out.push(self.bottom());
+        out
     }
 
     fn top(&self) -> String {
@@ -242,7 +297,7 @@ impl Card {
     /// One content line between two borders.
     ///
     /// The truncation is a safety net rather than a layout: a line that reaches
-    /// it has outgrown [`CONTENT`] and loses its colour along with its tail,
+    /// it has outgrown [`CONTENT`] and loses its color along with its tail,
     /// which is what makes the defect visible instead of silently breaking the
     /// box the way an over-long line otherwise would.
     fn edge(&self, piece: &Piece) -> String {
@@ -278,7 +333,7 @@ fn clip(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CONTENT, Card, Piece, Reveal, WIDTH};
+    use super::{CONTENT, Card, Piece, Reveal, Tone, WIDTH};
 
     fn card() -> Card {
         Card::new("rote", "Thu 10 Sep", false)
@@ -324,10 +379,10 @@ mod tests {
     #[test]
     fn the_field_says_nothing_about_what_was_typed() {
         let mut empty = card();
-        empty.entry(0, Reveal::Blind);
+        empty.entry(0, Reveal::Blind, Tone::Calm);
         for typed in [1_usize, 7, 64, 4096] {
             let mut drawn = card();
-            drawn.entry(typed, Reveal::Blind);
+            drawn.entry(typed, Reveal::Blind, Tone::Calm);
             assert_eq!(
                 drawn.render(),
                 empty.render(),
@@ -340,7 +395,9 @@ mod tests {
     #[test]
     fn the_cursor_lands_inside_the_field_and_nowhere_else() {
         let mut drawn = card();
-        drawn.say("a label", super::DIM).entry(0, Reveal::Blind);
+        drawn
+            .say("a label", super::DIM)
+            .entry(0, Reveal::Blind, Tone::Calm);
         let (row, column) = drawn.caret().expect("a field takes the cursor");
         let lines = drawn.render();
         let line: Vec<char> = lines[row].chars().collect();
@@ -365,6 +422,49 @@ mod tests {
         let painted = Piece::painted("hello", super::RED, true);
         assert_eq!(plain.width(), painted.width());
         assert!(painted.styled.len() > plain.styled.len());
+    }
+
+    #[test]
+    fn a_reserved_card_is_the_same_height_however_much_is_put_in_it() {
+        let mut empty = card();
+        empty.reserve(8);
+        let mut full = card();
+        full.reserve(8);
+        for n in 0..6 {
+            full.say(format!("line {n}"), super::DIM);
+        }
+        assert_eq!(empty.render().len(), full.render().len());
+        assert_eq!(empty.render().len(), 8 + 4);
+    }
+
+    #[test]
+    fn a_state_that_overruns_its_reservation_is_cut_rather_than_stretching_the_box() {
+        let mut drawn = card();
+        drawn.reserve(3);
+        for n in 0..9 {
+            drawn.say(format!("line {n}"), super::DIM);
+        }
+        let lines = drawn.render();
+        assert_eq!(lines.len(), 3 + 4);
+        assert!(lines.iter().any(|l| l.contains("line 2")));
+        assert!(!lines.iter().any(|l| l.contains("line 3")));
+    }
+
+    #[test]
+    fn an_alarmed_field_differs_only_in_color() {
+        let mut calm = card();
+        calm.entry(0, Reveal::Blind, Tone::Calm);
+        let mut alarm = Card::new("rote", "Thu 10 Sep", true);
+        alarm.entry(0, Reveal::Blind, Tone::Alarm);
+        let mut painted_calm = Card::new("rote", "Thu 10 Sep", true);
+        painted_calm.entry(0, Reveal::Blind, Tone::Calm);
+        assert_eq!(calm.caret(), alarm.caret());
+        assert_eq!(
+            alarm.render().len(),
+            painted_calm.render().len(),
+            "an alarm must not change the shape"
+        );
+        assert_ne!(alarm.render(), painted_calm.render(), "and must be visible");
     }
 
     #[test]

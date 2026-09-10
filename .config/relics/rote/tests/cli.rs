@@ -7,8 +7,8 @@
 //! The binary, driven as it ships.
 //!
 //! The suite **seeds** the store rather than enrolling through it: real
-//! enrolment costs 256 MiB and six seconds in a debug build, and `relic test`
-//! has to stay fast. Two tests pay the real cost so the enrolment path is not
+//! enrollment costs 256 MiB and six seconds in a debug build, and `relic test`
+//! has to stay fast. Two tests pay the real cost so the enrollment path is not
 //! untested; everything else writes a log and a cheap verifier directly.
 
 use argon2::password_hash::{PasswordHasher as _, SaltString};
@@ -296,7 +296,7 @@ fn help_falls_through_to_a_command_of_that_name() {
         .stdout(contains("horizon"));
 }
 
-// Enrolment.
+// Enrollment.
 
 #[test]
 fn a_secret_from_a_pipe_enrols_and_shows_up_on_the_schedule() {

@@ -32,7 +32,7 @@ pub struct SlugState {
     /// Where it sits on the ladder.
     pub step: Step,
     /// The day the schedule counts from: the last review or probe, else
-    /// enrolment.
+    /// enrollment.
     pub anchor: Date,
     /// The day it was enrolled, or last re-enrolled.
     pub added: Date,
@@ -76,12 +76,12 @@ impl SlugState {
     }
 
     /// Whether the secret has already been in front of a person today, whether
-    /// through an entry or through enrolment.
+    /// through an entry or through enrollment.
     pub fn seen_today(&self, today: Date) -> bool {
         self.last_attempt == Some(today) || self.added == today
     }
 
-    /// Whether the slug has been practised since its last scheduled review.
+    /// Whether the slug has been practiced since its last scheduled review.
     ///
     /// A warm slug cannot produce a cold entry at the cap interval, which is
     /// what the cutover gate is waiting for.
@@ -479,7 +479,7 @@ mod tests {
         assert_eq!(
             slug.standing(date(2026, 9, 11)),
             Standing::Due,
-            "a fresh slug is due the day after enrolment"
+            "a fresh slug is due the day after enrollment"
         );
     }
 

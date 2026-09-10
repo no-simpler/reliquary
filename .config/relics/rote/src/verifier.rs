@@ -13,7 +13,7 @@
 //!
 //! **Where a verifier lives is a separate question**, and it is not in `ark`.
 //! See `store` and the relic's `CLAUDE.md`: a verifier is an offline-attackable
-//! confirmation oracle, and it is regenerable by re-enrolment, so it has no
+//! confirmation oracle, and it is regenerable by re-enrollment, so it has no
 //! business in a tree that replicates to two providers and keeps prior versions.
 
 use argon2::password_hash::{Ident, Output, ParamsString, PasswordHash, Salt, SaltString};

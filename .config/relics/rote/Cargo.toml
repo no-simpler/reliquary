@@ -27,7 +27,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 # The verifier. argon2id is the Password Hashing Competition winner and OWASP's
-# first recommendation; the PHC string format it serialises to carries its own
+# first recommendation; the PHC string format it serializes to carries its own
 # parameters, so a verifier is self-describing and `doctor` can read the cost off
 # it rather than trusting a constant that may have moved.
 argon2 = { version = "0.5.3", features = ["zeroize", "std"] }
@@ -51,7 +51,7 @@ toml = "1.1.4"
 
 [dev-dependencies]
 # Integration tests are their own crate, so what the binary depends on is not in
-# scope for them. The suite seeds a store rather than driving enrolment, so it
+# scope for them. The suite seeds a store rather than driving enrollment, so it
 # mints its own cheap verifiers and its own hash chain.
 argon2 = { version = "0.5.3", features = ["zeroize", "std"] }
 sha2 = "0.10.9"

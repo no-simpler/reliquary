@@ -1,4 +1,4 @@
-//! Boxed, coloured, and meant to be read once. What a terminal gets.
+//! Boxed, colored, and meant to be read once. What a terminal gets.
 
 use comfy_table::presets::UTF8_HORIZONTAL_ONLY;
 use comfy_table::{ContentArrangement, Table as Grid};
@@ -9,12 +9,12 @@ const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
 
-/// Bold, when colour is on.
+/// Bold, when color is on.
 pub fn bold(text: &str, color: bool) -> String {
     paint(text, BOLD, color)
 }
 
-/// Dim, when colour is on.
+/// Dim, when color is on.
 pub fn dim(text: &str, color: bool) -> String {
     paint(text, DIM, color)
 }
@@ -48,7 +48,7 @@ pub fn block(heading: &str, table: &Table, notes: &[String], color: bool) -> Str
 
 fn grid(table: &Table, color: bool) -> String {
     let mut grid = Grid::new();
-    // Colour is already decided; comfy-table would otherwise probe the terminal
+    // Color is already decided; comfy-table would otherwise probe the terminal
     // and reach a second opinion.
     if color {
         grid.enforce_styling();

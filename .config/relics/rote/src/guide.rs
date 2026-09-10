@@ -47,7 +47,7 @@ THE LADDER
 
   Do not change a lock until the new key has survived spacing. Read that off
   rote status: three consecutive first-attempt passes at a cold seven-day
-  interval, which is about five weeks from a fresh enrolment.
+  interval, which is about five weeks from a fresh enrollment.
 
   One entry per sitting scores. A second entry a minute later is primed by the
   first and measures transcription rather than recall, so the retries exist to
@@ -55,7 +55,7 @@ THE LADDER
 
   The drill runs before the lookup. The card says so at the prompt, because that
   is where the rule applies, and it offers the lookup afterwards rather than
-  pretending nobody needs one.
+  pretending nobody needs one. See rote help keys.
 ";
 
 const IRREGULARITY: &str = "\
@@ -111,7 +111,8 @@ CUSTODY
   one; typed nonsense would count as the same thing while looking like an
   attempt.
 
-  After a miss the card offers the lookup. Take it and the next entry is aided:
+  After a miss the card offers the lookup, on ctrl-l. Take it and the next entry
+  is aided:
   recorded in full, out of retention, out of the latency series, out of the
   buckets, and unable to move the ladder. Week one is aided almost entirely, and
   that is the honest shape of week one rather than a fault in it. rote status

@@ -9,7 +9,7 @@ use crate::slug::Slug;
 /// Both namespaces, advertised where a reader will look for them.
 pub const ROOT_AFTER_LONG_HELP: &str = "\
 rote guide ladder|irregularity|custody|probes = doctrine
-rote help intervals|records|files|stdin|exit = reference topics";
+rote help keys|intervals|records|files|stdin|exit = reference topics";
 
 /// The daily drill.
 #[derive(Parser)]
@@ -76,7 +76,7 @@ pub enum Command {
     /// Drill without scoring, whatever the schedule says.
     Practice(PracticeArgs),
 
-    /// Enrol a slug. The secret is typed twice and stored only as a verifier.
+    /// Enroll a slug. The secret is typed twice and stored only as a verifier.
     Add(AddArgs),
 
     /// Hold a slug out of the reminder until a chosen day, then take it cold.
@@ -144,7 +144,7 @@ pub struct PracticeArgs {
     pub slugs: Vec<Slug>,
 }
 
-/// Arguments for enrolment.
+/// Arguments for enrollment.
 #[derive(Args)]
 pub struct AddArgs {
     /// The slug, which by convention matches the 1Password item title.
@@ -186,7 +186,7 @@ pub struct RekeyArgs {
     #[arg(value_name = "SLUG")]
     pub slug: Slug,
 
-    /// Replace without proving the current secret. This is a re-enrolment, and
+    /// Replace without proving the current secret. This is a re-enrollment, and
     /// the log records it as one.
     #[arg(long)]
     pub force: bool,

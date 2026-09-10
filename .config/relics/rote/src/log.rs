@@ -3,7 +3,7 @@
 //! JSON Lines rather than the frontmatter documents and whole-file JSON the rest
 //! of the lane uses, because this file is meant to outlive the machine. An
 //! append is one `O_APPEND` line write, so no later write can rewrite an earlier
-//! record; a whole-file replacement re-serialises the past on every save, and a
+//! record; a whole-file replacement re-serializes the past on every save, and a
 //! bug in that path rewrites history rather than failing.
 //!
 //! Every record carries `prev`, the SHA-256 of the preceding line. That is
@@ -216,7 +216,7 @@ impl Event {
 pub struct Added {
     /// The slug.
     pub slug: Slug,
-    /// Which verifier generation this is. Enrolment is 1.
+    /// Which verifier generation this is. Enrollment is 1.
     pub version: u32,
     /// Whether losing this one is unrecoverable rather than inconvenient.
     pub critical: bool,
@@ -231,7 +231,7 @@ pub struct Rekeyed {
     /// The new generation.
     pub version: u32,
     /// Whether the current secret was proved before the replacement, or whether
-    /// this was a re-enrolment by someone who had lost it.
+    /// this was a re-enrollment by someone who had lost it.
     pub proved: bool,
 }
 
@@ -372,7 +372,7 @@ impl Line {
 ///
 /// # Errors
 ///
-/// When the record will not serialise, which means a type in it has a broken
+/// When the record will not serialize, which means a type in it has a broken
 /// `Serialize`.
 pub fn render(record: &Record) -> Result<String, serde_json::Error> {
     serde_json::to_string(record)

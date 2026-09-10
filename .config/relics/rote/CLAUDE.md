@@ -58,7 +58,7 @@ guessing against an unambiguous success signal — and that is an accepted shape
 for a ninety-bit phrase and a poor one for a login password. Putting one in
 `ark` would replicate it to two providers, into every snapshot and into a month
 of prior versions, where no rotation can reach it. A verifier is regenerable by
-re-enrolment and carries no history, so it belongs where losing the local copy
+re-enrollment and carries no history, so it belongs where losing the local copy
 loses nothing, which is the placement rule `POSTURE`'s `design/layout.md` states.
 
 A slug with no verifier is therefore a **first-class state**, not a corruption:
@@ -87,7 +87,7 @@ Things a future edit must not undo.
   lands in shell history. The drill accepts no stdin at all.
 - **`rekey` proves the current secret before accepting a new one.** Without it a
   verifier could be replaced by one somebody else knows, and the reading would
-  still say memorised. `--force` is a re-enrolment and the log records it as one.
+  still say memorised. `--force` is a re-enrollment and the log records it as one.
 - **Bracketed paste is enabled so a paste can be refused.** A drill answered
   from a vault measures nothing.
 - **The lookup is only ever offered after an entry is recorded.** There is no
@@ -115,6 +115,22 @@ Things a future edit must not undo.
   hint beside where a secret is typed is a hint that will one day be overlapped
   by what is typed into it — so instructions sit on their own lines above, with
   one blank line before the label-and-field block.
+- **Every state of one window is the same rectangle in the same place.** A window
+  reserves its lines with `Card::reserve` and each state fills them; short states
+  are padded and a state that overruns is cut. What is above the field is the
+  heading and does not move, what changes lives in a reserved column or on the
+  line under the field, and the field itself never moves. A cut line is the
+  signal that the layout or the wording wants shortening — never the box.
+- **A refusal is a flash and a counter, not a paragraph.** The field border goes
+  red for `FLASH` and comes back; nothing red stays on the screen, and the try
+  count increments in the slot it already occupied. A mark that stays is a mark
+  every later glance has to re-read, and a menu that must be answered turns a
+  mistyped character into an interrogation.
+- **A glyph carries what a glyph can.** One column of standing per row, and words
+  only for what the glyph cannot say. Nothing on a card spells out a key that a
+  person already knows — enter submits, escape leaves — so the only key named is
+  ctrl-l, and only where it is on offer. The full set is `rote help keys`, which
+  is reference and belongs there rather than on the screen every day.
 - **The caret is the terminal's own cursor**, moved into the field and shown
   there. It blinks the way every other password field on the machine blinks,
   follows the reader's own cursor settings, costs no animation loop, and cannot
@@ -190,7 +206,7 @@ keep the hand-assembled PHC string honest.
 
 - **JSON Lines**, where the lane elsewhere uses frontmatter documents and
   whole-file JSON. An append is one `O_APPEND` line write, so no later write can
-  rewrite an earlier record; a whole-file replacement re-serialises the past on
+  rewrite an earlier record; a whole-file replacement re-serializes the past on
   every save, and a bug in that path rewrites history rather than failing.
 - **Local civil dates**, where the lane elsewhere uses UTC instants and day
   differences. A daily ritual is a calendar concept and a UTC boundary falls in

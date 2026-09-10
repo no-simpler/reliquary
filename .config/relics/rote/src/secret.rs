@@ -40,7 +40,7 @@ impl Secret {
     /// Take bytes as given, for the paths that read a secret from a pipe.
     ///
     /// Longer than [`CAPACITY`] is refused rather than truncated: a silently
-    /// truncated secret would enrol a verifier for something nobody typed.
+    /// truncated secret would enroll a verifier for something nobody typed.
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         if bytes.len() > CAPACITY {
             return None;
@@ -101,7 +101,7 @@ impl Secret {
         &self.bytes
     }
 
-    /// Whether two entries match, for the double entry at enrolment.
+    /// Whether two entries match, for the double entry at enrollment.
     ///
     /// Not constant time, and it does not need to be: both sides were typed by
     /// the same person a moment apart, and neither is a stored secret being
@@ -186,7 +186,7 @@ mod tests {
         assert!(Secret::from_bytes(&vec![b'x'; CAPACITY]).is_some());
         assert!(
             Secret::from_bytes(&vec![b'x'; CAPACITY + 1]).is_none(),
-            "truncating would enrol a verifier for something nobody typed"
+            "truncating would enroll a verifier for something nobody typed"
         );
     }
 

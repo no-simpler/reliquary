@@ -17,7 +17,7 @@ use crate::model::{SlugState, State};
 use crate::secret::Secret;
 use crate::slug::Slug;
 use crate::store::Verifiers;
-use crate::tui::{Console, Key, Nudge, Typed, read_secret};
+use crate::tui::{Console, Refusal, Timings, Typed, card::Tone, read_secret};
 use crate::verifier::Verifier;
 
 /// One slug to ask about.
@@ -272,6 +272,7 @@ fn ask_about(
     let mut resolved: Option<Step> = None;
     let mut class = item.class;
     let mut attempt: u8 = 0;
+    let mut missed = false;
     loop {
         attempt = attempt.saturating_add(1);
         let aided = !class.unaided();
@@ -281,68 +282,53 @@ fn ask_about(
             max_attempts.saturating_sub(attempt)
         };
         set(rows, index, screen::RowState::Active { attempt, left });
-        paint(console, &screen::Frame::running(today, rows, Some(index)))?;
+        let mut frame = screen::Frame::running(today, rows, Some(index));
+        frame.lookup = missed;
+        frame.status = status(attempt, max_attempts);
+        paint(console, &frame)?;
 
-        let entry = match read(console, today, rows, index)? {
+        let entry = match read(console, today, rows, index, missed, attempt, max_attempts)? {
             Typed::Submitted(entry) => entry,
+            Typed::Lookup => {
+                class = Class::Aided;
+                if let Some(row) = rows.get_mut(index) {
+                    row.class = Class::Aided;
+                }
+                attempt = attempt.saturating_sub(1);
+                continue;
+            }
             Typed::Skipped => {
-                set(rows, index, screen::RowState::Skipped);
-                sitting
-                    .taken
-                    .push(nothing(item, index, class, attempt, Outcome::Skip));
+                let step = resolved.unwrap_or(item.step);
+                left_it(sitting, rows, index, class, attempt, Outcome::Skip, step);
                 return Ok(false);
             }
             Typed::Aborted => {
-                set(rows, index, screen::RowState::Aborted);
-                sitting
-                    .taken
-                    .push(nothing(item, index, class, attempt, Outcome::Abort));
+                let step = resolved.unwrap_or(item.step);
+                left_it(sitting, rows, index, class, attempt, Outcome::Abort, step);
                 sitting.aborted = true;
                 return Ok(true);
             }
         };
 
-        // An empty entry is a concession, and the verifier has nothing to say
-        // about it. Conceding is what the card asks for in place of typing
-        // something to get past the prompt.
-        let outcome = if entry.secret.is_empty() {
-            Outcome::Blank
-        } else {
-            set(rows, index, screen::RowState::Checking);
-            paint(console, &screen::Frame::running(today, rows, Some(index)))?;
-            if verify(item, &entry.secret)? {
-                Outcome::Pass
-            } else {
-                Outcome::Fail
-            }
-        };
-        drop(entry.secret);
-
+        let outcome = judge(console, item, rows, index, today, &entry.secret, verify)?;
+        let timings = entry.forget();
         // An aided entry cannot move the ladder, so it carries whatever this
         // sitting already decided rather than a position of its own.
-        let step_after = if aided {
-            resolved.unwrap_or(item.step)
-        } else {
+        let step_after = if class.unaided() {
             *resolved.get_or_insert_with(|| item.step_after(outcome))
+        } else {
+            resolved.unwrap_or(item.step)
         };
-        sitting.taken.push(Taken {
-            item: index,
-            class,
-            attempt,
-            outcome,
-            ttfk_ms: entry.ttfk_ms,
-            total_ms: entry.total_ms,
-            corrections: entry.corrections,
-            paste_refused: entry.paste_refused,
-            step_after,
-        });
+        record_entry(
+            sitting, index, class, attempt, outcome, &timings, step_after,
+        );
 
         if outcome == Outcome::Pass {
             set(
                 rows,
                 index,
                 screen::RowState::Passed {
-                    total_ms: entry.total_ms,
+                    total_ms: timings.total_ms,
                     retries: attempt.saturating_sub(1),
                 },
             );
@@ -363,72 +349,103 @@ fn ask_about(
             return Ok(false);
         }
 
-        match after_miss(console, today, rows, index, left > 0)? {
-            Choice::Retry => {}
-            Choice::Look => {
-                class = Class::Aided;
-                if let Some(row) = rows.get_mut(index) {
-                    row.class = Class::Aided;
-                }
-            }
-            Choice::Move => return Ok(false),
-            Choice::Abort => {
-                set(rows, index, screen::RowState::Aborted);
-                sitting.aborted = true;
-                return Ok(true);
-            }
+        if left == 0 {
+            return Ok(false);
         }
+        // The refusal is a flash and a counter, not a menu. Enter submits and
+        // escape leaves; the one branch nobody could guess at is the lookup, and
+        // it goes on offer here because a cold attempt is now on record.
+        missed = true;
+        let mut frame = screen::Frame::running(today, rows, Some(index));
+        frame.tone = Tone::Alarm;
+        frame.lookup = true;
+        frame.status = status(attempt.saturating_add(1), max_attempts);
+        let card = screen::card(&frame, console.color());
+        console.flash(&card)?;
     }
 }
 
-/// Offer the lookup, and read the answer.
-fn after_miss(
-    console: &mut dyn Console,
-    today: Date,
-    rows: &[screen::Row],
+/// Record a prompt somebody walked away from, and mark its row.
+fn left_it(
+    sitting: &mut Sitting,
+    rows: &mut [screen::Row],
     index: usize,
-    retry: bool,
-) -> Result<Choice> {
-    let mut frame = screen::Frame::running(today, rows, Some(index));
-    frame.notice = Some(screen::Notice::Choose { retry });
-    paint(console, &frame)?;
-    choose(console, retry)
+    class: Class,
+    attempt: u8,
+    outcome: Outcome,
+    step: Step,
+) {
+    let state = if outcome == Outcome::Skip {
+        screen::RowState::Skipped
+    } else {
+        screen::RowState::Aborted
+    };
+    set(rows, index, state);
+    sitting
+        .taken
+        .push(nothing(index, class, attempt, outcome, step));
 }
 
-/// What to do after a miss.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Choice {
-    /// Try again, from memory.
-    Retry,
-    /// Go and look it up, then type it as an aided entry.
-    Look,
-    /// Leave it there and go on to the next slug.
-    Move,
-    /// Abandon the sitting.
-    Abort,
-}
-
-/// Read the one keystroke that decides what happens after a miss.
+/// What the verifier makes of one entry.
 ///
-/// Anything unrecognised is ignored rather than guessed at: this prompt decides
-/// what the next record claims to measure.
-fn choose(console: &mut dyn Console, retry: bool) -> Result<Choice> {
-    loop {
-        let Some(key) = console.next()? else {
-            return Ok(Choice::Abort);
-        };
-        match key {
-            Key::Enter => return Ok(if retry { Choice::Retry } else { Choice::Move }),
-            Key::Char('l' | 'L') => return Ok(Choice::Look),
-            Key::Char('s' | 'S') | Key::Escape => return Ok(Choice::Move),
-            Key::Interrupt => return Ok(Choice::Abort),
-            Key::Char(_) | Key::Backspace | Key::Clear | Key::Paste => {}
-        }
+/// An empty entry is a concession, and the verifier has nothing to say about it.
+/// Conceding is what the card asks for in place of typing something to get past
+/// the prompt.
+fn judge(
+    console: &mut dyn Console,
+    item: &Item,
+    rows: &mut [screen::Row],
+    index: usize,
+    today: Date,
+    secret: &Secret,
+    verify: &dyn Fn(&Item, &Secret) -> Result<bool>,
+) -> Result<Outcome> {
+    if secret.is_empty() {
+        return Ok(Outcome::Blank);
     }
+    set(rows, index, screen::RowState::Checking);
+    paint(console, &screen::Frame::running(today, rows, Some(index)))?;
+    Ok(if verify(item, secret)? {
+        Outcome::Pass
+    } else {
+        Outcome::Fail
+    })
+}
+
+/// Add one entry to the sitting.
+fn record_entry(
+    sitting: &mut Sitting,
+    index: usize,
+    class: Class,
+    attempt: u8,
+    outcome: Outcome,
+    entry: &Timings,
+    step_after: Step,
+) {
+    sitting.taken.push(Taken {
+        item: index,
+        class,
+        attempt,
+        outcome,
+        ttfk_ms: entry.ttfk_ms,
+        total_ms: entry.total_ms,
+        corrections: entry.corrections,
+        paste_refused: entry.paste_refused,
+        step_after,
+    });
+}
+
+/// What the line under the field says about this attempt.
+fn status(attempt: u8, of: u8) -> Option<String> {
+    (attempt > 1).then(|| format!("try {attempt} of {of}"))
 }
 
 /// An entry where nothing was typed, so nothing was measured.
-fn nothing(item: &Item, index: usize, class: Class, attempt: u8, outcome: Outcome) -> Taken {
+///
+/// `step` is where the sitting has already put the slug, which is not always
+/// where it started: leaving after a miss must not write a record claiming the
+/// step the miss knocked it off, because replay reads the last record.
+fn nothing(index: usize, class: Class, attempt: u8, outcome: Outcome, step: Step) -> Taken {
     Taken {
         item: index,
         class,
@@ -438,7 +455,7 @@ fn nothing(item: &Item, index: usize, class: Class, attempt: u8, outcome: Outcom
         total_ms: None,
         corrections: 0,
         paste_refused: 0,
-        step_after: item.step,
+        step_after: step,
     }
 }
 
@@ -448,7 +465,7 @@ fn set(rows: &mut [screen::Row], index: usize, state: screen::RowState) {
     }
 }
 
-/// Paint a frame, resolving colour from the console that will draw it.
+/// Paint a frame, resolving color from the console that will draw it.
 fn paint(console: &mut dyn Console, frame: &screen::Frame<'_>) -> Result<()> {
     let card = screen::card(frame, console.color());
     console.paint(&card)
@@ -459,12 +476,21 @@ fn read(
     today: Date,
     rows: &[screen::Row],
     index: usize,
+    missed: bool,
+    attempt: u8,
+    of: u8,
 ) -> Result<Typed> {
     let color = console.color();
-    read_secret(console, &mut |nudge| {
+    read_secret(console, missed, &mut |refusal| {
         let mut frame = screen::Frame::running(today, rows, Some(index));
-        if nudge == Some(Nudge::PasteRefused) {
-            frame.notice = Some(screen::Notice::PasteRefused);
+        frame.lookup = missed;
+        frame.status = if refusal == Refusal::Paste {
+            Some("type it, do not paste it".to_owned())
+        } else {
+            status(attempt, of)
+        };
+        if refusal == Refusal::Paste {
+            frame.tone = Tone::Alarm;
         }
         screen::card(&frame, color)
     })
@@ -493,6 +519,7 @@ mod tests {
         at: usize,
         elapsed: u64,
         frames: usize,
+        flashes: usize,
         held: usize,
         anchored: usize,
         last: Vec<String>,
@@ -505,6 +532,7 @@ mod tests {
                 at: 0,
                 elapsed: 0,
                 frames: 0,
+                flashes: 0,
                 held: 0,
                 anchored: 0,
                 last: Vec::new(),
@@ -544,6 +572,12 @@ mod tests {
             self.frames = self.frames.saturating_add(1);
             self.last = card.render();
             Ok(())
+        }
+
+        /// No pause in a test: what matters is that a refusal was shown at all.
+        fn flash(&mut self, card: &Card) -> Result<()> {
+            self.flashes = self.flashes.saturating_add(1);
+            self.paint(card)
         }
 
         fn hold(&mut self) -> Result<()> {
@@ -602,9 +636,9 @@ mod tests {
     }
 
     /// Answers to the offer that follows a miss.
-    const RETRY: (Key, u64) = (Key::Enter, 0);
-    const LOOK: (Key, u64) = (Key::Char('l'), 0);
-    const MOVE_ON: (Key, u64) = (Key::Char('s'), 0);
+    /// A miss puts the field straight back; there is nothing to press.
+    const LOOK: (Key, u64) = (Key::Lookup, 0);
+    const MOVE_ON: (Key, u64) = (Key::Escape, 0);
 
     fn one(class: Class) -> Plan {
         Plan {
@@ -718,7 +752,6 @@ mod tests {
     fn a_lapse_resets_the_step_and_the_retry_does_not_undo_it() {
         let plan = one(Class::Review);
         let mut keys = typing("wrong", 500);
-        keys.push(RETRY);
         keys.extend(typing("right", 2_000));
         let attempts = std::cell::Cell::new(0u32);
         let (sitting, _) = drive(&plan, keys, 3, &|_| {
@@ -745,7 +778,6 @@ mod tests {
         let mut keys = vec![];
         for _ in 0..5 {
             keys.extend(typing("nope", 100));
-            keys.push(RETRY);
         }
         let (sitting, _) = drive(&plan, keys, 3, &|_| false);
         assert_eq!(sitting.taken.len(), 3);
@@ -828,8 +860,15 @@ mod tests {
         keys.push(MOVE_ON);
         keys.extend(typing("never-reached", 2_000));
         let (sitting, _) = drive(&plan, keys, 3, &|_| false);
-        assert_eq!(sitting.taken.len(), 1);
+        assert_eq!(sitting.taken.len(), 2, "the miss, and the leaving");
         assert!(!sitting.aborted);
+        let left = sitting.taken.get(1).unwrap();
+        assert_eq!(left.outcome, Outcome::Skip);
+        assert_eq!(
+            left.step_after,
+            Step::FIRST,
+            "leaving must not put back the step the miss knocked it off"
+        );
     }
 
     #[test]
@@ -890,7 +929,7 @@ mod tests {
         assert!(sitting.taken.is_empty());
         assert_eq!(plan.missing().count(), 1);
         assert!(
-            console.last.iter().any(|line| line.contains("re-enrol")),
+            console.last.iter().any(|line| line.contains("no verifier")),
             "{:?}",
             console.last
         );
@@ -1015,7 +1054,7 @@ mod tests {
                 Mode::Daily(Filler::BelowCap)
             )
             .is_empty(),
-            "enrolment today is today's exposure"
+            "enrollment today is today's exposure"
         );
         assert_eq!(
             classes(&on(date(2026, 9, 1), &state, &verifiers, Mode::Practice)),

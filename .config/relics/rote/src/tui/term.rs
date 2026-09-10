@@ -17,7 +17,7 @@
 //! and everything after it starts under the end of the line before.
 //!
 //! Where the dialog sits is this module's business and nobody else's. A caller
-//! hands over a card; centring, the terminal being resized under it, and the
+//! hands over a card; centering, the terminal being resized under it, and the
 //! terminal being too small to draw in at all are all answered here.
 
 use std::io::{IsTerminal as _, Write as _};
@@ -49,9 +49,13 @@ const MIN_COLS: usize = card::WIDTH + 2;
 /// of air.
 const MIN_ROWS: usize = 7;
 
+/// How long a refusal is shown before the card goes back to calm. Long enough
+/// to be seen, short enough that nobody is waiting on it.
+const FLASH: std::time::Duration = std::time::Duration::from_millis(220);
+
 /// Where the top of the dialog sits in the space available to it, as a
 /// fraction. A box at the exact middle reads as low, so designed dialogs sit
-/// above it — the optical centre rather than the arithmetic one.
+/// above it — the optical center rather than the arithmetic one.
 const OPTICAL_NUMERATOR: usize = 2;
 const OPTICAL_DENOMINATOR: usize = 5;
 
@@ -278,7 +282,7 @@ fn size() -> (usize, usize) {
     })
 }
 
-/// Where the top edge goes: the optical centre of the anchored height, moved up
+/// Where the top edge goes: the optical center of the anchored height, moved up
 /// only if what is actually being drawn would not otherwise fit.
 fn place(rows: usize, anchored: usize, drawn: usize) -> usize {
     let free = rows.saturating_sub(anchored);
@@ -339,6 +343,12 @@ impl Screen for Terminal {
         result
     }
 
+    fn flash(&mut self, card: &Card) -> Result<()> {
+        self.paint(card)?;
+        std::thread::sleep(FLASH);
+        Ok(())
+    }
+
     fn hold(&mut self) -> Result<()> {
         loop {
             match self.event()? {
@@ -388,6 +398,7 @@ fn code_of(code: KeyCode, modifiers: KeyModifiers) -> Option<Key> {
     match code {
         KeyCode::Char('c' | 'd') if control => Some(Key::Interrupt),
         KeyCode::Char('u') if control => Some(Key::Clear),
+        KeyCode::Char('l') if control => Some(Key::Lookup),
         KeyCode::Char(character) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
             Some(Key::Char(character))
         }
@@ -510,7 +521,7 @@ mod tests {
 
     #[test]
     fn the_dialog_sits_above_the_arithmetic_middle() {
-        // Twenty spare rows: centred would be ten down, optical is eight.
+        // Twenty spare rows: centered would be ten down, optical is eight.
         assert_eq!(place(30, 10, 10), 8);
         assert!(place(40, 12, 12) < (40 - 12) / 2);
     }

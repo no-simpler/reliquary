@@ -5,6 +5,7 @@
 
 /// Canonical order.
 pub const TOPICS: &[(&str, &str)] = &[
+    ("keys", KEYS),
     ("intervals", INTERVALS),
     ("records", RECORDS),
     ("files", FILES),
@@ -29,6 +30,29 @@ pub fn topic_names() -> String {
         .join(", ")
 }
 
+const KEYS: &str = "\
+KEYS
+
+  What a prompt takes. The card names only the lookup, because that is the only
+  one a person could not already guess, and it says so only where it is on
+  offer.
+
+    enter        submit what is in the field
+    enter        on an empty field, concede: a failure of recall, recorded
+    escape       leave this slug where it stands and go on to the next
+    ctrl-u       clear the field and start the entry again
+    ctrl-l       go and look it up, then type it as an aided entry
+    ctrl-c       abandon the sitting
+
+  Ctrl-L is offered only after a cold attempt is on record, and does nothing
+  before then. Consulting the vault first and typing what it says would make the
+  reading a transcription, and the whole point is that the cold attempt is
+  recorded either way.
+
+  A paste is refused rather than accepted. A drill answered from a vault
+  measures nothing.
+";
+
 const INTERVALS: &str = "\
 INTERVALS
 
@@ -43,7 +67,7 @@ INTERVALS
     effective   days since the previous entry of any kind
 
   Effective is the honest one, and it is what every statistic and the cutover
-  gate read. Practising a slug the day before its review does not make that
+  gate read. Practicing a slug the day before its review does not make that
   review seven-day evidence, and the numbers say so.
 
   An entry whose effective interval reaches twice the scheduled one is marked a
@@ -88,7 +112,7 @@ FILES
   ~/.config/rote/config.toml      optional
 
   The two homes are deliberate. An argon2id verifier is an offline-attackable
-  confirmation oracle, and it is regenerable by re-enrolment, so it has no
+  confirmation oracle, and it is regenerable by re-enrollment, so it has no
   business in a tree that replicates to two providers and keeps prior versions.
   The log is the opposite: not regenerable, and carrying no secret material.
 

@@ -44,7 +44,7 @@ pub struct Context {
     pub clock: Clock,
     /// Output shape.
     pub format: Format,
-    /// Whether to colour.
+    /// Whether to color.
     pub color: bool,
     /// Whether to print only what was asked for.
     pub quiet: bool,
@@ -212,7 +212,7 @@ fn sitting(ctx: &Context, mode: Mode, only: &[Slug], aided: bool) -> Result<u8> 
     if plan.missing().count() == plan.items.len() {
         let names: Vec<String> = plan.missing().map(|item| item.slug.to_string()).collect();
         println!(
-            "no verifier on this machine for {} · rote rekey --force to re-enrol",
+            "no verifier on this machine for {} · rote rekey --force to re-enroll",
             names.join(", ")
         );
         return Ok(INCOMPLETE);
@@ -363,7 +363,7 @@ fn write_cache(ctx: &Context, state: &State, today: Date) -> Result<()> {
     Cache { v: SCHEMA, due }.save(&ctx.paths.cache())
 }
 
-// Enrolment and rotation.
+// Enrollment and rotation.
 
 fn add(ctx: &Context, args: &AddArgs) -> Result<u8> {
     let mut store = Store::open(ctx.paths.clone())?;
@@ -375,36 +375,26 @@ fn add(ctx: &Context, args: &AddArgs) -> Result<u8> {
         );
     }
     let today = ctx.today();
+    let heading = format!("enroll {}", args.slug);
     let mut dialog = dialog(args.stdin, ctx.color)?;
     let secret = match dialog.as_mut() {
         None => piped(1)?.into_iter().next().unwrap_or_else(Secret::new),
         Some(console) => {
-            let heading = format!("enrol {}", args.slug);
-            let Some(first) = typed(
-                console,
-                today,
-                &heading,
-                "typed twice, and kept only as a verifier",
-            )?
-            else {
-                return abandoned(console, today);
+            let Some(first) = typed(console, today, &heading, "type it twice")? else {
+                return abandoned(console, today, &heading);
             };
             let Some(again) = typed(console, today, &heading, "again")? else {
-                return abandoned(console, today);
+                return abandoned(console, today, &heading);
             };
             if !first.same_as(&again) {
-                return refused(
-                    console,
-                    today,
-                    "the two entries differ, so nothing was enrolled",
-                );
+                return refused(console, today, &heading, "the two entries differ");
             }
             first
         }
     };
     if secret.is_empty() {
         return match dialog.as_mut() {
-            Some(console) => refused(console, today, "an empty secret is not a secret"),
+            Some(console) => refused(console, today, &heading, "an empty secret is not a secret"),
             None => bail!("an empty secret is not a secret"),
         };
     }
@@ -428,7 +418,7 @@ fn add(ctx: &Context, args: &AddArgs) -> Result<u8> {
     write_cache(ctx, &after, today)?;
     let said = format!("{} enrolled · first review tomorrow", args.slug);
     match dialog.as_mut() {
-        Some(console) => tui::outcome(console, today, &said, card::GREEN)?,
+        Some(console) => tui::outcome(console, today, &heading, &said, card::GREEN)?,
         None => {
             if !ctx.quiet {
                 println!("{said}");
@@ -476,23 +466,19 @@ fn rekey(ctx: &Context, args: &RekeyArgs) -> Result<u8> {
             bail!("--stdin wants a new secret on its own line");
         };
         let Some(first) = typed(console, today, &heading, "the new secret, typed twice")? else {
-            return abandoned(console, today);
+            return abandoned(console, today, &heading);
         };
         let Some(again) = typed(console, today, &heading, "again")? else {
-            return abandoned(console, today);
+            return abandoned(console, today, &heading);
         };
         if !first.same_as(&again) {
-            return refused(
-                console,
-                today,
-                "the two entries differ, so nothing was replaced",
-            );
+            return refused(console, today, &heading, "the two entries differ");
         }
         first
     };
     if secret.is_empty() {
         return match dialog.as_mut() {
-            Some(console) => refused(console, today, "an empty secret is not a secret"),
+            Some(console) => refused(console, today, &heading, "an empty secret is not a secret"),
             None => bail!("an empty secret is not a secret"),
         };
     }
@@ -519,7 +505,7 @@ fn rekey(ctx: &Context, args: &RekeyArgs) -> Result<u8> {
         args.slug
     );
     match dialog.as_mut() {
-        Some(console) => tui::outcome(console, today, &said, card::GREEN)?,
+        Some(console) => tui::outcome(console, today, &heading, &said, card::GREEN)?,
         None => {
             if !ctx.quiet {
                 println!("{said}");
@@ -619,7 +605,7 @@ fn prove(
     // have memorised it" could be made true by editing a file.
     let Some(current) = verifiers.get(&args.slug)? else {
         bail!(
-            "there is no verifier for {} on this machine, so there is nothing to prove against. Use --force to re-enrol",
+            "there is no verifier for {} on this machine, so there is nothing to prove against. Use --force to re-enroll",
             args.slug
         );
     };
@@ -636,7 +622,7 @@ fn prove(
             "prove the current secret before it is replaced",
         )?
         else {
-            return abandoned(console, today).map(Some);
+            return abandoned(console, today, heading).map(Some);
         };
         secret
     };
@@ -645,7 +631,7 @@ fn prove(
     }
     let said = "that is not the current secret, so nothing was replaced";
     match dialog.as_mut() {
-        Some(console) => refused(console, today, said).map(Some),
+        Some(console) => refused(console, today, heading, said).map(Some),
         None => bail!("{said}"),
     }
 }
@@ -674,18 +660,15 @@ fn typed(
     let prompt = tui::Ask { heading, intention };
     match tui::ask(console, today, &prompt)? {
         tui::Typed::Submitted(entry) => Ok(Some(entry.secret)),
-        tui::Typed::Skipped | tui::Typed::Aborted => Ok(None),
+        // Nothing here has a vault to consult: the secret being enrolled is the
+        // one the reader brought with them.
+        tui::Typed::Skipped | tui::Typed::Aborted | tui::Typed::Lookup => Ok(None),
     }
 }
 
 /// Close a dialog that was walked away from.
-fn abandoned(console: &mut term::Terminal, today: Date) -> Result<u8> {
-    tui::outcome(
-        console,
-        today,
-        "abandoned · nothing was changed",
-        card::YELLOW,
-    )?;
+fn abandoned(console: &mut term::Terminal, today: Date, heading: &str) -> Result<u8> {
+    tui::outcome(console, today, heading, "nothing was changed", card::DIM)?;
     Ok(INCOMPLETE)
 }
 
@@ -694,8 +677,8 @@ fn abandoned(console: &mut term::Terminal, today: Date) -> Result<u8> {
 /// Said on the card and held, rather than raised: the screen is erased on the
 /// way out, so an error printed after it is an error printed to a person who has
 /// already been told nothing.
-fn refused(console: &mut term::Terminal, today: Date, text: &str) -> Result<u8> {
-    tui::outcome(console, today, text, card::RED)?;
+fn refused(console: &mut term::Terminal, today: Date, heading: &str, text: &str) -> Result<u8> {
+    tui::outcome(console, today, heading, text, card::RED)?;
     Ok(INCOMPLETE)
 }
 
@@ -808,7 +791,7 @@ fn status_notes(slugs: &[&SlugState], today: Date) -> Vec<String> {
             && slug.warm()
         {
             notes.push(format!(
-                "{}: {passes} of {} cold passes at the cap. Practising it inside the interval is why the next one will not count",
+                "{}: {passes} of {} cold passes at the cap. Practicing it inside the interval is why the next one will not count",
                 slug.slug,
                 ladder::GATE_PASSES
             ));

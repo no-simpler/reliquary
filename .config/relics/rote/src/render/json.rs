@@ -7,7 +7,7 @@ use serde::Serialize;
 ///
 /// # Errors
 ///
-/// When the value will not serialise.
+/// When the value will not serialize.
 pub fn document<T: Serialize>(value: &T) -> Result<String> {
     Ok(serde_json::to_string_pretty(value)?)
 }

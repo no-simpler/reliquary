@@ -8,7 +8,7 @@
 //! accepted shape for a ninety-bit phrase and a poor one for a login password,
 //! and putting one in `ark` would replicate it to two providers, into every
 //! snapshot, and into a month of prior versions — where no rotation can reach
-//! it. A verifier is regenerable by re-enrolment and carries no history, so it
+//! it. A verifier is regenerable by re-enrollment and carries no history, so it
 //! belongs where losing the local copy loses nothing.
 //!
 //! A slug with no verifier is therefore a first-class state, not a corruption:
