@@ -244,6 +244,32 @@ fn help_guide_and_completions_answer_before_a_store_exists() {
 }
 
 #[test]
+fn the_root_help_advertises_every_topic_that_exists() {
+    let rote = Rote::new();
+    let output = rote.run(&["--help"]).output().expect("a run");
+    let help = String::from_utf8_lossy(&output.stdout);
+    for topic in ["ladder", "irregularity", "custody", "probes"] {
+        assert!(
+            help.contains(topic),
+            "guide topic {topic} is not advertised"
+        );
+    }
+    for topic in ["intervals", "records", "files", "stdin", "exit"] {
+        assert!(help.contains(topic), "help topic {topic} is not advertised");
+    }
+}
+
+#[test]
+fn a_refusal_is_told_apart_from_a_finding() {
+    let mut rote = Rote::new();
+    rote.add(&today(), "a", false);
+    // Three: rote could not do the thing at all.
+    rote.run(&["retire", "ghost"]).assert().code(3);
+    // Zero: it did, and found nothing wrong.
+    rote.run(&["doctor"]).assert().code(0);
+}
+
+#[test]
 fn an_unknown_topic_names_the_ones_that_exist() {
     let rote = Rote::new();
     rote.run(&["guide", "nonsense"])

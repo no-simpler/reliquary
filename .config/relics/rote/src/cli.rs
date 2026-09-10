@@ -8,8 +8,8 @@ use crate::slug::Slug;
 
 /// Both namespaces, advertised where a reader will look for them.
 pub const ROOT_AFTER_LONG_HELP: &str = "\
-rote guide ladder|irregularity|custody = doctrine
-rote help intervals|records|exit = reference topics";
+rote guide ladder|irregularity|custody|probes = doctrine
+rote help intervals|records|files|stdin|exit = reference topics";
 
 /// The daily drill.
 #[derive(Parser)]

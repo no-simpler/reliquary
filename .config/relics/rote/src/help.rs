@@ -115,11 +115,13 @@ EXIT CODES
 
   0   clean, or nothing was due
   1   a first-attempt failure, or a soft finding from doctor
-  2   the sitting was abandoned, or doctor found something broken
-  1   any other refusal, on stderr
+  2   the sitting was abandoned, or doctor found something broken, or the
+      command line would not parse
+  3   rote could not run at all, and so found out nothing
 
   doctor exits on its grade, so a non-zero status there means it had something
-  to report rather than that it failed to run.
+  to report rather than that it failed to run. Three is the other case: not
+  knowing is never reported as a clean bill of health.
 ";
 
 #[cfg(test)]
