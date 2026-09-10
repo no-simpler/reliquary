@@ -93,6 +93,12 @@ Things a future edit must not undo.
   vault be consulted before anything is written, and the cold attempt — the
   whole reading — would go unrecorded. `--aided` is the declaration for a
   sitting that already went that way, not a shortcut past it.
+- **Everything written while raw mode is held goes through `RawLines`.** Raw
+  mode takes the line discipline away, so a bare newline moves down without
+  returning to column zero and whatever comes next starts under the end of the
+  line before it. The writer borrows the guard, so it cannot be obtained without
+  raw mode and cannot outlive it, and the translation is idempotent so a call
+  site that spells the break either way produces the same bytes.
 - **The terminal is put back three ways**, because each covers a way of leaving
   the others do not: an RAII guard, a panic hook, and a `signal-hook` thread. A
   default-disposition `SIGTERM` runs no destructor, and a terminal left in raw

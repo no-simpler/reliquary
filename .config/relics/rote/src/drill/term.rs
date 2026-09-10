@@ -11,6 +11,10 @@
 //! panic hook for the unwind, and a signal thread because a default-disposition
 //! `SIGTERM` runs no destructor at all. A terminal left in raw mode with echo
 //! off is one that shows nothing of what is typed into it next.
+//!
+//! Raw mode also takes the line discipline away, so a bare newline moves down
+//! without returning to column zero. Writing to the terminal while it is held
+//! therefore goes through [`RawLines`], which is reachable only from the guard.
 
 use std::io::{IsTerminal as _, Write as _};
 use std::sync::Once;
@@ -76,11 +80,53 @@ impl RawMode {
             .context("asking the terminal to bracket pastes")?;
         Ok(Self)
     }
+
+    /// Standard error, with the line discipline raw mode took away.
+    ///
+    /// The borrow is the constraint: a writer that ends lines this way is only
+    /// correct while raw mode is held, so it cannot outlive the guard, and
+    /// there is no way to reach one without holding it.
+    fn err(&self) -> RawLines<'_, std::io::Stderr> {
+        RawLines {
+            inner: std::io::stderr(),
+            _guard: self,
+        }
+    }
 }
 
 impl Drop for RawMode {
     fn drop(&mut self) {
         restore();
+    }
+}
+
+/// A writer that ends every line the way raw mode needs it ended.
+///
+/// Idempotent, so a line already written with a carriage return is left alone:
+/// whichever way a call site spells the break, what reaches the terminal is the
+/// same, and the class of bug where the next line starts under the last one
+/// cannot come back.
+struct RawLines<'a, W: std::io::Write> {
+    inner: W,
+    _guard: &'a RawMode,
+}
+
+impl<W: std::io::Write> std::io::Write for RawLines<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        for chunk in buf.split_inclusive(|&byte| byte == b'\n') {
+            if let Some((&b'\n', head)) = chunk.split_last() {
+                self.inner
+                    .write_all(head.strip_suffix(b"\r").unwrap_or(head))?;
+                self.inner.write_all(b"\r\n")?;
+            } else {
+                self.inner.write_all(chunk)?;
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
     }
 }
 
@@ -98,8 +144,8 @@ pub fn ask(prompt: &str) -> Result<Option<Secret>> {
             "a secret has to be typed at a terminal; use --stdin to feed one from a pipe"
         ));
     }
-    let _raw = RawMode::enter()?;
-    let mut err = std::io::stderr();
+    let raw = RawMode::enter()?;
+    let mut err = raw.err();
     write!(err, "{prompt}")?;
     err.flush()?;
     let mut secret = Secret::new();
@@ -116,7 +162,7 @@ pub fn ask(prompt: &str) -> Result<Option<Secret>> {
             Some(Key::Enter) => break Some(secret),
             Some(Key::Escape | Key::Interrupt) => break None,
             Some(Key::Paste) => {
-                write!(err, "\r\n  a paste was refused — type it\r\n{prompt}")?;
+                write!(err, "\n  a paste was refused — type it\n{prompt}")?;
                 err.flush()?;
             }
             None => {}
@@ -287,7 +333,43 @@ fn code_of(code: KeyCode, modifiers: KeyModifiers) -> Option<Key> {
 mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    use super::{Key, key_of};
+    use super::{Key, RawLines, RawMode, key_of};
+
+    /// A guard that took nothing, so putting it back is a flush and no more.
+    /// Constructing one is what the borrow in `RawLines` asks for.
+    fn through_raw_lines(input: &str) -> String {
+        use std::io::Write as _;
+        let guard = RawMode;
+        let mut lines = RawLines {
+            inner: Vec::new(),
+            _guard: &guard,
+        };
+        lines
+            .write_all(input.as_bytes())
+            .expect("a vector cannot fail to be written to");
+        String::from_utf8(lines.inner).expect("what went in was text")
+    }
+
+    #[test]
+    fn a_line_written_in_raw_mode_returns_to_column_zero() {
+        assert_eq!(through_raw_lines("secret: "), "secret: ");
+        assert_eq!(through_raw_lines("\n"), "\r\n");
+        assert_eq!(
+            through_raw_lines("  a paste was refused\n  again: "),
+            "  a paste was refused\r\n  again: "
+        );
+    }
+
+    #[test]
+    fn a_line_that_already_returns_is_left_alone() {
+        assert_eq!(through_raw_lines("\r\n"), "\r\n");
+        assert_eq!(through_raw_lines("one\r\ntwo\n"), "one\r\ntwo\r\n");
+    }
+
+    #[test]
+    fn every_line_is_ended_rather_than_only_the_last() {
+        assert_eq!(through_raw_lines("one\ntwo\nthree"), "one\r\ntwo\r\nthree");
+    }
 
     fn press(code: KeyCode, modifiers: KeyModifiers) -> Event {
         Event::Key(KeyEvent {

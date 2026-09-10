@@ -372,8 +372,9 @@ fn add(ctx: &Context, args: &AddArgs) -> Result<u8> {
     let secret = if args.stdin {
         piped(1)?.into_iter().next().unwrap_or_else(Secret::new)
     } else {
-        let first = ask("secret: ")?;
-        let again = ask("  again: ")?;
+        let (first_prompt, again_prompt) = paired("secret");
+        let first = ask(&first_prompt)?;
+        let again = ask(&again_prompt)?;
         if !first.same_as(&again) {
             bail!("the two entries differ, so nothing was enrolled");
         }
@@ -444,8 +445,9 @@ fn rekey(ctx: &Context, args: &RekeyArgs) -> Result<u8> {
     let secret = if let Some(secret) = piped_secrets.next() {
         secret
     } else {
-        let first = ask("new secret: ")?;
-        let again = ask("     again: ")?;
+        let (first_prompt, again_prompt) = paired("new secret");
+        let first = ask(&first_prompt)?;
+        let again = ask(&again_prompt)?;
         if !first.same_as(&again) {
             bail!("the two entries differ, so nothing was replaced");
         }
@@ -556,6 +558,19 @@ fn probe(ctx: &Context, args: &ProbeArgs) -> Result<u8> {
 
 fn ask(prompt: &str) -> Result<Secret> {
     term::ask(prompt)?.context("nothing was entered")
+}
+
+/// The word the confirmation prompt asks with.
+const AGAIN: &str = "again";
+
+/// A prompt and its confirmation, the second right-aligned under the first.
+///
+/// Derived rather than typed: hand-counted padding drifts the moment a label
+/// changes, and the drift is invisible until someone reads the two lines
+/// together on a terminal that has had its line discipline taken away.
+fn paired(label: &str) -> (String, String) {
+    let width = label.chars().count().max(AGAIN.chars().count());
+    (format!("{label:>width$}: "), format!("{AGAIN:>width$}: "))
 }
 
 /// Read secrets from a pipe, one per line.
@@ -1100,4 +1115,34 @@ fn banner(ctx: &Context) -> Result<u8> {
         println!("==> {text}");
     }
     Ok(CLEAN)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::paired;
+
+    /// The colons carry the alignment, so that is what this reads.
+    fn colon(prompt: &str) -> usize {
+        prompt.find(':').expect("a prompt asks with a colon")
+    }
+
+    #[test]
+    fn a_confirmation_sits_under_the_prompt_it_confirms() {
+        for label in ["secret", "new secret"] {
+            let (first, again) = paired(label);
+            assert_eq!(
+                colon(&first),
+                colon(&again),
+                "{label}: {first:?} and {again:?} do not line up"
+            );
+            assert_eq!(first.len(), again.len());
+        }
+    }
+
+    #[test]
+    fn a_label_shorter_than_the_confirmation_is_the_one_that_gets_padded() {
+        let (first, again) = paired("pin");
+        assert_eq!(first, "  pin: ");
+        assert_eq!(again, "again: ");
+    }
 }
