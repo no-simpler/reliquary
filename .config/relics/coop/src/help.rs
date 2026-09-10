@@ -74,6 +74,15 @@ tiers
   kind is findings for anything answering doctor --format json, and text for
   anything else, whose non-blank lines become notices verbatim.
 
+  The exit status means different things across the two. A findings producer
+  reports its grade through it, so a non-zero status there is the answer. A
+  text producer has no such channel, so for it a non-zero status is a failure:
+  the card says nothing and doctor reports it.
+
+  Either way a failed answer is cached like a successful one, so a producer
+  that is reliably broken is retried on its own refresh interval rather than
+  from every prompt.
+
     [source]
     id = \"rote\"
 

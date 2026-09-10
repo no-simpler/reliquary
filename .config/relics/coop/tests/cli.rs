@@ -356,6 +356,41 @@ keys = ["{}"]
 }
 
 #[test]
+fn a_producer_that_fails_is_stamped_so_it_does_not_refork_every_prompt() {
+    let coop = Coop::new();
+    let ledger = coop.base.join("attempts");
+    let producer = coop.producer("broken", &format!("echo x >> {}\nexit 7", ledger.display()));
+    coop.declare(
+        "broken.toml",
+        &format!(
+            r#"
+[source]
+id = "broken"
+fix = "act"
+
+[source.ask]
+run = ["{}"]
+kind = "text"
+refresh = "1h"
+"#,
+            producer.display()
+        ),
+    );
+    for _ in 0..3 {
+        coop.card(&["tick"]);
+    }
+    let attempts = std::fs::read_to_string(&ledger).unwrap_or_default();
+    assert_eq!(
+        attempts.lines().count(),
+        1,
+        "a reliably broken producer must not be re-run from every prompt"
+    );
+    coop.run(&["doctor"])
+        .code(1)
+        .stdout(predicate::str::contains("answered with a failure"));
+}
+
+#[test]
 fn a_producer_that_is_not_on_this_machine_is_dormant_rather_than_fatal() {
     let coop = Coop::new();
     stale_stamp(&coop);

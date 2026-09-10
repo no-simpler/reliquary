@@ -79,6 +79,14 @@ Things a future edit must not undo.
 - **A producer's escape sequences are stripped.** A text producer was written
   for a person and colours itself; the card owns its own colour, and a smuggled
   sequence would also let a producer move the cursor out of the box.
+- **A failed ask is cached like a successful one.** Otherwise the cache stays
+  stale and a reliably broken producer forks a background refresh from every
+  prompt on the machine, forever. It is stored as `Outcome::Skipped`, so it
+  carries no findings to the card and `doctor` reports it instead — a producer
+  that will not run is not the person's nag.
+- **The exit status means different things across the two kinds.** A findings
+  producer reports its grade through it; a text producer has no such channel,
+  so there it means what it usually means.
 - **A producer never reports under another source's name.** `ask::relabel`
   keeps a producer's own namespace and moves anything else onto the declared
   id, which is the rule `assay` enforces on the binaries it collects.

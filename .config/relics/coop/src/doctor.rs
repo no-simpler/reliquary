@@ -31,6 +31,7 @@ pub fn report(ctx: &Ctx, gathered: &Gathered) -> Report {
     findings.extend(declaration_findings(&gathered.broken));
     findings.extend(fixless(gathered));
     findings.extend(dormant(gathered));
+    findings.extend(failing(ctx, gathered));
     findings.extend(budget(ctx));
     findings.extend(furniture(ctx, gathered));
     Report::ran(station(), findings)
@@ -106,6 +107,28 @@ fn dormant(gathered: &Gathered) -> Vec<Finding> {
         sources_station()
             .note(summary("a declared source has no producer on this machine"))
             .detailed_with(Detail::new(sleeping.join("\n"))),
+    ]
+}
+
+/// A producer that will not run. Not on the card: a broken producer is not a
+/// nag, and the person at the prompt cannot tell from a card what went wrong.
+fn failing(ctx: &Ctx, gathered: &Gathered) -> Vec<Finding> {
+    let mut detail: Vec<String> = Vec::new();
+    for (id, _) in &gathered.states {
+        if let Some(why) = crate::ask::failure(&ctx.paths, id) {
+            detail.push(format!("{id}: {why}"));
+        }
+    }
+    if detail.is_empty() {
+        return Vec::new();
+    }
+    vec![
+        sources_station()
+            .soft(summary("a source answered with a failure"))
+            .detailed_with(Detail::new(detail.join("\n")))
+            .fixed_by(FixHint::lossy(
+                "run what the source declares, and read what it says",
+            )),
     ]
 }
 

@@ -12,7 +12,7 @@
 use std::process::Stdio;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use jiff::Timestamp;
 use relic_core::finding::{Finding, Outcome, Report, StationId, Summary};
 use relic_core::tool::Tool;
@@ -69,6 +69,25 @@ pub fn refresh(
     now: Timestamp,
     budget: Duration,
 ) -> Result<Report> {
+    match attempt(source, ask, budget) {
+        Ok(report) => {
+            store(paths, source, ask, report.clone(), now)?;
+            Ok(report)
+        }
+        Err(error) => {
+            // A failure is stamped too, so it ages out on the same clock a
+            // success does. Without this the cache stays stale, and a producer
+            // that is reliably broken forks a background refresh from every
+            // prompt on the machine, forever.
+            let why = format!("{error:#}");
+            let skipped = Report::skipped(source.id.clone(), Summary::lossy(&why));
+            store(paths, source, ask, skipped, now)?;
+            Err(error)
+        }
+    }
+}
+
+fn attempt(source: &Source, ask: &Ask, budget: Duration) -> Result<Report> {
     let tool =
         Tool::find(ask.program()).ok_or_else(|| anyhow!("{} is not on PATH", ask.program()))?;
     let mut command = tool.command();
@@ -76,10 +95,38 @@ pub fn refresh(
     let exit = tool
         .run_within(&mut command, budget)
         .with_context(|| format!("running {}", ask.program()))?;
-    let report = parse(source, ask.kind, &exit.stdout)?;
+    // A findings producer reports its grade through its exit status, so a
+    // non-zero one there is the answer rather than a failure. A text producer
+    // has no such channel, so for it the status means what it usually means.
+    if ask.kind == Kind::Text && !exit.ok() {
+        let code = exit
+            .code
+            .map_or_else(|| "a signal".to_owned(), |code| code.to_string());
+        let stderr = exit.stderr.trim();
+        bail!(
+            "{} exited {code}{}",
+            ask.program(),
+            if stderr.is_empty() {
+                String::new()
+            } else {
+                format!(": {stderr}")
+            }
+        );
+    }
+    parse(source, ask.kind, &exit.stdout)
+}
+
+fn store(paths: &Paths, source: &Source, ask: &Ask, report: Report, now: Timestamp) -> Result<()> {
     let keys = cache::fingerprint(&ask.keys, now);
-    cache::Cached::store(&paths.cache(source.id.as_str()), report.clone(), keys, now)?;
-    Ok(report)
+    cache::Cached::store(&paths.cache(source.id.as_str()), report, keys, now)
+}
+
+/// Why a source last answered with nothing, when that was a failure.
+pub fn failure(paths: &Paths, id: &str) -> Option<String> {
+    match Cached::load(&paths.cache(id))?.report.outcome {
+        Outcome::Skipped(reason) => Some(reason.as_str().to_owned()),
+        Outcome::Ran(_) => None,
+    }
 }
 
 /// Turn a producer's stdout into a report.
