@@ -207,8 +207,26 @@ impl Sitting {
         self.taken
             .iter()
             .filter(|taken| taken.attempt == 1)
-            .filter_map(Landed::of)
+            .filter_map(|taken| {
+                if self.was_aided(taken.item) {
+                    return Some(Landed::Aided);
+                }
+                Landed::of(taken)
+            })
             .collect()
+    }
+
+    /// Whether the lookup was taken on this slug at any point.
+    ///
+    /// It re-labels the whole slug rather than only the entry that followed it.
+    /// The row already says so, and a sitting that reported the cold try while
+    /// the row beside it said aided would be telling two stories about one
+    /// slug. Week one is lookups almost throughout, and calling that a run of
+    /// lapses would be punishing the honest shape of week one.
+    fn was_aided(&self, item: usize) -> bool {
+        self.taken
+            .iter()
+            .any(|taken| taken.item == item && !taken.class.unaided())
     }
 }
 
@@ -922,6 +940,40 @@ mod tests {
             Step::FIRST,
             "leaving must not put back the step the miss knocked it off"
         );
+    }
+
+    #[test]
+    fn a_slug_that_was_looked_up_lands_as_aided_whatever_the_cold_try_did() {
+        // Conceded, looked it up, typed it: the row says aided, and so does the
+        // sitting. The cold blank is still a first-attempt failure in the log,
+        // in the ladder and in the exit status.
+        let plan = one(Class::Review);
+        let mut keys = vec![(Key::Enter, 100), LOOK];
+        keys.extend(typing("right", 2_000));
+        let (sitting, _) = drive(&plan, keys, 3, &|_| true);
+        assert_eq!(sitting.landings(), vec![super::Landed::Aided]);
+        assert_eq!(
+            sitting.missed(),
+            1,
+            "the cold blank is still what the exit status reports"
+        );
+        let cold = sitting.taken.first().unwrap();
+        assert_eq!(cold.outcome, Outcome::Blank);
+        assert_eq!(
+            cold.step_after,
+            Step::FIRST,
+            "and the ladder still went back to the foot"
+        );
+    }
+
+    #[test]
+    fn a_miss_with_no_lookup_still_lands_as_a_lapse() {
+        let plan = one(Class::Review);
+        let mut keys = typing("wrong", 100);
+        keys.extend(typing("wrong", 2_000));
+        keys.extend(typing("wrong", 4_000));
+        let (sitting, _) = drive(&plan, keys, 3, &|_| false);
+        assert_eq!(sitting.landings(), vec![super::Landed::Lapse]);
     }
 
     #[test]

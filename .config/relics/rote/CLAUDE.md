@@ -131,6 +131,13 @@ Things a future edit must not undo.
   `Sitting::landings` buckets each slug once and the buckets are disjoint, so the
   closing count adds up to what was drilled instead of setting a count of classes
   beside a count of one outcome. A lone slug is described rather than counted.
+  **A lookup re-labels its whole slug**, whatever the cold try did: the row's own
+  chip already says aided, and a closing line reporting the cold try beside it
+  would tell two stories about one slug. Week one is lookups almost throughout,
+  and reading that back as a run of lapses would punish the honest shape of it.
+  The cold failure is not lost — it stays in the log, in the ladder, in `stats`
+  and in the exit status, which is where a measurement belongs rather than in a
+  summary line.
 - **A glyph carries what a glyph can.** One column of standing per row, and words
   only for what the glyph cannot say. Nothing on a card spells out a key that a
   person already knows — enter submits, escape leaves — so the only key named is
