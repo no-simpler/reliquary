@@ -37,6 +37,12 @@ brew-owned model causes real friction. Don't do it speculatively.
 If bedrock's surface outgrows a single checker, promote it to a first-class `bedrock` CLI/relic
 (`bedrock check|doctor|list`) parallel to `relic`. Not warranted at v1.
 
+## Hoist `toml` into `[workspace.dependencies]`
+
+`warden`, `assay`, `rote` and now `coop` each declare `toml = "1.1.4"` in their own manifests,
+against a table whose own comment sets the threshold at two consumers. Four copies is four places a
+version can drift. One edit: add it to the table, and switch the four to `toml.workspace = true`.
+
 ---
 _Reference (not a todo): confirmed-correct config exclusions are documented in
 `~/.config/CLAUDE.md` → "Deliberately not tracked (audited)"._
