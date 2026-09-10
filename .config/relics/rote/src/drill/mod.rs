@@ -191,11 +191,64 @@ pub struct Sitting {
 
 impl Sitting {
     /// First-attempt failures on entries that scored.
-    pub fn lapses(&self) -> usize {
+    pub fn missed(&self) -> usize {
         self.taken
             .iter()
             .filter(|taken| taken.attempt == 1 && taken.class.unaided() && taken.outcome.lapsed())
             .count()
+    }
+
+    /// How each slug that was asked about landed, in the order they were asked.
+    ///
+    /// One landing per slug and no slug in two of them, so the counts add up to
+    /// what was actually drilled. Only the first try is read: it is the one that
+    /// scores, and a second entry is primed by the first.
+    pub fn landings(&self) -> Vec<Landed> {
+        self.taken
+            .iter()
+            .filter(|taken| taken.attempt == 1)
+            .filter_map(Landed::of)
+            .collect()
+    }
+}
+
+/// Where one slug ended up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Landed {
+    /// Answered, cold, first try.
+    Pass,
+    /// Missed, and the ladder went back to the foot.
+    Lapse,
+    /// Missed, and nothing moved: practice and probes carry no schedule.
+    Miss,
+    /// Passed over.
+    Skipped,
+    /// The answer was looked up first, so it measured nothing either way.
+    Aided,
+}
+
+impl Landed {
+    /// Where a first try leaves its slug, or `None` when the sitting was
+    /// abandoned there and the slug got no reading at all.
+    fn of(taken: &Taken) -> Option<Self> {
+        if !taken.class.unaided() {
+            return Some(Self::Aided);
+        }
+        Some(match taken.outcome {
+            Outcome::Pass => Self::Pass,
+            // A lapse is the ladder going back to the foot. Practice and probes
+            // move nothing, so a miss there is a reading and not a lapse — which
+            // is what `rote guide probes` says and what `rote stats` counts.
+            Outcome::Fail | Outcome::Blank => {
+                if taken.class.scores() {
+                    Self::Lapse
+                } else {
+                    Self::Miss
+                }
+            }
+            Outcome::Skip => Self::Skipped,
+            Outcome::Abort => return None,
+        })
     }
 }
 
@@ -759,7 +812,7 @@ mod tests {
             attempts.get() > 1
         });
         assert_eq!(sitting.taken.len(), 2);
-        assert_eq!(sitting.lapses(), 1);
+        assert_eq!(sitting.missed(), 1);
         let first = sitting.taken.first().unwrap();
         let second = sitting.taken.get(1).unwrap();
         assert_eq!(first.outcome, Outcome::Fail);
@@ -804,7 +857,7 @@ mod tests {
         assert_eq!(taken.outcome, Outcome::Blank);
         assert_eq!(taken.step_after, Step::FIRST, "conceding is a lapse");
         assert_eq!(asked.get(), 0, "there was nothing to check");
-        assert_eq!(sitting.lapses(), 1);
+        assert_eq!(sitting.missed(), 1);
     }
 
     #[test]
@@ -831,7 +884,7 @@ mod tests {
             Step::FIRST,
             "the cold attempt decided the step, and the lookup cannot undo it"
         );
-        assert_eq!(sitting.lapses(), 1, "an aided pass is not a rescue");
+        assert_eq!(sitting.missed(), 1, "an aided pass is not a rescue");
     }
 
     #[test]
@@ -847,7 +900,7 @@ mod tests {
         assert_eq!(aided.class, Class::Aided);
         assert_eq!(aided.outcome, Outcome::Fail);
         assert_eq!(
-            sitting.lapses(),
+            sitting.missed(),
             1,
             "the cold miss is the lapse; the aided one is a reading about the vault"
         );

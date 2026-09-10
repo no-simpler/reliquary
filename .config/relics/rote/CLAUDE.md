@@ -126,6 +126,11 @@ Things a future edit must not undo.
   count increments in the slot it already occupied. A mark that stays is a mark
   every later glance has to re-read, and a menu that must be answered turns a
   mistyped character into an interrogation.
+- **A lapse is the ladder going back to the foot, and nothing else is one.**
+  Practice and probes move no schedule, so a first-try failure there is a *miss*.
+  `Sitting::landings` buckets each slug once and the buckets are disjoint, so the
+  closing count adds up to what was drilled instead of setting a count of classes
+  beside a count of one outcome. A lone slug is described rather than counted.
 - **A glyph carries what a glyph can.** One column of standing per row, and words
   only for what the glyph cannot say. Nothing on a card spells out a key that a
   person already knows — enter submits, escape leaves — so the only key named is

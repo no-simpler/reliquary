@@ -13,7 +13,7 @@
 
 use jiff::civil::Date;
 
-use super::{Item, Sitting};
+use super::{Item, Landed, Sitting};
 use crate::ladder::{Class, Step};
 use crate::slug::Slug;
 use crate::tui::card::{BOLD, CONTENT, Card, DIM, GREEN, Piece, RED, Reveal, Tone, YELLOW, join};
@@ -322,38 +322,27 @@ fn seconds(total_ms: Option<u64>) -> String {
     }
 }
 
+/// How the sitting went, in one line.
+///
+/// Counts of one thing rather than a count of one thing beside a count of
+/// another: every slug lands in exactly one bucket, so the numbers add up to
+/// what was drilled. One slug needs no arithmetic at all, so it is described
+/// rather than counted.
 fn tally(sitting: &Sitting) -> String {
-    let mut reviews = 0u32;
-    let mut practice = 0u32;
-    let mut probes = 0u32;
-    for taken in sitting.taken.iter().filter(|t| t.attempt == 1) {
-        match taken.class {
-            Class::Review => reviews = reviews.saturating_add(1),
-            Class::Practice => practice = practice.saturating_add(1),
-            Class::Probe => probes = probes.saturating_add(1),
-            Class::Aided => {}
+    let landings = sitting.landings();
+    let mut parts = Vec::new();
+    match landings.as_slice() {
+        [] => {}
+        [only] => parts.push(alone(*only).to_owned()),
+        many => {
+            for (landing, one, more) in ORDER {
+                let count = many.iter().filter(|found| **found == *landing).count();
+                if count > 0 {
+                    parts.push(relic_core::fmt::plural(count, one, more));
+                }
+            }
         }
     }
-    let mut parts = Vec::new();
-    if reviews > 0 {
-        parts.push(relic_core::fmt::plural(
-            usize::try_from(reviews).unwrap_or(0),
-            "review",
-            "reviews",
-        ));
-    }
-    if probes > 0 {
-        parts.push(relic_core::fmt::plural(
-            usize::try_from(probes).unwrap_or(0),
-            "probe",
-            "probes",
-        ));
-    }
-    if practice > 0 {
-        parts.push(format!("{practice} practice"));
-    }
-    let lapses = sitting.lapses();
-    parts.push(relic_core::fmt::plural(lapses, "lapse", "lapses"));
     if sitting.aborted {
         parts.push("abandoned".to_owned());
     }
@@ -361,6 +350,26 @@ fn tally(sitting: &Sitting) -> String {
         return "nothing recorded".to_owned();
     }
     parts.join(" · ")
+}
+
+/// The buckets, in the order they are read out, with what to call one and many.
+const ORDER: &[(Landed, &str, &str)] = &[
+    (Landed::Pass, "pass", "passes"),
+    (Landed::Lapse, "lapse", "lapses"),
+    (Landed::Miss, "miss", "misses"),
+    (Landed::Skipped, "skipped", "skipped"),
+    (Landed::Aided, "aided", "aided"),
+];
+
+/// What one slug on its own did, said rather than counted.
+fn alone(landing: Landed) -> &'static str {
+    match landing {
+        Landed::Pass => "passed",
+        Landed::Lapse => "lapsed",
+        Landed::Miss => "missed",
+        Landed::Skipped => "skipped",
+        Landed::Aided => "aided",
+    }
 }
 
 #[cfg(test)]
@@ -700,9 +709,99 @@ mod tests {
         .render()
         .join("\n");
         assert!(text.contains("done"));
-        assert!(text.contains("1 review"));
+        // One slug is described, not counted.
+        assert!(text.contains("passed"), "{text}");
+        assert!(
+            !text.contains("1 pass"),
+            "a lone slug needs no arithmetic: {text}"
+        );
         assert!(text.contains("press any key"));
         assert!(text.contains("cutover ready"));
+    }
+
+    /// A sitting with `n` slugs, each landing as its outcome and class say.
+    fn sitting_of(entries: &[(Class, Outcome)]) -> Sitting {
+        Sitting {
+            taken: entries
+                .iter()
+                .enumerate()
+                .map(|(item, (class, outcome))| Taken {
+                    item,
+                    class: *class,
+                    attempt: 1,
+                    outcome: *outcome,
+                    ttfk_ms: Some(10),
+                    total_ms: Some(400),
+                    corrections: 0,
+                    paste_refused: 0,
+                    step_after: Step::FIRST,
+                })
+                .collect(),
+            aborted: false,
+            rows: Vec::new(),
+        }
+    }
+
+    fn tallied(entries: &[(Class, Outcome)]) -> String {
+        super::tally(&sitting_of(entries))
+    }
+
+    #[test]
+    fn one_slug_is_described_and_several_are_counted() {
+        assert_eq!(tallied(&[(Class::Review, Outcome::Pass)]), "passed");
+        assert_eq!(tallied(&[(Class::Review, Outcome::Fail)]), "lapsed");
+        assert_eq!(tallied(&[(Class::Practice, Outcome::Fail)]), "missed");
+        assert_eq!(tallied(&[(Class::Review, Outcome::Skip)]), "skipped");
+        assert_eq!(
+            tallied(&[
+                (Class::Review, Outcome::Pass),
+                (Class::Review, Outcome::Fail)
+            ]),
+            "1 pass · 1 lapse"
+        );
+    }
+
+    #[test]
+    fn the_counts_add_up_to_what_was_drilled() {
+        let entries = [
+            (Class::Review, Outcome::Pass),
+            (Class::Review, Outcome::Pass),
+            (Class::Review, Outcome::Fail),
+            (Class::Practice, Outcome::Blank),
+            (Class::Probe, Outcome::Fail),
+            (Class::Review, Outcome::Skip),
+        ];
+        assert_eq!(
+            tallied(&entries),
+            "2 passes · 1 lapse · 2 misses · 1 skipped"
+        );
+    }
+
+    #[test]
+    fn a_miss_that_moved_nothing_is_not_called_a_lapse() {
+        // rote guide probes: failing a chosen horizon is a reading, not a lapse
+        // in the schedule, and rote stats counts it that way too.
+        assert_eq!(tallied(&[(Class::Probe, Outcome::Fail)]), "missed");
+        assert_eq!(tallied(&[(Class::Practice, Outcome::Fail)]), "missed");
+        assert_eq!(tallied(&[(Class::Review, Outcome::Fail)]), "lapsed");
+    }
+
+    #[test]
+    fn an_abandoned_sitting_says_so_and_counts_no_reading_for_where_it_stopped() {
+        let mut sitting = sitting_of(&[(Class::Review, Outcome::Pass)]);
+        sitting.taken.push(Taken {
+            item: 1,
+            class: Class::Review,
+            attempt: 1,
+            outcome: Outcome::Abort,
+            ttfk_ms: None,
+            total_ms: None,
+            corrections: 0,
+            paste_refused: 0,
+            step_after: Step::FIRST,
+        });
+        sitting.aborted = true;
+        assert_eq!(super::tally(&sitting), "passed · abandoned");
     }
 
     #[test]

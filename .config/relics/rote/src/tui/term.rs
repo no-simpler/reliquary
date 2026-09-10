@@ -51,7 +51,7 @@ const MIN_ROWS: usize = 7;
 
 /// How long a refusal is shown before the card goes back to calm. Long enough
 /// to be seen, short enough that nobody is waiting on it.
-const FLASH: std::time::Duration = std::time::Duration::from_millis(220);
+const FLASH: std::time::Duration = std::time::Duration::from_millis(340);
 
 /// Where the top of the dialog sits in the space available to it, as a
 /// fraction. A box at the exact middle reads as low, so designed dialogs sit

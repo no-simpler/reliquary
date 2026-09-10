@@ -272,7 +272,7 @@ fn sitting(ctx: &Context, mode: Mode, only: &[Slug], aided: bool) -> Result<u8> 
     write_cache(ctx, &after, today)?;
     Ok(if taken.aborted {
         INCOMPLETE
-    } else if taken.lapses() > 0 {
+    } else if taken.missed() > 0 {
         LAPSE
     } else {
         CLEAN
