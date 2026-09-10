@@ -1,0 +1,14 @@
+# The system-update nag. `up` writes this timestamp on every attempt, so running
+# it is the dismissal — nothing here has to be retracted, and `up` needs no code
+# to take part.
+
+[source]
+id = "up"
+summary = "{age} since the last system update"
+summary-missing = "no record of a system update on this machine"
+fix = "up"
+
+[source.when]
+path = "~/.local/state/up/last_upped_at"
+older-than = "1d"
+missing = "fire"

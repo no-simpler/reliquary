@@ -42,6 +42,22 @@ final_space = true
     type = 'executiontime'
     style = 'plain'
 
+  # coop: how many notices are outstanding, and nothing at all otherwise — which
+  # is the intended state, so this segment is usually absent.
+  #
+  # $COOP_BADGE is refreshed before each render by _coop_precmd in
+  # shell/interactive.d/050-prompt.{zsh,bash} and fish/conf.d/050-prompt.fish,
+  # which reads it from a file coop tick wrote, so the prompt costs no exec of
+  # its own. Same env-var route as ske below, for the same upstream reason.
+  #
+  # Ahead of ske so ske keeps the screen edge.
+  [[blocks.segments]]
+    template = '{{ if .Env.COOP_BADGE }} 🕊 {{ .Env.COOP_BADGE }}{{ end }}'
+    foreground = 'yellow'
+    background = 'transparent'
+    type = 'text'
+    style = 'plain'
+
   # ske: show the Touch-ID window whenever one is open, and nothing otherwise.
   # A forgotten open window is the realistic risk here (anyone who could abuse the
   # socket is already running as you), so visibility beats hardening it.

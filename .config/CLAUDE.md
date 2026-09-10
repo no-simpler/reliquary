@@ -315,15 +315,54 @@ offline-attackable confirmation oracle, and it is regenerable by re-enrolment, s
 `~/.local/state/rote/` and never enters a backup. `rote` inaugurates `~/Trove` as a directory; the
 POSTURE spec's later lanes make a repository of it.
 
-Wired to two things beyond `$PATH`. `rote banner` is the reminder in `080-check.{sh,fish}`,
-alongside `up`'s — it reads only a derived cache, prints **counts and never slug names**, and fails
-silent. And `rote doctor --format json` is the **first public-lane speaker** of `relic-core`'s
-finding protocol, so `assay`'s registry station collects drill staleness into `yadm doctor` with no
-new station.
+Wired to two things beyond `$PATH`. `rote banner` is the drill nag, declared as a `coop` source,
+and it reads only a derived cache and fails silent. Its `--format json` shape is what `coop` reads.
+And `rote doctor --format json` is the **first public-lane speaker** of `relic-core`'s finding
+protocol, so `assay`'s registry station collects drill staleness into `yadm doctor` with no new
+station. The two thresholds differ on purpose: the banner fires the day a drill comes due, `doctor`
+waits out a grace.
 
 **The binary is the single source of truth for its own surface** — reference in `rote --help` and
 `rote help`, doctrine in `rote guide`. Do not restate either here; the relic's `CLAUDE.md` carries
 the custody constraints and the measured argon2 figures.
+
+### Shell notification inbox (`coop`)
+
+One inbox for every "something wants your attention" a shell used to print on its own. Public relic
+(`~/.config/relics/coop/`, Rust). It replaced three independent startup banners whose staleness
+policy lived in three different places, one of them copy-pasted into both shell languages.
+
+**Producers declare a condition; coop evaluates it.** Nothing sends a notification and nothing
+retracts one — a thing that has to remember to retract eventually forgets. So a notice retires
+itself: `up`'s is a predicate over the timestamp `up` already writes, which makes running `up` the
+dismissal. Neither migrated producer needed code written for it, and `up` still has none.
+
+Declarations are drop-in files at `~/.config/coop/sources.d/*.toml`, tracked, so they travel; a
+producer that is absent on a machine goes dormant rather than failing. A notice is a
+`relic_core::finding::Finding`, so every binary already answering `doctor --format json` is already
+a well-formed producer, and there is no second protocol to learn.
+
+**Two surfaces, deliberately different in kind.** The **card** is edge-triggered — drawn on a
+shell's first prompt and thereafter only when the outstanding set moves. The **badge** is an
+oh-my-posh segment over `$COOP_BADGE`, level-triggered and therefore absent almost always. Both come
+from one `coop tick` per prompt: the card on stdout, the count in a file the hook reads with a shell
+builtin. Measured at 2.9 ms, against `ske prompt`'s 10.8 ms.
+
+Wired in `shell/interactive.d/050-prompt.{zsh,bash}` and `fish/conf.d/050-prompt.fish`, beside
+`_ske_window` and **before** the oh-my-posh init — that order is load-bearing in zsh and bash.
+Those hooks now save and restore the exit status, which `_ske_window` did not: oh-my-posh reads
+`$?` at the top of its own hook, so an unguarded predecessor made every prompt render as a success.
+fish needs no guard, which is measured rather than assumed.
+
+**Empty is the intended state.** Every notice is a nag built to be dismissed today, so a `Note`
+severity never reaches the card and a stat declaration without a fix is refused outright. `coop
+doctor` reports a notice still standing after a fortnight as furniture, whoever declared it — the
+inbox polices its own emptiness. There is no explicit dismissal; identity, content digest and
+first-seen are plumbed for one.
+
+**The binary is the single source of truth for its own surface** — reference in `coop --help` and
+`coop help`, doctrine in `coop guide`. Do not restate either here; the relic's `CLAUDE.md` carries
+the constraints and the measured figures.
 
 ### Touch ID window (`ske`)
 

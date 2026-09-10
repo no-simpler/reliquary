@@ -1,0 +1,12 @@
+# Manifest for the `coop` CLI — Stage-2 in-house relic.
+# See ~/.config/reliquary/GRADUATION.md for the full schema.
+
+[relic]
+name = "coop"
+description = "Shell notification inbox: what wants your attention, drawn once and gone when acted on."
+runtime = "rust"
+min-runtime-version = "1.89" # floor, never a pin — edition 2024
+brew-deps = []               # rustup owns the toolchain
+external-deps = [
+    "whatever a source declares in ~/.config/coop/sources.d; an absent one goes dormant, never fatal",
+]

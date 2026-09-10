@@ -312,6 +312,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "coop"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "camino",
+ "clap",
+ "clap_complete",
+ "crossterm",
+ "fs-err",
+ "jiff",
+ "predicates",
+ "relic-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

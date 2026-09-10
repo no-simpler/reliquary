@@ -476,16 +476,15 @@ impl Verifiers {
     }
 }
 
-/// What the reminder reads. Derived, disposable, and deliberately nameless: a
-/// banner in every new terminal that says which secrets you hold is a standing
-/// disclosure for no benefit.
+/// What the reminder reads. Derived and disposable: the schedule projected down
+/// to the one question a nag asks, so the reminder never opens the log.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Cache {
     /// Schema, so a stale cache from an older binary is ignored rather than
     /// misread.
     pub v: u32,
-    /// The day each active slug next falls due. Counts only; no names.
+    /// The day each active slug next falls due.
     pub due: Vec<Date>,
 }
 

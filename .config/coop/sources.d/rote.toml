@@ -1,0 +1,16 @@
+# The drill nag. `rote banner` is the reminder, not `rote doctor`: the banner
+# fires the day a drill comes due, doctor waits out a grace, and `assay` already
+# collects the latter.
+#
+# The keys are what keep this off a timer. Its cache is the only thing the count
+# is derived from, and 04:00 is rote's own day rollover, so between those two
+# the answer cannot have changed. `refresh` is only a backstop.
+
+[source]
+id = "rote"
+
+[source.ask]
+run = ["rote", "banner", "--format", "json"]
+kind = "findings"
+refresh = "6h"
+keys = ["~/.local/state/rote/cache.json", "day:04:00"]

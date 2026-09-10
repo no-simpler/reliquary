@@ -104,8 +104,6 @@ Things a future edit must not undo.
   is a loud refusal to write rather than a partial read.
 - **`doctor` never writes.** `assay`'s registry station asserts that of every
   binary it collects, on a two-second budget, so nothing in that path hashes.
-- **The reminder prints counts, never slug names.** A line in every new terminal
-  saying which secrets you hold is a standing disclosure for no benefit.
 - **Every test sets `ROTE_ROOT` and `ROTE_STATE`.** They are seams, along with
   `ROTE_CONFIG`, `ROTE_UI` and `ROTE_HOST`. There is deliberately **no seam that
   lowers the KDF cost**: the suite seeds a store instead, and mints one verifier

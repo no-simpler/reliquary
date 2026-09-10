@@ -2,7 +2,7 @@
 
 use anyhow::{Context as _, Result, bail};
 use jiff::civil::Date;
-use relic_core::finding::Grade;
+use relic_core::finding::{FixHint, Grade, Report, StationId, Summary};
 use relic_core::ui::Format;
 
 use crate::cli::{
@@ -1064,15 +1064,32 @@ fn run_doctor(ctx: &Context) -> Result<u8> {
 fn banner(ctx: &Context) -> Result<u8> {
     // Decoration, and decoration fails silent: a reminder that cannot read its
     // own cache prints nothing rather than a diagnostic in every new shell.
-    let Some(cache) = Cache::load(&ctx.paths.cache()) else {
+    let due = Cache::load(&ctx.paths.cache()).map_or(0, |cache| cache.due_by(ctx.today()));
+
+    // The nag is not the health check. This fires the day a drill comes due;
+    // doctor waits out a grace, because a drill taken a day late is a drill
+    // taken. coop reads this one, and assay's registry station reads that one.
+    if ctx.format == Format::Json {
+        let station = StationId::from_static("rote");
+        let findings = if due == 0 {
+            Vec::new()
+        } else {
+            vec![
+                station
+                    .soft(Summary::lossy(&format!(
+                        "{} due",
+                        relic_core::fmt::plural(due, "drill", "drills")
+                    )))
+                    .fixed_by(FixHint::lossy("rote")),
+            ]
+        };
+        println!("{}", json::document(&Report::ran(station, findings))?);
         return Ok(CLEAN);
-    };
-    let due = cache.due_by(ctx.today());
+    }
+
     if due == 0 {
         return Ok(CLEAN);
     }
-    // Counts, never names. A line in every terminal saying which secrets you
-    // hold is a standing disclosure for no benefit.
     let text = format!(
         "rote: {} due.",
         relic_core::fmt::plural(due, "drill", "drills")

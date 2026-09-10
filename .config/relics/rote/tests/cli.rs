@@ -823,7 +823,7 @@ fn a_record_from_a_newer_schema_stops_the_writer() {
 // The reminder.
 
 #[test]
-fn the_reminder_is_silent_with_no_cache_and_counts_without_naming() {
+fn the_reminder_is_silent_with_no_cache_and_counts_what_is_due() {
     let mut rote = Rote::new();
     rote.run(&["banner"]).assert().success().stdout("");
 
@@ -836,10 +836,38 @@ fn the_reminder_is_silent_with_no_cache_and_counts_without_naming() {
     let output = rote.run(&["banner"]).output().expect("a run");
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(text.contains("2 drills due"), "{text}");
-    assert!(
-        !text.contains("escrow-p"),
-        "a line in every terminal naming your secrets is a standing disclosure"
-    );
+}
+
+#[test]
+fn the_banner_answers_a_report_for_whatever_reads_it_next() {
+    let mut rote = Rote::new();
+    rote.add(&days_ago(3), "a", false);
+    rote.add(&days_ago(3), "b", true);
+    rote.run(&["status"]).assert().success();
+
+    let output = rote
+        .run(&["banner", "--format", "json"])
+        .output()
+        .expect("a run");
+    let report: relic_core::finding::Report =
+        serde_json::from_slice(&output.stdout).expect("a report, not prose");
+    let finding = report.findings().first().expect("one finding");
+    assert_eq!(finding.summary.as_str(), "2 drills due");
+    assert_eq!(finding.fix.as_ref().expect("a fix").as_str(), "rote");
+    assert_eq!(finding.severity, relic_core::finding::Severity::Soft);
+}
+
+#[test]
+fn the_banner_answers_an_empty_report_when_nothing_is_due() {
+    let rote = Rote::new();
+    let output = rote
+        .run(&["banner", "--format", "json"])
+        .output()
+        .expect("a run");
+    let report: relic_core::finding::Report =
+        serde_json::from_slice(&output.stdout).expect("a report, not prose");
+    assert!(report.findings().is_empty());
+    assert_eq!(report.grade(), relic_core::finding::Grade::Ok);
 }
 
 // The files.

@@ -21,6 +21,7 @@ resolver = "3"
 members = [
     "assay",
     "compose-gc",
+    "coop",
     "crates/*",
     "decruft",
     "docket",

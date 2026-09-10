@@ -1,0 +1,43 @@
+[package]
+name = "coop"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Shell notification inbox: what wants your attention, drawn once and gone when acted on."
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "coop"
+path = "src/main.rs"
+
+[dependencies]
+relic-core = { path = "../crates/relic-core" }
+
+anyhow.workspace = true
+camino.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+fs-err.workspace = true
+jiff.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Terminal width, and nothing else. The card is drawn by hand: a table library
+# would own the borders, and the borders are the design.
+crossterm = "0.29.0"
+# The declaration format. Not a workspace dependency — see the table's comment
+# there, and the drift already recorded against it.
+toml = "1.1.4"
+
+# Integration tests are their own crate, so what the binary depends on is not
+# in scope for them.
+[dev-dependencies]
+assert_cmd.workspace = true
+jiff.workspace = true
+predicates.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
