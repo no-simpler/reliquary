@@ -10,7 +10,7 @@ use crate::cli::{
     RetireArgs, ScheduleArgs,
 };
 use crate::config::Config;
-use crate::drill::{self, Mode, Screen as _, screen, term};
+use crate::drill::{self, Mode, screen};
 use crate::ladder::{self, Class, Gate, Standing};
 use crate::log::{
     Added, Attempted, Digest, Event, Line, Outcome, Probed, Record, Rekeyed, Retired, SCHEMA,
@@ -22,6 +22,7 @@ use crate::secret::Secret;
 use crate::slug::Slug;
 use crate::stats::{Stats, Trend};
 use crate::store::{Cache, Clock, Env, Journal, Paths, Store, Verifiers};
+use crate::tui::{self, Screen as _, card, term};
 use crate::verifier::Verifier;
 
 /// Everything went as it should, or there was nothing to do.
@@ -260,7 +261,11 @@ fn sitting(ctx: &Context, mode: Mode, only: &[Slug], aided: bool) -> Result<u8> 
 
     let after = State::replay(store.journal().lines());
     let notes = closing_notes(&plan, &after);
-    console.paint(&screen::Frame::done(today, &taken.rows, &taken, &notes))?;
+    let closing = screen::card(
+        &screen::Frame::done(today, &taken.rows, &taken, &notes),
+        ctx.color,
+    );
+    console.paint(&closing)?;
     console.hold()?;
     drop(console);
 
@@ -369,19 +374,43 @@ fn add(ctx: &Context, args: &AddArgs) -> Result<u8> {
             args.slug
         );
     }
-    let secret = if args.stdin {
-        piped(1)?.into_iter().next().unwrap_or_else(Secret::new)
+    let today = ctx.today();
+    let mut dialog = if args.stdin {
+        None
     } else {
-        let (first_prompt, again_prompt) = paired("secret");
-        let first = ask(&first_prompt)?;
-        let again = ask(&again_prompt)?;
-        if !first.same_as(&again) {
-            bail!("the two entries differ, so nothing was enrolled");
+        Some(open(ctx.color)?)
+    };
+    let secret = match dialog.as_mut() {
+        None => piped(1)?.into_iter().next().unwrap_or_else(Secret::new),
+        Some(console) => {
+            let heading = format!("enrol {}", args.slug);
+            let Some(first) = typed(
+                console,
+                today,
+                &heading,
+                "typed twice, and kept only as a verifier",
+            )?
+            else {
+                return abandoned(console, today);
+            };
+            let Some(again) = typed(console, today, &heading, "again")? else {
+                return abandoned(console, today);
+            };
+            if !first.same_as(&again) {
+                return refused(
+                    console,
+                    today,
+                    "the two entries differ, so nothing was enrolled",
+                );
+            }
+            first
         }
-        first
     };
     if secret.is_empty() {
-        bail!("an empty secret is not a secret");
+        return match dialog.as_mut() {
+            Some(console) => refused(console, today, "an empty secret is not a secret"),
+            None => bail!("an empty secret is not a secret"),
+        };
     }
     let verifier = make_verifier(&secret)?;
     drop(secret);
@@ -390,7 +419,6 @@ fn add(ctx: &Context, args: &AddArgs) -> Result<u8> {
     verifiers.set(&args.slug, &verifier);
     verifiers.save(&ctx.paths.verifiers())?;
 
-    let today = ctx.today();
     store.append(&record(
         ctx,
         today,
@@ -402,8 +430,14 @@ fn add(ctx: &Context, args: &AddArgs) -> Result<u8> {
     ))?;
     let after = State::replay(store.journal().lines());
     write_cache(ctx, &after, today)?;
-    if !ctx.quiet {
-        println!("{} enrolled · first review tomorrow", args.slug);
+    let said = format!("{} enrolled · first review tomorrow", args.slug);
+    match dialog.as_mut() {
+        Some(console) => tui::outcome(console, today, &said, card::GREEN)?,
+        None => {
+            if !ctx.quiet {
+                println!("{said}");
+            }
+        }
     }
     Ok(CLEAN)
 }
@@ -415,6 +449,13 @@ fn rekey(ctx: &Context, args: &RekeyArgs) -> Result<u8> {
         bail!("there is no slug called {}", args.slug);
     };
     let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
+    let today = ctx.today();
+    let heading = format!("rekey {}", args.slug);
+    let mut dialog = if args.stdin {
+        None
+    } else {
+        Some(open(ctx.color)?)
+    };
 
     let mut piped_secrets = if args.stdin {
         piped(if args.force { 1 } else { 2 })?.into_iter()
@@ -423,38 +464,46 @@ fn rekey(ctx: &Context, args: &RekeyArgs) -> Result<u8> {
     };
 
     if !args.force {
-        // Proving the current secret is what stops a verifier being replaced by
-        // one somebody else knows: without it, "I have memorised it" could be
-        // made true by editing a file.
-        let Some(current) = verifiers.get(&args.slug)? else {
-            bail!(
-                "there is no verifier for {} on this machine, so there is nothing to prove against. Use --force to re-enrol",
-                args.slug
-            );
-        };
-        let offered = if let Some(secret) = piped_secrets.next() {
-            secret
-        } else {
-            ask("current secret: ")?
-        };
-        if !current.accepts(&offered)? {
-            bail!("that is not the current secret, so nothing was replaced");
+        let proved = prove(
+            args,
+            &verifiers,
+            piped_secrets.next(),
+            &mut dialog,
+            today,
+            &heading,
+        )?;
+        if let Some(code) = proved {
+            return Ok(code);
         }
     }
 
     let secret = if let Some(secret) = piped_secrets.next() {
         secret
     } else {
-        let (first_prompt, again_prompt) = paired("new secret");
-        let first = ask(&first_prompt)?;
-        let again = ask(&again_prompt)?;
-        if !first.same_as(&again) {
-            bail!("the two entries differ, so nothing was replaced");
+        {
+            let console = dialog.get_or_insert(open(ctx.color)?);
+            let Some(first) = typed(console, today, &heading, "the new secret, typed twice")?
+            else {
+                return abandoned(console, today);
+            };
+            let Some(again) = typed(console, today, &heading, "again")? else {
+                return abandoned(console, today);
+            };
+            if !first.same_as(&again) {
+                return refused(
+                    console,
+                    today,
+                    "the two entries differ, so nothing was replaced",
+                );
+            }
+            first
         }
-        first
     };
     if secret.is_empty() {
-        bail!("an empty secret is not a secret");
+        return match dialog.as_mut() {
+            Some(console) => refused(console, today, "an empty secret is not a secret"),
+            None => bail!("an empty secret is not a secret"),
+        };
     }
     let verifier = make_verifier(&secret)?;
     drop(secret);
@@ -463,7 +512,6 @@ fn rekey(ctx: &Context, args: &RekeyArgs) -> Result<u8> {
     verifiers.set(&args.slug, &verifier);
     verifiers.save(&ctx.paths.verifiers())?;
 
-    let today = ctx.today();
     store.append(&record(
         ctx,
         today,
@@ -475,11 +523,17 @@ fn rekey(ctx: &Context, args: &RekeyArgs) -> Result<u8> {
     ))?;
     let after = State::replay(store.journal().lines());
     write_cache(ctx, &after, today)?;
-    if !ctx.quiet {
-        println!(
-            "{} rekeyed to version {version} · the ladder starts over",
-            args.slug
-        );
+    let said = format!(
+        "{} rekeyed to version {version} · the ladder starts over",
+        args.slug
+    );
+    match dialog.as_mut() {
+        Some(console) => tui::outcome(console, today, &said, card::GREEN)?,
+        None => {
+            if !ctx.quiet {
+                println!("{said}");
+            }
+        }
     }
     Ok(CLEAN)
 }
@@ -556,21 +610,94 @@ fn probe(ctx: &Context, args: &ProbeArgs) -> Result<u8> {
     Ok(CLEAN)
 }
 
-fn ask(prompt: &str) -> Result<Secret> {
-    term::ask(prompt)?.context("nothing was entered")
+/// Prove the current secret before a rotation replaces it.
+///
+/// Without it a verifier could be replaced by one somebody else knows, and the
+/// reading would still say memorised. `Some(code)` means the rotation stopped
+/// here and that is the status to leave on.
+fn prove(
+    args: &RekeyArgs,
+    verifiers: &Verifiers,
+    piped: Option<Secret>,
+    dialog: &mut Option<term::Terminal>,
+    today: Date,
+    heading: &str,
+) -> Result<Option<u8>> {
+    // A rotation proves the current secret before accepting a new one, so a
+    // verifier cannot be replaced by one somebody else knows: without it, "I
+    // have memorised it" could be made true by editing a file.
+    let Some(current) = verifiers.get(&args.slug)? else {
+        bail!(
+            "there is no verifier for {} on this machine, so there is nothing to prove against. Use --force to re-enrol",
+            args.slug
+        );
+    };
+    let offered = if let Some(secret) = piped {
+        secret
+    } else {
+        let Some(console) = dialog.as_mut() else {
+            bail!("--stdin wants the current secret first, then the new one");
+        };
+        let Some(secret) = typed(
+            console,
+            today,
+            heading,
+            "prove the current secret before it is replaced",
+        )?
+        else {
+            return abandoned(console, today).map(Some);
+        };
+        secret
+    };
+    if current.accepts(&offered)? {
+        return Ok(None);
+    }
+    let said = "that is not the current secret, so nothing was replaced";
+    match dialog.as_mut() {
+        Some(console) => refused(console, today, said).map(Some),
+        None => bail!("{said}"),
+    }
 }
 
-/// The word the confirmation prompt asks with.
-const AGAIN: &str = "again";
+/// Open the screen a secret is typed on.
+fn open(color: bool) -> Result<term::Terminal> {
+    term::Terminal::enter(color)
+}
 
-/// A prompt and its confirmation, the second right-aligned under the first.
+/// Ask for one secret. `None` means the dialog was abandoned rather than
+/// answered.
+fn typed(
+    console: &mut term::Terminal,
+    today: Date,
+    heading: &str,
+    intention: &str,
+) -> Result<Option<Secret>> {
+    let prompt = tui::Ask { heading, intention };
+    match tui::ask(console, today, &prompt)? {
+        tui::Typed::Submitted(entry) => Ok(Some(entry.secret)),
+        tui::Typed::Skipped | tui::Typed::Aborted => Ok(None),
+    }
+}
+
+/// Close a dialog that was walked away from.
+fn abandoned(console: &mut term::Terminal, today: Date) -> Result<u8> {
+    tui::outcome(
+        console,
+        today,
+        "abandoned · nothing was changed",
+        card::YELLOW,
+    )?;
+    Ok(INCOMPLETE)
+}
+
+/// Close a dialog on an outcome that is a refusal.
 ///
-/// Derived rather than typed: hand-counted padding drifts the moment a label
-/// changes, and the drift is invisible until someone reads the two lines
-/// together on a terminal that has had its line discipline taken away.
-fn paired(label: &str) -> (String, String) {
-    let width = label.chars().count().max(AGAIN.chars().count());
-    (format!("{label:>width$}: "), format!("{AGAIN:>width$}: "))
+/// Said on the card and held, rather than raised: the screen is erased on the
+/// way out, so an error printed after it is an error printed to a person who has
+/// already been told nothing.
+fn refused(console: &mut term::Terminal, today: Date, text: &str) -> Result<u8> {
+    tui::outcome(console, today, text, card::RED)?;
+    Ok(INCOMPLETE)
 }
 
 /// Read secrets from a pipe, one per line.
@@ -1115,34 +1242,4 @@ fn banner(ctx: &Context) -> Result<u8> {
         println!("==> {text}");
     }
     Ok(CLEAN)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::paired;
-
-    /// The colons carry the alignment, so that is what this reads.
-    fn colon(prompt: &str) -> usize {
-        prompt.find(':').expect("a prompt asks with a colon")
-    }
-
-    #[test]
-    fn a_confirmation_sits_under_the_prompt_it_confirms() {
-        for label in ["secret", "new secret"] {
-            let (first, again) = paired(label);
-            assert_eq!(
-                colon(&first),
-                colon(&again),
-                "{label}: {first:?} and {again:?} do not line up"
-            );
-            assert_eq!(first.len(), again.len());
-        }
-    }
-
-    #[test]
-    fn a_label_shorter_than_the_confirmation_is_the_one_that_gets_padded() {
-        let (first, again) = paired("pin");
-        assert_eq!(first, "  pin: ");
-        assert_eq!(again, "again: ");
-    }
 }

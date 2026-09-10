@@ -1,17 +1,18 @@
-//! The card, as a value.
+//! What the drill puts on a card.
 //!
-//! Rendering is a pure function from a frame to lines, so the whole visual
-//! design is under snapshot test and the terminal adapter only has to paint what
-//! it is handed. Colour is resolved once, by the caller, and passed in.
+//! Building one is a pure function from a frame to a card, so the whole visual
+//! design is under snapshot test and the terminal adapter only has to place what
+//! it is handed. The box, the palette and the entry line are the shared dialog's
+//! and live in `tui::card`; what is here is the drill's own layout.
 
 use jiff::civil::Date;
 
 use super::{Item, Sitting};
 use crate::ladder::{Class, Step};
 use crate::slug::Slug;
-
-/// Narrowest card. Wider than this only when the content asks for it.
-const MIN_WIDTH: usize = 52;
+use crate::tui::card::{
+    BOLD, CONTENT, Card, DIM, GREEN, Piece, RED, Reveal, YELLOW, entry_line, join,
+};
 
 /// Where one slug has got to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,56 +135,16 @@ impl<'a> Frame<'a> {
     }
 }
 
-const RESET: &str = "\x1b[0m";
-const BOLD: &str = "\x1b[1m";
-const DIM: &str = "\x1b[2m";
-const RED: &str = "\x1b[31m";
-const GREEN: &str = "\x1b[32m";
-const YELLOW: &str = "\x1b[33m";
-
-/// A piece of text, and the same text with colour on it.
-struct Piece {
-    plain: String,
-    styled: String,
-}
-
-impl Piece {
-    fn plain(text: impl Into<String>) -> Self {
-        let text = text.into();
-        Self {
-            styled: text.clone(),
-            plain: text,
-        }
-    }
-
-    fn painted(text: impl Into<String>, code: &str, color: bool) -> Self {
-        let text = text.into();
-        let styled = if color {
-            format!("{code}{text}{RESET}")
-        } else {
-            text.clone()
-        };
-        Self {
-            plain: text,
-            styled,
-        }
-    }
-
-    fn width(&self) -> usize {
-        self.plain.chars().count()
-    }
-}
-
-fn join(pieces: &[Piece]) -> Piece {
-    Piece {
-        plain: pieces.iter().map(|p| p.plain.as_str()).collect(),
-        styled: pieces.iter().map(|p| p.styled.as_str()).collect(),
-    }
-}
-
 /// Draw the card.
-pub fn render(frame: &Frame<'_>, color: bool) -> Vec<String> {
-    let mut body: Vec<Piece> = Vec::new();
+/// Lay the frame out as a card.
+pub fn card(frame: &Frame<'_>, color: bool) -> Card {
+    let title = if frame.sitting.is_some() {
+        "done"
+    } else {
+        "rote"
+    };
+    let stamp = frame.today.strftime("%a %-d %b").to_string();
+    let mut card = Card::new(title, stamp, color);
     let names = frame
         .rows
         .iter()
@@ -192,87 +153,73 @@ pub fn render(frame: &Frame<'_>, color: bool) -> Vec<String> {
         .unwrap_or(0);
 
     if frame.rows.is_empty() {
-        body.push(Piece::painted("nothing to drill", DIM, color));
+        card.say("nothing to drill", DIM);
     }
 
     for (index, row) in frame.rows.iter().enumerate() {
-        body.push(row_line(row, names, color));
+        for piece in row_lines(row, names, color) {
+            card.line(piece);
+        }
         if frame.active == Some(index) {
             if let Some(text) = intention(row) {
-                body.push(Piece::painted(text, DIM, color));
+                card.say(text, DIM);
             }
-            body.push(prompt_line(row, color));
+            card.line(prompt_line(row, color));
         }
     }
 
     match frame.notice {
         Some(Notice::PasteRefused) => {
-            body.push(Piece::plain(""));
-            body.push(Piece::painted(
-                "a paste was refused — the drill has to be typed",
-                YELLOW,
-                color,
-            ));
+            card.gap()
+                .say("a paste was refused — the drill has to be typed", YELLOW);
         }
         Some(Notice::Choose { retry }) => {
-            body.push(Piece::plain(""));
-            let text = if retry {
-                "[enter] try again from memory   [l] look it up, then type it   [s] move on"
-            } else {
-                "[l] look it up, then type it   [enter] move on"
-            };
-            body.push(Piece::painted(text, YELLOW, color));
+            card.gap();
+            if retry {
+                card.say("[enter]  try again from memory", YELLOW);
+            }
+            card.say("[l]      look it up, then type it", YELLOW);
+            card.say(
+                if retry {
+                    "[s]      move on"
+                } else {
+                    "[enter]  move on"
+                },
+                YELLOW,
+            );
         }
         None => {}
     }
 
     if let Some(sitting) = frame.sitting {
-        body.push(Piece::plain(""));
-        body.push(Piece::painted(tally(sitting), BOLD, color));
+        card.gap().say(tally(sitting), BOLD);
         for note in frame.notes {
-            body.push(Piece::painted(note.clone(), DIM, color));
+            card.say(note.clone(), DIM);
         }
-        body.push(Piece::plain(""));
-        body.push(Piece::painted("press any key", DIM, color));
+        card.gap().say("press any key", DIM);
     }
-
-    let title = if frame.sitting.is_some() {
-        "done"
-    } else {
-        "rote"
-    };
-    let stamp = frame.today.strftime("%a %-d %b").to_string();
-    let width = body
-        .iter()
-        .map(Piece::width)
-        .max()
-        .unwrap_or(0)
-        .saturating_add(8)
-        .max(MIN_WIDTH)
-        .max(title.chars().count() + stamp.chars().count() + 8);
-
-    let mut lines = Vec::with_capacity(body.len().saturating_add(4));
-    lines.push(top(title, &stamp, width, color));
-    lines.push(edge("", 0, width, color));
-    for piece in &body {
-        lines.push(edge(&piece.styled, piece.width(), width, color));
-    }
-    lines.push(edge("", 0, width, color));
-    lines.push(bottom(width, color));
-    lines
+    card
 }
 
-fn row_line(row: &Row, names: usize, color: bool) -> Piece {
-    let name = format!(
-        "{:<width$}",
-        row.slug.as_str(),
-        width = names.saturating_add(2)
-    );
-    let mut pieces = vec![Piece::painted(name, BOLD, color)];
-    pieces.push(Piece::painted(chip(row), DIM, color));
-    pieces.push(Piece::plain("  "));
-    pieces.push(state_piece(row, color));
-    join(&pieces)
+/// The row, and the outcome beside it or under it.
+///
+/// A sentence-shaped outcome does not fit beside a name and a chip, so it takes
+/// the line below rather than pushing the box wider than every other card in the
+/// binary.
+fn row_lines(row: &Row, names: usize, color: bool) -> Vec<Piece> {
+    let indent = names.saturating_add(2);
+    let head = join(&[
+        Piece::painted(format!("{:<indent$}", row.slug.as_str()), BOLD, color),
+        Piece::painted(chip(row), DIM, color),
+    ]);
+    let state = state_piece(row, color);
+    if state.is_blank() {
+        return vec![head];
+    }
+    if head.width().saturating_add(2).saturating_add(state.width()) <= CONTENT {
+        return vec![join(&[head, Piece::plain("  "), state])];
+    }
+    vec![head, join(&[Piece::plain(" ".repeat(indent)), state])]
 }
 
 fn chip(row: &Row) -> String {
@@ -366,7 +313,7 @@ fn state_piece(row: &Row, color: bool) -> Piece {
 }
 
 fn prompt_line(row: &Row, color: bool) -> Piece {
-    let attempt = match row.state {
+    let hint = match row.state {
         RowState::Active { attempt, left } if attempt > 1 => {
             format!("   try {attempt}, {left} after this")
         }
@@ -379,11 +326,10 @@ fn prompt_line(row: &Row, color: bool) -> Piece {
         | RowState::Aborted
         | RowState::Unverifiable => String::new(),
     };
-    join(&[
-        Piece::painted("▸ ", DIM, color),
-        Piece::painted("▉", BOLD, color),
-        Piece::painted(attempt, DIM, color),
-    ])
+    // The drill is blind, so there is nothing typed for the entry line to know
+    // about. It is asked for anyway, through the one function every prompt in
+    // the binary draws itself with.
+    entry_line(0, Reveal::Blind, &hint, color)
 }
 
 fn seconds(total_ms: Option<u64>) -> String {
@@ -437,47 +383,15 @@ fn tally(sitting: &Sitting) -> String {
     parts.join(" · ")
 }
 
-fn top(title: &str, stamp: &str, width: usize, color: bool) -> String {
-    let left = format!("┌─ {title} ");
-    let right = format!(" {stamp} ─┐");
-    let fill = width
-        .saturating_sub(left.chars().count())
-        .saturating_sub(right.chars().count());
-    let line = format!("{left}{}{right}", "─".repeat(fill));
-    paint(&line, DIM, color)
-}
-
-fn bottom(width: usize, color: bool) -> String {
-    let line = format!("└{}┘", "─".repeat(width.saturating_sub(2)));
-    paint(&line, DIM, color)
-}
-
-fn edge(content: &str, visible: usize, width: usize, color: bool) -> String {
-    let pad = width.saturating_sub(visible).saturating_sub(8);
-    format!(
-        "{}   {content}{}   {}",
-        paint("│", DIM, color),
-        " ".repeat(pad),
-        paint("│", DIM, color)
-    )
-}
-
-fn paint(text: &str, code: &str, color: bool) -> String {
-    if color {
-        format!("{code}{text}{RESET}")
-    } else {
-        text.to_owned()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use jiff::civil::date;
 
-    use super::{Frame, Notice, Row, RowState, render};
+    use super::{Frame, Notice, Row, RowState, card};
     use crate::drill::{Sitting, Taken};
     use crate::ladder::{Class, Step};
     use crate::log::Outcome;
+    use crate::tui::card::WIDTH;
 
     fn row(name: &str, class: Class, state: RowState) -> Row {
         Row {
@@ -489,24 +403,63 @@ mod tests {
         }
     }
 
-    fn width_of(lines: &[String]) -> usize {
-        lines
-            .iter()
-            .map(|line| line.chars().count())
-            .max()
-            .unwrap_or(0)
+    /// Every state a row can reach, so the layout is checked against the
+    /// content it actually has to hold rather than against a happy one.
+    fn every_state() -> Vec<RowState> {
+        vec![
+            RowState::Pending,
+            RowState::Active {
+                attempt: 3,
+                left: 0,
+            },
+            RowState::Checking,
+            RowState::Passed {
+                total_ms: Some(12_345),
+                retries: 2,
+            },
+            RowState::Failed {
+                attempt: 2,
+                left: 1,
+                scored: true,
+            },
+            RowState::Skipped,
+            RowState::Aborted,
+            RowState::Unverifiable,
+        ]
     }
 
     #[test]
-    fn every_line_of_a_card_is_the_same_width() {
-        let rows = vec![
-            row("escrow-p", Class::Review, RowState::Pending),
-            row("flagship-login", Class::Practice, RowState::Pending),
-        ];
-        let lines = render(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
-        let width = width_of(&lines);
-        for line in &lines {
-            assert_eq!(line.chars().count(), width, "{line}");
+    fn every_line_of_every_card_is_exactly_the_card_width() {
+        for state in every_state() {
+            for class in [Class::Review, Class::Practice, Class::Probe, Class::Aided] {
+                let rows = vec![
+                    row("escrow-p", class, state),
+                    row("flagship-login", class, state),
+                ];
+                let mut frame = Frame::running(date(2026, 9, 10), &rows, Some(0));
+                for notice in [
+                    None,
+                    Some(Notice::PasteRefused),
+                    Some(Notice::Choose { retry: true }),
+                    Some(Notice::Choose { retry: false }),
+                ] {
+                    frame.notice = notice;
+                    for line in card(&frame, false).render() {
+                        assert_eq!(line.chars().count(), WIDTH, "{state:?} {class:?} {line}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn no_real_content_ever_reaches_the_truncation_net() {
+        for state in every_state() {
+            let rows = vec![row("flagship-login", Class::Aided, state)];
+            let mut frame = Frame::running(date(2026, 9, 10), &rows, Some(0));
+            frame.notice = Some(Notice::Choose { retry: true });
+            let text = card(&frame, false).render().join("\n");
+            assert!(!text.contains('…'), "{state:?} was cut: {text}");
         }
     }
 
@@ -520,7 +473,7 @@ mod tests {
                 left: 2,
             },
         )];
-        let lines = render(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
+        let lines = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false).render();
         let text = lines.join("\n");
         assert!(text.contains("from memory only"), "{text}");
         assert!(text.contains("empty entry if there is nothing"), "{text}");
@@ -536,7 +489,7 @@ mod tests {
                 left: 1,
             },
         )];
-        let lines = render(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
+        let lines = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false).render();
         assert!(!lines.join("\n").contains("from memory only"));
     }
 
@@ -550,7 +503,7 @@ mod tests {
                 left: 0,
             },
         )];
-        let lines = render(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
+        let lines = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false).render();
         let text = lines.join("\n");
         assert!(text.contains("look it up now"), "{text}");
         assert!(text.contains("aided · not a reading"), "{text}");
@@ -569,13 +522,15 @@ mod tests {
         )];
         let mut frame = Frame::running(date(2026, 9, 10), &rows, Some(0));
         frame.notice = Some(Notice::Choose { retry: false });
-        let text = render(&frame, false).join("\n");
-        assert!(text.contains("[l] look it up"), "{text}");
+        let text = card(&frame, false).render().join("\n");
+        assert!(text.contains("look it up, then type it"), "{text}");
+        assert!(text.contains("[enter]  move on"), "{text}");
         assert!(!text.contains("try again from memory"), "{text}");
 
         frame.notice = Some(Notice::Choose { retry: true });
         assert!(
-            render(&frame, false)
+            card(&frame, false)
+                .render()
                 .join("\n")
                 .contains("try again from memory")
         );
@@ -592,7 +547,9 @@ mod tests {
                 scored: false,
             },
         )];
-        let text = render(&Frame::running(date(2026, 9, 10), &rows, None), false).join("\n");
+        let text = card(&Frame::running(date(2026, 9, 10), &rows, None), false)
+            .render()
+            .join("\n");
         assert!(
             text.contains("the vault and the verifier disagree"),
             "{text}"
@@ -610,8 +567,8 @@ mod tests {
             },
         )];
         let frame = Frame::running(date(2026, 9, 10), &rows, None);
-        let plain = render(&frame, false);
-        let painted = render(&frame, true);
+        let plain = card(&frame, false).render();
+        let painted = card(&frame, true).render();
         assert_eq!(plain.len(), painted.len());
         assert!(painted.iter().any(|line| line.contains("\x1b[")));
         assert!(!plain.iter().any(|line| line.contains("\x1b[")));
@@ -627,7 +584,7 @@ mod tests {
                 left: 2,
             },
         )];
-        let lines = render(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
+        let lines = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false).render();
         assert!(lines.iter().any(|line| line.contains("▸ ▉")), "{lines:?}");
     }
 
@@ -641,7 +598,7 @@ mod tests {
                 left: 1,
             },
         )];
-        let lines = render(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false);
+        let lines = card(&Frame::running(date(2026, 9, 10), &rows, Some(0)), false).render();
         assert!(lines.iter().any(|line| line.contains("try 2")));
     }
 
@@ -650,14 +607,14 @@ mod tests {
         let rows = vec![row("a", Class::Review, RowState::Pending)];
         let mut frame = Frame::running(date(2026, 9, 10), &rows, Some(0));
         frame.notice = Some(Notice::PasteRefused);
-        let lines = render(&frame, false);
+        let lines = card(&frame, false).render();
         assert!(lines.iter().any(|line| line.contains("paste was refused")));
     }
 
     #[test]
     fn a_slug_with_no_verifier_says_what_to_do_about_it() {
         let rows = vec![row("a", Class::Review, RowState::Unverifiable)];
-        let lines = render(&Frame::running(date(2026, 9, 10), &rows, None), false);
+        let lines = card(&Frame::running(date(2026, 9, 10), &rows, None), false).render();
         assert!(lines.iter().any(|line| line.contains("re-enrol")));
     }
 
@@ -703,10 +660,11 @@ mod tests {
             rows: Vec::new(),
         };
         let notes = vec!["escrow-p  cutover ready — 4 passes at 7d".to_owned()];
-        let lines = render(
+        let lines = card(
             &Frame::done(date(2026, 9, 10), &rows, &sitting, &notes),
             false,
-        );
+        )
+        .render();
         let text = lines.join("\n");
         assert!(text.contains("done"));
         assert!(text.contains("1 review"));
@@ -718,7 +676,7 @@ mod tests {
 
     #[test]
     fn an_empty_sitting_says_so_rather_than_drawing_an_empty_box() {
-        let lines = render(&Frame::running(date(2026, 9, 10), &[], None), false);
+        let lines = card(&Frame::running(date(2026, 9, 10), &[], None), false).render();
         assert!(lines.iter().any(|line| line.contains("nothing to drill")));
     }
 
@@ -732,7 +690,7 @@ mod tests {
                 retries: 0,
             },
         )];
-        let lines = render(&Frame::running(date(2026, 9, 10), &rows, None), false);
+        let lines = card(&Frame::running(date(2026, 9, 10), &rows, None), false).render();
         assert!(lines.iter().any(|line| line.contains('—')));
     }
 }

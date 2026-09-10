@@ -30,8 +30,10 @@ cmd.rs          dispatch, and what each command does
 config.rs       ~/.config/rote/config.toml, or its defaults
 doctor.rs       findings in relic_core's vocabulary, and their human shape
 drill/mod.rs    the plan, and the sitting loop
-drill/screen.rs the card, as a pure function from a frame to lines
-drill/term.rs   crossterm: raw mode, the alternate screen, restoration
+drill/screen.rs the drill's own layout, as a pure function from a frame to a card
+tui/mod.rs      the traits, the one entry loop, and the shared prompt dialogs
+tui/card.rs     the box, the palette, and the one entry line
+tui/term.rs     crossterm: raw mode, the alternate screen, placement, restoration
 guide.rs        doctrine
 help.rs         reference
 ladder.rs       intervals, standing, the cutover gate — pure
@@ -93,12 +95,37 @@ Things a future edit must not undo.
   vault be consulted before anything is written, and the cold attempt — the
   whole reading — would go unrecorded. `--aided` is the declaration for a
   sitting that already went that way, not a shortcut past it.
-- **Everything written while raw mode is held goes through `RawLines`.** Raw
-  mode takes the line discipline away, so a bare newline moves down without
-  returning to column zero and whatever comes next starts under the end of the
-  line before it. The writer borrows the guard, so it cannot be obtained without
-  raw mode and cannot outlive it, and the translation is idempotent so a call
-  site that spells the break either way produces the same bytes.
+- **Three commands are dialogs and the rest are not.** `add`, `rekey` and the
+  drill have to be typed at; everything else answers `--format json` and is a
+  script's to call. A dialog opens the alternate screen, holds its outcome until
+  a key is pressed, and leaves nothing in scrollback. `--stdin` is not a dialog
+  and never opens one. The two paths that say one thing and ask nothing —
+  nothing due, and no verifier for anything in the plan — stay inline: a screen
+  that opens to say *nothing* and then demands a keypress is hostile on the most
+  frequent path there is.
+- **One entry loop, and one entry line.** `tui::read_secret` is the only loop
+  that accepts a typed secret, and `card::entry_line` the only place one is
+  drawn. Revealing anything — per-character masking is defensible — is a change
+  to `Reveal` and to nothing else. The typed count is already passed in and
+  deliberately unused, so that change costs no call site. Word-boundary masking
+  is never defensible: seven word lengths is most of a diceware phrase's search
+  space.
+- **Every card is `card::WIDTH` wide.** A box that resizes as content comes and
+  goes reads as instability and makes the eye re-find the border. Height is the
+  axis that varies, and `Screen::anchor` fixes the top edge so that variation
+  grows downward. A line that outgrows `CONTENT` is cut at the single render
+  choke point rather than breaking the box, and a test asserts real content never
+  reaches that net.
+- **Every line is placed with its own `MoveTo`.** Raw mode takes the line
+  discipline away, so a newline written while it is held moves down without
+  returning to column zero and everything after it starts under the end of the
+  line before. Nothing writes a newline in raw mode; a test asserts no rendered
+  line carries one.
+- **Placement, resize and a terminal too small are the adapter's.** The drill
+  never learns that terminal size exists. A resize repaints from the last card
+  rather than waiting for a keystroke, and a terminal below the floor gets a
+  plain refusal — the dialog has a fixed shape and nothing about it degrades
+  usefully.
 - **The terminal is put back three ways**, because each covers a way of leaving
   the others do not: an RAII guard, a panic hook, and a `signal-hook` thread. A
   default-disposition `SIGTERM` runs no destructor, and a terminal left in raw

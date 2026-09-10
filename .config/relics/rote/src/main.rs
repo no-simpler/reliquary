@@ -15,6 +15,7 @@ mod secret;
 mod slug;
 mod stats;
 mod store;
+mod tui;
 mod verifier;
 
 use clap::Parser as _;

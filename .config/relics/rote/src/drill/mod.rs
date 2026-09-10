@@ -3,10 +3,9 @@
 //! The loop is generic over where keys come from and where the card is painted,
 //! so every path through it — pass, lapse, retry, refused paste, skip, abort —
 //! is driven by a scripted list of keys in the tests. Only raw mode, the
-//! alternate screen and the real `event::read()` sit outside that, in `term`.
+//! alternate screen and the real `event::read()` sit outside that, in `tui`.
 
 pub mod screen;
-pub mod term;
 
 use anyhow::Result;
 use jiff::civil::Date;
@@ -18,69 +17,8 @@ use crate::model::{SlugState, State};
 use crate::secret::Secret;
 use crate::slug::Slug;
 use crate::store::Verifiers;
+use crate::tui::{Console, Key, Nudge, Typed, read_secret};
 use crate::verifier::Verifier;
-
-/// A key, as the drill understands it. Anything else the terminal sends is
-/// nothing: only a character reaches the buffer, so an escape sequence cannot be
-/// typed into a secret.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Key {
-    /// A printable character.
-    Char(char),
-    /// Remove the last character.
-    Backspace,
-    /// Submit.
-    Enter,
-    /// Pass over this slug.
-    Escape,
-    /// Abandon the sitting.
-    Interrupt,
-    /// Start the entry over.
-    Clear,
-    /// A bracketed paste arrived. It is refused: the drill must be typed, and a
-    /// paste is a lookup wearing a drill's clothes.
-    Paste,
-}
-
-/// Where keys come from, and the stopwatch that runs beside them.
-pub trait Input {
-    /// Start the stopwatch for a fresh prompt.
-    fn arm(&mut self);
-
-    /// The next key, or `None` when the input has ended.
-    ///
-    /// # Errors
-    ///
-    /// When the terminal cannot be read.
-    fn next(&mut self) -> Result<Option<Key>>;
-
-    /// Milliseconds since [`Input::arm`].
-    fn elapsed_ms(&self) -> u64;
-}
-
-/// Both halves of a terminal, so the loop borrows it once.
-pub trait Console: Input + Screen {}
-
-impl<T: Input + Screen> Console for T {}
-
-/// Where the card is painted.
-pub trait Screen {
-    /// Draw a frame.
-    ///
-    /// # Errors
-    ///
-    /// When the terminal cannot be written to.
-    fn paint(&mut self, frame: &screen::Frame<'_>) -> Result<()>;
-
-    /// Hold the finished card until a key is pressed.
-    ///
-    /// The session leaves no scrollback, so this is the only chance to read it.
-    ///
-    /// # Errors
-    ///
-    /// When the terminal cannot be read.
-    fn hold(&mut self) -> Result<()>;
-}
 
 /// One slug to ask about.
 #[derive(Clone, Debug)]
@@ -261,6 +199,10 @@ impl Sitting {
     }
 }
 
+/// What a card holds beyond one line per row: the active slug's intention and
+/// prompt, and the four lines of border and padding.
+const ANCHOR_EXTRA: usize = 6;
+
 /// Run the sitting.
 ///
 /// `verify` is passed in rather than reached for, so the loop can be driven in a
@@ -279,6 +221,10 @@ pub fn run(
 ) -> Result<Sitting> {
     let mut rows: Vec<screen::Row> = plan.items.iter().map(screen::Row::pending).collect();
     let mut sitting = Sitting::default();
+    // A row each, the intention and the prompt under whichever is active, and
+    // the box. Set here rather than by the caller, so no path into a sitting can
+    // forget it and let the dialog move under the person typing into it.
+    console.anchor(plan.items.len().saturating_add(ANCHOR_EXTRA));
 
     for (index, item) in plan.items.iter().enumerate() {
         if item.verifier.is_none() {
@@ -334,7 +280,7 @@ fn ask_about(
             max_attempts.saturating_sub(attempt)
         };
         set(rows, index, screen::RowState::Active { attempt, left });
-        console.paint(&screen::Frame::running(today, rows, Some(index)))?;
+        paint(console, &screen::Frame::running(today, rows, Some(index)))?;
 
         let entry = match read(console, today, rows, index)? {
             Typed::Submitted(entry) => entry,
@@ -362,7 +308,7 @@ fn ask_about(
             Outcome::Blank
         } else {
             set(rows, index, screen::RowState::Checking);
-            console.paint(&screen::Frame::running(today, rows, Some(index)))?;
+            paint(console, &screen::Frame::running(today, rows, Some(index)))?;
             if verify(item, &entry.secret)? {
                 Outcome::Pass
             } else {
@@ -444,7 +390,7 @@ fn after_miss(
 ) -> Result<Choice> {
     let mut frame = screen::Frame::running(today, rows, Some(index));
     frame.notice = Some(screen::Notice::Choose { retry });
-    console.paint(&frame)?;
+    paint(console, &frame)?;
     choose(console, retry)
 }
 
@@ -501,20 +447,10 @@ fn set(rows: &mut [screen::Row], index: usize, state: screen::RowState) {
     }
 }
 
-/// What one prompt produced.
-enum Typed {
-    Submitted(Entry),
-    Skipped,
-    Aborted,
-}
-
-/// One submitted entry, before anything has judged it.
-struct Entry {
-    secret: Secret,
-    ttfk_ms: Option<u64>,
-    total_ms: Option<u64>,
-    corrections: u32,
-    paste_refused: u32,
+/// Paint a frame, resolving colour from the console that will draw it.
+fn paint(console: &mut dyn Console, frame: &screen::Frame<'_>) -> Result<()> {
+    let card = screen::card(frame, console.color());
+    console.paint(&card)
 }
 
 fn read(
@@ -523,54 +459,14 @@ fn read(
     rows: &[screen::Row],
     index: usize,
 ) -> Result<Typed> {
-    let mut secret = Secret::new();
-    let mut ttfk: Option<u64> = None;
-    let mut corrections = 0u32;
-    let mut refused = 0u32;
-    console.arm();
-    loop {
-        let Some(key) = console.next()? else {
-            return Ok(Typed::Aborted);
-        };
-        match key {
-            Key::Char(character) => {
-                if ttfk.is_none() {
-                    ttfk = Some(console.elapsed_ms());
-                }
-                secret.push(character);
-            }
-            Key::Backspace => {
-                if secret.pop() {
-                    corrections = corrections.saturating_add(1);
-                }
-            }
-            Key::Clear => {
-                if !secret.is_empty() {
-                    secret.clear();
-                    corrections = corrections.saturating_add(1);
-                }
-            }
-            Key::Enter => {
-                let elapsed = console.elapsed_ms();
-                let total = ttfk.map(|start| elapsed.saturating_sub(start));
-                return Ok(Typed::Submitted(Entry {
-                    secret,
-                    ttfk_ms: ttfk,
-                    total_ms: total,
-                    corrections,
-                    paste_refused: refused,
-                }));
-            }
-            Key::Escape => return Ok(Typed::Skipped),
-            Key::Interrupt => return Ok(Typed::Aborted),
-            Key::Paste => {
-                refused = refused.saturating_add(1);
-                let mut frame = screen::Frame::running(today, rows, Some(index));
-                frame.notice = Some(screen::Notice::PasteRefused);
-                console.paint(&frame)?;
-            }
+    let color = console.color();
+    read_secret(console, &mut |nudge| {
+        let mut frame = screen::Frame::running(today, rows, Some(index));
+        if nudge == Some(Nudge::PasteRefused) {
+            frame.notice = Some(screen::Notice::PasteRefused);
         }
-    }
+        screen::card(&frame, color)
+    })
 }
 
 #[cfg(test)]
@@ -578,11 +474,12 @@ mod tests {
     use anyhow::Result;
     use jiff::civil::{Date, date};
 
-    use super::{Input, Item, Key, Mode, Plan, Screen, Sitting, screen};
+    use super::{Item, Mode, Plan, Sitting, screen};
     use crate::config::Filler;
     use crate::ladder::{Class, Step};
     use crate::log::Outcome;
     use crate::secret::Secret;
+    use crate::tui::{Card, Input, Key, Screen};
     use crate::verifier::Verifier;
 
     const PHC: &str = "$argon2id$v=19$m=64,t=1,p=1$CQkJCQkJCQkJCQkJCQkJCQ$\
@@ -596,6 +493,7 @@ mod tests {
         elapsed: u64,
         frames: usize,
         held: usize,
+        anchored: usize,
         last: Vec<String>,
     }
 
@@ -607,6 +505,7 @@ mod tests {
                 elapsed: 0,
                 frames: 0,
                 held: 0,
+                anchored: 0,
                 last: Vec::new(),
             }
         }
@@ -632,9 +531,17 @@ mod tests {
     }
 
     impl Screen for Fake {
-        fn paint(&mut self, frame: &screen::Frame<'_>) -> Result<()> {
+        fn color(&self) -> bool {
+            false
+        }
+
+        fn anchor(&mut self, height: usize) {
+            self.anchored = height;
+        }
+
+        fn paint(&mut self, card: &Card) -> Result<()> {
             self.frames = self.frames.saturating_add(1);
-            self.last = screen::render(frame, false);
+            self.last = card.render();
             Ok(())
         }
 
@@ -684,14 +591,11 @@ mod tests {
         )
         .unwrap();
         // The caller paints the closing frame; do here what `cmd` does there.
-        console
-            .paint(&screen::Frame::done(
-                date(2026, 9, 10),
-                &sitting.rows,
-                &sitting,
-                &[],
-            ))
-            .unwrap();
+        super::paint(
+            &mut console,
+            &screen::Frame::done(date(2026, 9, 10), &sitting.rows, &sitting, &[]),
+        )
+        .unwrap();
         console.hold().unwrap();
         (sitting, console)
     }

@@ -1,10 +1,9 @@
-//! The terminal, and everything that has to be put back.
+//! crossterm: raw mode, the alternate screen, placement, and restoration.
 //!
-//! The sitting runs on the **alternate screen** and leaves nothing in
-//! scrollback. Blind input already keeps typed bytes off the display; what the
-//! alternate screen additionally removes is a standing record of which slugs
-//! exist and which were failed. It is also what would make per-character masking
-//! a question of taste later rather than a question of security.
+//! A sitting runs on the **alternate screen** and leaves nothing in scrollback.
+//! Blind input already keeps typed bytes off the display; what the alternate
+//! screen additionally removes is a standing record of which slugs exist and
+//! which were failed.
 //!
 //! Putting the terminal back is not one control but three, because each covers
 //! a way of leaving that the others do not: a guard for the ordinary return, a
@@ -12,9 +11,14 @@
 //! `SIGTERM` runs no destructor at all. A terminal left in raw mode with echo
 //! off is one that shows nothing of what is typed into it next.
 //!
-//! Raw mode also takes the line discipline away, so a bare newline moves down
-//! without returning to column zero. Writing to the terminal while it is held
-//! therefore goes through [`RawLines`], which is reachable only from the guard.
+//! Every line is placed with an explicit `MoveTo`, so no newline is ever written
+//! while raw mode is held. That matters because raw mode takes the line
+//! discipline away: a bare newline moves down without returning to column zero,
+//! and everything after it starts under the end of the line before.
+//!
+//! Where the dialog sits is this module's business and nobody else's. A caller
+//! hands over a card; centring, the terminal being resized under it, and the
+//! terminal being too small to draw in at all are all answered here.
 
 use std::io::{IsTerminal as _, Write as _};
 use std::sync::Once;
@@ -31,11 +35,32 @@ use crossterm::terminal::{
 };
 use crossterm::{cursor, execute, queue};
 
-use super::{Input, Key, Screen, screen};
-use crate::secret::Secret;
+use super::card::{self, Card};
+use super::{Input, Key, Screen};
 
 /// Exit status for a sitting cut short by a signal.
 const INTERRUPTED: i32 = 2;
+
+/// The narrowest terminal a card fits in, with a column either side.
+const MIN_COLS: usize = card::WIDTH + 2;
+
+/// The shortest terminal worth drawing a dialog in: a minimal card and a line
+/// of air.
+const MIN_ROWS: usize = 7;
+
+/// Where the top of the dialog sits in the space available to it, as a
+/// fraction. A box at the exact middle reads as low, so designed dialogs sit
+/// above it — the optical centre rather than the arithmetic one.
+const OPTICAL_NUMERATOR: usize = 2;
+const OPTICAL_DENOMINATOR: usize = 5;
+
+/// Whether a dialog holds the screen.
+///
+/// Raw mode and the alternate screen are process-wide, so two dialogs cannot be
+/// open at once: the second one's restoration would put the terminal back while
+/// the first is still drawing on it, turning echo on under a prompt that is
+/// about to be typed into. Refusing is the only safe answer, and it is loud.
+static OPEN: AtomicBool = AtomicBool::new(false);
 
 static RAW: AtomicBool = AtomicBool::new(false);
 static ALT: AtomicBool = AtomicBool::new(false);
@@ -54,6 +79,21 @@ fn restore() {
         let _ = disable_raw_mode();
     }
     let _ = out.flush();
+}
+
+/// Take the screen, or say who has it.
+fn claim() -> Result<()> {
+    if OPEN.swap(true, Ordering::SeqCst) {
+        return Err(anyhow!(
+            "a dialog is already open on this terminal, and a second one would put it back under the first"
+        ));
+    }
+    Ok(())
+}
+
+/// Give the screen up.
+fn release() {
+    OPEN.store(false, Ordering::SeqCst);
 }
 
 /// Arm the three ways of putting the terminal back. Idempotent.
@@ -80,18 +120,6 @@ impl RawMode {
             .context("asking the terminal to bracket pastes")?;
         Ok(Self)
     }
-
-    /// Standard error, with the line discipline raw mode took away.
-    ///
-    /// The borrow is the constraint: a writer that ends lines this way is only
-    /// correct while raw mode is held, so it cannot outlive the guard, and
-    /// there is no way to reach one without holding it.
-    fn err(&self) -> RawLines<'_, std::io::Stderr> {
-        RawLines {
-            inner: std::io::stderr(),
-            _guard: self,
-        }
-    }
 }
 
 impl Drop for RawMode {
@@ -100,98 +128,27 @@ impl Drop for RawMode {
     }
 }
 
-/// A writer that ends every line the way raw mode needs it ended.
+/// Whether a dialog can run here at all.
 ///
-/// Idempotent, so a line already written with a carriage return is left alone:
-/// whichever way a call site spells the break, what reaches the terminal is the
-/// same, and the class of bug where the next line starts under the last one
-/// cannot come back.
-struct RawLines<'a, W: std::io::Write> {
-    inner: W,
-    _guard: &'a RawMode,
-}
-
-impl<W: std::io::Write> std::io::Write for RawLines<'_, W> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        for chunk in buf.split_inclusive(|&byte| byte == b'\n') {
-            if let Some((&b'\n', head)) = chunk.split_last() {
-                self.inner
-                    .write_all(head.strip_suffix(b"\r").unwrap_or(head))?;
-                self.inner.write_all(b"\r\n")?;
-            } else {
-                self.inner.write_all(chunk)?;
-            }
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.inner.flush()
-    }
-}
-
-/// Read one secret at an inline prompt.
-///
-/// Blind: the prompt stays in scrollback and not one character of the answer
-/// does. `None` means the prompt was abandoned rather than answered.
-///
-/// # Errors
-///
-/// When this is not a terminal, or the terminal cannot be read.
-pub fn ask(prompt: &str) -> Result<Option<Secret>> {
-    if !is_interactive() {
-        return Err(anyhow!(
-            "a secret has to be typed at a terminal; use --stdin to feed one from a pipe"
-        ));
-    }
-    let raw = RawMode::enter()?;
-    let mut err = raw.err();
-    write!(err, "{prompt}")?;
-    err.flush()?;
-    let mut secret = Secret::new();
-    let answer = loop {
-        let event = crossterm::event::read().context("reading the terminal")?;
-        match key_of(&event) {
-            Some(Key::Char(character)) => {
-                secret.push(character);
-            }
-            Some(Key::Backspace) => {
-                secret.pop();
-            }
-            Some(Key::Clear) => secret.clear(),
-            Some(Key::Enter) => break Some(secret),
-            Some(Key::Escape | Key::Interrupt) => break None,
-            Some(Key::Paste) => {
-                write!(err, "\n  a paste was refused — type it\n{prompt}")?;
-                err.flush()?;
-            }
-            None => {}
-        }
-    };
-    writeln!(err)?;
-    err.flush()?;
-    Ok(answer)
-}
-
-/// Whether a drill can run here at all.
-///
-/// All three streams, not just stdin: a sitting that cannot paint is not a
-/// sitting, and a redirected stream is the shape a piped secret would arrive in.
+/// All three streams, not just stdin: a dialog that cannot paint is not a
+/// dialog, and a redirected stream is the shape a piped secret would arrive in.
 pub fn is_interactive() -> bool {
     std::io::stdin().is_terminal()
         && std::io::stdout().is_terminal()
         && std::io::stderr().is_terminal()
 }
 
-/// The terminal, held in drill mode for as long as this value lives.
+/// The terminal, held in dialog mode for as long as this value lives.
 pub struct Terminal {
     armed_at: Instant,
     color: bool,
+    anchor: usize,
+    last: Vec<String>,
     _raw: RawMode,
 }
 
 impl Terminal {
-    /// Enter drill mode.
+    /// Enter dialog mode.
     ///
     /// # Errors
     ///
@@ -199,25 +156,111 @@ impl Terminal {
     pub fn enter(color: bool) -> Result<Self> {
         if !is_interactive() {
             return Err(anyhow!(
-                "a drill has to be typed at a terminal, so there is nothing to run here"
+                "this has to be typed at a terminal, so there is nothing to run here"
             ));
         }
-        let raw = RawMode::enter()?;
+        claim()?;
+        let raw = match RawMode::enter() {
+            Ok(raw) => raw,
+            Err(error) => {
+                release();
+                return Err(error);
+            }
+        };
         execute!(std::io::stdout(), EnterAlternateScreen, cursor::Hide)
             .context("entering the alternate screen")?;
         ALT.store(true, Ordering::SeqCst);
         Ok(Self {
             armed_at: Instant::now(),
             color,
+            anchor: 0,
+            last: Vec::new(),
             _raw: raw,
         })
+    }
+
+    /// Draw the lines held from the last paint, wherever the terminal is now.
+    fn repaint(&mut self) -> Result<()> {
+        let lines = std::mem::take(&mut self.last);
+        let result = self.blit(&lines);
+        self.last = lines;
+        result
+    }
+
+    /// Place lines on the alternate screen.
+    fn blit(&mut self, lines: &[String]) -> Result<()> {
+        let (cols, rows) = size();
+        if cols < MIN_COLS || rows < MIN_ROWS.max(lines.len()) {
+            return cramped(cols, rows, lines.len());
+        }
+        let left = cols.saturating_sub(card::WIDTH) / 2;
+        let top = place(rows, self.anchor, lines.len());
+        let mut out = std::io::stdout();
+        queue!(out, Clear(ClearType::All))?;
+        for (offset, line) in lines.iter().enumerate() {
+            let row = u16::try_from(top.saturating_add(offset)).unwrap_or(u16::MAX);
+            let column = u16::try_from(left).unwrap_or(u16::MAX);
+            queue!(
+                out,
+                cursor::MoveTo(column, row),
+                crossterm::style::Print(line)
+            )?;
+        }
+        out.flush()?;
+        Ok(())
+    }
+
+    /// The next event, with a resize answered here rather than handed on.
+    fn event(&mut self) -> Result<Event> {
+        loop {
+            let event = crossterm::event::read().context("reading the terminal")?;
+            if matches!(event, Event::Resize(_, _)) {
+                self.repaint()?;
+                continue;
+            }
+            return Ok(event);
+        }
     }
 }
 
 impl Drop for Terminal {
     fn drop(&mut self) {
         restore();
+        release();
     }
+}
+
+/// Say the terminal is too small, rather than drawing a broken box in it.
+///
+/// The dialog has a fixed shape and nothing about it degrades usefully, so this
+/// is the honest answer rather than a smaller card that cannot hold what it has
+/// to say.
+fn cramped(cols: usize, rows: usize, wanted_rows: usize) -> Result<()> {
+    let needed = format!("rote needs {MIN_COLS} x {}", MIN_ROWS.max(wanted_rows));
+    let has = format!("this terminal is {cols} x {rows}");
+    let mut out = std::io::stdout();
+    queue!(out, Clear(ClearType::All))?;
+    for (offset, line) in [needed, has].iter().enumerate() {
+        let row = u16::try_from(offset).unwrap_or(u16::MAX);
+        queue!(out, cursor::MoveTo(0, row), crossterm::style::Print(line))?;
+    }
+    out.flush()?;
+    Ok(())
+}
+
+/// The terminal's size, or the smallest thing that will refuse to draw.
+fn size() -> (usize, usize) {
+    crossterm::terminal::size().map_or((0, 0), |(cols, rows)| {
+        (usize::from(cols), usize::from(rows))
+    })
+}
+
+/// Where the top edge goes: the optical centre of the anchored height, moved up
+/// only if what is actually being drawn would not otherwise fit.
+fn place(rows: usize, anchored: usize, drawn: usize) -> usize {
+    let free = rows.saturating_sub(anchored);
+    let top = free.saturating_mul(OPTICAL_NUMERATOR) / OPTICAL_DENOMINATOR;
+    top.min(rows.saturating_sub(drawn))
 }
 
 fn watch_signals() {
@@ -243,7 +286,7 @@ impl Input for Terminal {
 
     fn next(&mut self) -> Result<Option<Key>> {
         loop {
-            let event = crossterm::event::read().context("reading the terminal")?;
+            let event = self.event()?;
             if let Some(key) = key_of(&event) {
                 return Ok(Some(key));
             }
@@ -256,23 +299,24 @@ impl Input for Terminal {
 }
 
 impl Screen for Terminal {
-    fn paint(&mut self, frame: &screen::Frame<'_>) -> Result<()> {
-        let mut out = std::io::stdout();
-        queue!(out, Clear(ClearType::All), cursor::MoveTo(0, 0))?;
-        for line in screen::render(frame, self.color) {
-            queue!(
-                out,
-                crossterm::style::Print(line),
-                cursor::MoveToNextLine(1)
-            )?;
-        }
-        out.flush()?;
-        Ok(())
+    fn color(&self) -> bool {
+        self.color
+    }
+
+    fn anchor(&mut self, height: usize) {
+        self.anchor = height;
+    }
+
+    fn paint(&mut self, card: &Card) -> Result<()> {
+        let lines = card.render();
+        let result = self.blit(&lines);
+        self.last = lines;
+        result
     }
 
     fn hold(&mut self) -> Result<()> {
         loop {
-            match crossterm::event::read().context("reading the terminal")? {
+            match self.event()? {
                 Event::Key(KeyEvent {
                     kind: KeyEventKind::Press,
                     ..
@@ -288,7 +332,7 @@ impl Screen for Terminal {
     }
 }
 
-/// Map a terminal event onto a drill key.
+/// Map a terminal event onto a key.
 ///
 /// Only a bare character reaches the buffer. A modified key is either one of the
 /// three commands below or nothing at all, which is what stops an escape
@@ -333,43 +377,7 @@ fn code_of(code: KeyCode, modifiers: KeyModifiers) -> Option<Key> {
 mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    use super::{Key, RawLines, RawMode, key_of};
-
-    /// A guard that took nothing, so putting it back is a flush and no more.
-    /// Constructing one is what the borrow in `RawLines` asks for.
-    fn through_raw_lines(input: &str) -> String {
-        use std::io::Write as _;
-        let guard = RawMode;
-        let mut lines = RawLines {
-            inner: Vec::new(),
-            _guard: &guard,
-        };
-        lines
-            .write_all(input.as_bytes())
-            .expect("a vector cannot fail to be written to");
-        String::from_utf8(lines.inner).expect("what went in was text")
-    }
-
-    #[test]
-    fn a_line_written_in_raw_mode_returns_to_column_zero() {
-        assert_eq!(through_raw_lines("secret: "), "secret: ");
-        assert_eq!(through_raw_lines("\n"), "\r\n");
-        assert_eq!(
-            through_raw_lines("  a paste was refused\n  again: "),
-            "  a paste was refused\r\n  again: "
-        );
-    }
-
-    #[test]
-    fn a_line_that_already_returns_is_left_alone() {
-        assert_eq!(through_raw_lines("\r\n"), "\r\n");
-        assert_eq!(through_raw_lines("one\r\ntwo\n"), "one\r\ntwo\r\n");
-    }
-
-    #[test]
-    fn every_line_is_ended_rather_than_only_the_last() {
-        assert_eq!(through_raw_lines("one\ntwo\nthree"), "one\r\ntwo\r\nthree");
-    }
+    use super::{Key, claim, key_of, place, release};
 
     fn press(code: KeyCode, modifiers: KeyModifiers) -> Event {
         Event::Key(KeyEvent {
@@ -461,5 +469,46 @@ mod tests {
         assert_eq!(key_of(&Event::FocusGained), None);
         assert_eq!(key_of(&press(KeyCode::F(1), KeyModifiers::NONE)), None);
         assert_eq!(key_of(&press(KeyCode::Left, KeyModifiers::NONE)), None);
+    }
+
+    #[test]
+    fn a_second_dialog_is_refused_rather_than_left_to_undo_the_first() {
+        claim().expect("nothing holds the screen");
+        assert!(
+            claim().is_err(),
+            "a second dialog would restore the terminal under the first"
+        );
+        release();
+        claim().expect("the screen was given up");
+        release();
+    }
+
+    #[test]
+    fn the_dialog_sits_above_the_arithmetic_middle() {
+        // Twenty spare rows: centred would be ten down, optical is eight.
+        assert_eq!(place(30, 10, 10), 8);
+        assert!(place(40, 12, 12) < (40 - 12) / 2);
+    }
+
+    #[test]
+    fn a_card_taller_than_its_anchor_grows_downward_from_the_same_top() {
+        let top = place(30, 10, 10);
+        for drawn in [11, 12, 15, 20] {
+            assert_eq!(place(30, 10, drawn), top, "the top edge must not move");
+        }
+    }
+
+    #[test]
+    fn a_card_shorter_than_its_anchor_keeps_the_same_top_too() {
+        let top = place(30, 10, 10);
+        for drawn in [5, 7, 9] {
+            assert_eq!(place(30, 10, drawn), top, "the top edge must not move");
+        }
+    }
+
+    #[test]
+    fn a_card_that_would_run_off_the_bottom_is_lifted_rather_than_clipped() {
+        assert_eq!(place(20, 10, 20), 0);
+        assert_eq!(place(20, 10, 18), 2);
     }
 }
