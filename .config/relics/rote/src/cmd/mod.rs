@@ -1,9 +1,10 @@
 //! What each command does: the context every command is handed, and dispatch.
 //!
 //! One file per family. `sitting` is the drill, `enroll` is everything that
-//! takes or removes a secret, `reading` is the three tables, `health` is what
-//! `assay` and the shell read.
+//! takes or drops a secret, `dialog` is the terminal side those share, `reading`
+//! is the tables, `health` is what `assay` and the shell read.
 
+pub mod dialog;
 mod enroll;
 mod health;
 mod reading;
@@ -16,12 +17,14 @@ use relic_core::ui::Format;
 
 use crate::cli::{Cli, Command, Global};
 use crate::config::Config;
+use crate::corpus::Corpus;
+use crate::corpus::chain::Chains;
 use crate::exit::CLEAN;
-use crate::ladder::Standing;
-use crate::log::{Digest, Event, Record, SCHEMA};
-use crate::model::State;
+use crate::ladder::{Ladder, Standing};
+use crate::machine::{Flagship, MachineId};
 use crate::render::{Table, agent, human};
-use crate::store::{Cache, Clock, Env, Paths};
+use crate::store::{Cache, Clock, Env, Paths, Store};
+use crate::verifier::file::Verifiers;
 
 /// What every command is handed.
 pub struct Context {
@@ -29,7 +32,7 @@ pub struct Context {
     pub env: Env,
     /// The config file, or its defaults.
     pub config: Config,
-    /// The two homes.
+    /// The three homes.
     pub paths: Paths,
     /// The clock and the drill day.
     pub clock: Clock,
@@ -45,6 +48,18 @@ impl Context {
     /// The drill day.
     pub fn today(&self) -> Date {
         self.clock.today()
+    }
+
+    /// This machine's identity.
+    ///
+    /// Resolved on demand rather than at startup: it costs a subprocess, and
+    /// the reminder — which runs before every shell prompt — never needs it.
+    ///
+    /// # Errors
+    ///
+    /// When the platform offers no stable identifier.
+    pub fn machine(&self) -> Result<MachineId> {
+        crate::machine::resolve(self.env.machine.as_deref())
     }
 }
 
@@ -78,6 +93,24 @@ pub fn open_context(global: &Global) -> Result<Context> {
     })
 }
 
+/// Take the lock and the flagship gate, for a command that writes.
+///
+/// # Errors
+///
+/// When this machine may not write, or the corpus cannot be read.
+pub fn open_store(ctx: &Context) -> Result<Store> {
+    Store::open(ctx.paths.clone(), ctx.machine()?, ctx.env.host.clone())
+}
+
+/// Read the corpus without taking the lock, for a command that only looks.
+///
+/// # Errors
+///
+/// When a chain cannot be read.
+pub fn read_chains(ctx: &Context) -> Result<Chains> {
+    Chains::load(&ctx.paths.chains_dir())
+}
+
 /// Dispatch.
 ///
 /// # Errors
@@ -85,7 +118,7 @@ pub fn open_context(global: &Global) -> Result<Context> {
 /// When a command cannot do what it was asked.
 pub fn run(cli: &Cli) -> Result<u8> {
     // These three describe the tool rather than read the drill, so they answer
-    // before there is a store to open.
+    // before there is a corpus to open.
     match &cli.command {
         Some(Command::Completions(args)) => {
             completions(args.shell);
@@ -104,10 +137,11 @@ pub fn run(cli: &Cli) -> Result<u8> {
             Command::Status(_)
             | Command::Stats(_)
             | Command::Log(_)
+            | Command::Machines
             | Command::Practice(_)
-            | Command::Add(_)
-            | Command::Probe(_)
-            | Command::Rekey(_)
+            | Command::Enroll(_)
+            | Command::Attach(_)
+            | Command::Rotate(_)
             | Command::Retire(_)
             | Command::Doctor
             | Command::Banner,
@@ -121,10 +155,11 @@ pub fn run(cli: &Cli) -> Result<u8> {
         Some(Command::Status(args)) => reading::status(&ctx, args),
         Some(Command::Stats(args)) => reading::stats(&ctx, args),
         Some(Command::Log(args)) => reading::log(&ctx, args),
-        Some(Command::Add(args)) => enroll::add(&ctx, args),
-        Some(Command::Rekey(args)) => enroll::rekey(&ctx, args),
+        Some(Command::Machines) => reading::machines(&ctx),
+        Some(Command::Enroll(args)) => enroll::enroll(&ctx, args),
+        Some(Command::Attach(args)) => enroll::attach(&ctx, args),
+        Some(Command::Rotate(args)) => enroll::rotate(&ctx, args),
         Some(Command::Retire(args)) => enroll::retire(&ctx, args),
-        Some(Command::Probe(args)) => enroll::probe(&ctx, args),
         Some(Command::Doctor) => health::doctor(&ctx),
         Some(Command::Banner) => health::banner(&ctx),
         Some(Command::Completions(_) | Command::Help(_) | Command::Guide(_)) => {
@@ -164,34 +199,48 @@ fn help_topic(topic: Option<&str>) -> Result<()> {
     )
 }
 
-/// One record, stamped with this run's instant, day and host. The chain digest
-/// is the store's to fill in.
-fn stamped(ctx: &Context, today: Date, event: Event) -> Record {
-    Record {
-        v: SCHEMA,
-        at: ctx
-            .clock
-            .now()
-            .round(jiff::Unit::Second)
-            .unwrap_or(ctx.clock.now()),
-        day: today,
-        host: ctx.env.host.clone(),
-        prev: Digest::GENESIS,
-        event,
+/// Project the schedule down to what the reminder reads.
+///
+/// A dormant lineage is counted apart from a due one rather than among them: it
+/// cannot be drilled at all, so calling it due would be asking for something
+/// that is not on offer.
+fn write_cache(
+    ctx: &Context,
+    corpus: &Corpus,
+    verifiers: &Verifiers,
+    today: Date,
+    ladder: &Ladder,
+) -> Result<()> {
+    let mut due = Vec::new();
+    let mut dormant = 0usize;
+    for lineage in corpus.active() {
+        let Some(dossier) = lineage.current() else {
+            continue;
+        };
+        if !verifiers.holds(&dossier.engram) {
+            dormant = dormant.saturating_add(1);
+            continue;
+        }
+        due.push(match dossier.standing(today, ladder) {
+            Standing::Due => today,
+            Standing::Waiting { until } => until,
+        });
     }
+    Cache {
+        v: crate::corpus::record::SCHEMA,
+        due,
+        dormant,
+    }
+    .save(&ctx.paths.cache())
 }
 
-/// Project the schedule down to what the reminder reads.
-fn write_cache(ctx: &Context, state: &State, today: Date) -> Result<()> {
-    let due = state
-        .scheduled()
-        .into_iter()
-        .map(|slug| match slug.standing(today) {
-            Standing::Due | Standing::Probe => today,
-            Standing::Waiting { until } | Standing::Held { until } => until,
-        })
-        .collect();
-    Cache { v: SCHEMA, due }.save(&ctx.paths.cache())
+/// Whether this machine may write, without taking the lock.
+///
+/// # Errors
+///
+/// When the marker exists and cannot be read.
+fn flagship(ctx: &Context, machine: &MachineId) -> Result<Flagship> {
+    Flagship::read(&ctx.paths.marker, machine)
 }
 
 /// A titled table in whichever shape the run is in.

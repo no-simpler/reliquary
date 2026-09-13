@@ -1,0 +1,49 @@
+---
+source: rote/tests/wording.rs
+expression: body
+---
+CUSTODY
+
+  The secret is kept as an argon2id verifier over a random salt, in no
+  recoverable form. rote can say wrong. It can never say what the right answer
+  was, and there is no reveal.
+
+  The stance is good faith throughout. rote guards against accident and
+  confusion and not against you: it records what it was told and what it saw,
+  and it verifies only what it can. You could make the record say anything you
+  liked. You are trusted not to, and at worst to do it by mistake.
+
+  The drill is blind and refuses a paste, because an answer read out of a vault
+  measures nothing. Submitting nothing concedes: that is a failure of recall and
+  is recorded as one, which is more honest than typing something to get past the
+  prompt. After a miss the lookup is offered, and an entry taken that way is
+  aided: recorded in full, kept out of every figure that claims to measure a
+  memory. The first week is aided almost throughout, and that is the shape of a
+  first week rather than a run of failures.
+
+  An aided entry earns its keep twice. Typing what the vault shows and being
+  told wrong is the one routine signal that the vault item and the verifier hold
+  different secrets, which is otherwise undetectable.
+
+  Three verbs take a secret, and the difference between them is the whole point.
+
+  enroll opens a lineage with its first engram.
+
+  rotate proves the current secret, supersedes its engram, and starts a new one
+  at the foot. A different secret, a different memory.
+
+  attach makes a verifier on this machine for the engram that is already
+  current, and leaves its record untouched. The same secret, a machine that lost
+  its copy — which is what a restored flagship looks like, since a verifier is
+  never backed up.
+
+  rote cannot tell an attach from a rotate by looking at what was typed. It
+  holds nothing to check a claim against, so an attach has no failure mode for
+  the wrong secret: it records which claim was made and verifies neither. That
+  is a better trade than the alternative, where losing a laptop costs the whole
+  record of a memory you still hold. Before it asks, it names what it is about
+  to continue, so attaching the wrong lineage has a moment to be noticed.
+
+  The lineage name matches the 1Password item title by convention and not by
+  integration. Nothing is stored, nothing goes out of sync, no vault reference
+  is added, and the drill does not fail in exactly the world escrow exists for.

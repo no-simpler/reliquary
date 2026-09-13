@@ -1,430 +1,353 @@
-//! Everything that takes a secret in, proves one, or lets one go: enrollment,
-//! rotation, retirement, and the stretch horizon.
+//! Everything that takes a secret or drops one.
 //!
-//! Every command here opens the store before it touches the verifier file, so
-//! a log this binary must not write to is refused before anything else has
-//! changed.
+//! Four verbs, and the distinction between three of them is the whole point:
+//!
+//! - **enroll** opens a lineage with its first engram.
+//! - **rotate** proves the current secret, supersedes its engram, and starts the
+//!   ladder over on a new one. A different secret, a different memory.
+//! - **attach** makes a verifier here for the engram that is already current,
+//!   and leaves its record untouched. The same secret, a machine that lost its
+//!   copy.
+//! - **retire** takes a lineage off the schedule and drops its verifiers.
+//!
+//! `rote` cannot tell an attach from a rotate by looking at what was typed: it
+//! holds no recoverable form of a secret and has nothing to check a claim
+//! against. So it records **which claim was made** and verifies neither. That is
+//! the good faith principle at its sharpest — and it is a better trade than the
+//! alternative, where losing a laptop costs the whole record of a memory you
+//! still hold.
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Result, bail};
 use jiff::civil::Date;
-use relic_core::style::Tint;
 
-use super::{Context, stamped, write_cache};
-use crate::cli::{AddArgs, ProbeArgs, RekeyArgs, RetireArgs};
+use super::{Context, dialog, open_store, write_cache};
+use crate::cli::{AttachArgs, EnrollArgs, RetireArgs, RotateArgs};
+use crate::cmd::dialog::Twice;
+use crate::corpus::record::{Attached, EngramId, Enrolled, Event, Retired, Rotated};
+use crate::corpus::{Corpus, Lineage};
 use crate::exit::{CLEAN, INCOMPLETE};
-use crate::log::{Added, Event, Probed, Rekeyed, Retired};
-use crate::model::State;
+use crate::intake::{DIFFERED, EMPTY, make_verifier};
 use crate::secret::Secret;
-use crate::store::{Store, Verifiers};
-use crate::tui::{self, term};
-use crate::verifier::Verifier;
+use crate::tui::term;
+use crate::verifier::file::Verifiers;
 
-/// The furthest a horizon may sit, in days. Beyond a year it is a retirement
-/// wearing a probe's clothes.
-const HORIZON_MAX_DAYS: u32 = 365;
-
-pub fn add(ctx: &Context, args: &AddArgs) -> Result<u8> {
-    let mut store = Store::open(ctx.paths.clone())?;
-    let state = State::replay(store.journal().lines());
-    if let Some(slug) = state.get(&args.slug) {
-        if slug.retired {
+/// `rote enroll`.
+///
+/// # Errors
+///
+/// When the lineage already exists, the terminal refuses, or nothing can be
+/// written.
+pub fn enroll(ctx: &Context, args: &EnrollArgs) -> Result<u8> {
+    let mut store = open_store(ctx)?;
+    let ladder = ctx.config.ladder()?;
+    let corpus = Corpus::replay(store.chains().records(), &ladder);
+    if let Some(lineage) = corpus.lineage(&args.slug) {
+        if lineage.retired {
             bail!(
-                "{} is retired. rote rekey --force {} puts it back on the schedule with a new verifier",
+                "{} is retired. rote rotate --force {} puts it back with a new engram",
                 args.slug,
                 args.slug
             );
         }
         bail!(
-            "{} is already enrolled. Use rote rekey to replace its verifier",
+            "{} is already enrolled. rote rotate {} replaces the secret; \
+             rote attach {} makes a verifier on this machine",
+            args.slug,
+            args.slug,
             args.slug
         );
     }
+
     let today = ctx.today();
-    let heading = format!("enroll {}", args.slug);
-    let mut dialog = dialog(args.stdin, ctx)?;
-    let secret = match dialog.as_mut() {
-        None => piped(1)?.into_iter().next().unwrap_or_else(Secret::new),
-        Some(console) => match twice(console, today, &heading, "type it twice", ctx)? {
-            Twice::Agreed(secret) => secret,
-            Twice::Abandoned => return abandoned(console, today, &heading),
-            Twice::Differed => return refused(console, today, &heading, DIFFERED),
-        },
+    let heading = args.slug.to_string();
+    let mut console = dialog::open(args.stdin, ctx)?;
+    let Some(secret) = take_one(
+        ctx,
+        &mut console,
+        today,
+        &heading,
+        "the secret this lineage will hold, typed twice",
+        args.stdin,
+    )?
+    else {
+        return Ok(INCOMPLETE);
     };
-    if secret.is_empty() {
-        return match dialog.as_mut() {
-            Some(console) => refused(console, today, &heading, EMPTY),
-            None => bail!("{EMPTY}"),
-        };
-    }
+
+    let engram = EngramId::mint()?;
     let verifier = make_verifier(&secret)?;
     drop(secret);
 
     let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
-    verifiers.set(&args.slug, &verifier);
+    verifiers.set(engram, &args.slug, today, &verifier);
     verifiers.save(&ctx.paths.verifiers())?;
 
-    store.append(&stamped(
-        ctx,
+    store.append(
+        ctx.clock.now(),
         today,
-        Event::Add(Added {
+        Event::Enroll(Enrolled {
             slug: args.slug.clone(),
-            version: 1,
+            engram,
             critical: args.critical,
         }),
-    ))?;
-    let after = State::replay(store.journal().lines());
-    write_cache(ctx, &after, today)?;
-    let said = format!("{} enrolled · first review tomorrow", args.slug);
-    match dialog.as_mut() {
-        Some(console) => tui::outcome(console, today, &heading, &said, Tint::Green)?,
-        None => {
-            if !ctx.quiet {
-                println!("{said}");
-            }
-        }
-    }
-    Ok(CLEAN)
+    )?;
+
+    let after = Corpus::replay(store.chains().records(), &ladder);
+    write_cache(ctx, &after, &verifiers, today, &ladder)?;
+    let said = format!("{}@1 enrolled · first review tomorrow", args.slug);
+    dialog::settled(ctx, console.as_mut(), today, &heading, &said)
 }
 
-pub fn rekey(ctx: &Context, args: &RekeyArgs) -> Result<u8> {
-    let mut store = Store::open(ctx.paths.clone())?;
-    let state = State::replay(store.journal().lines());
-    let Some(slug) = state.get(&args.slug) else {
-        bail!("there is no slug called {}", args.slug);
+/// `rote attach`.
+///
+/// # Errors
+///
+/// When the lineage is unknown or retired, the terminal refuses, or nothing can
+/// be written.
+pub fn attach(ctx: &Context, args: &AttachArgs) -> Result<u8> {
+    let mut store = open_store(ctx)?;
+    let ladder = ctx.config.ladder()?;
+    let corpus = Corpus::replay(store.chains().records(), &ladder);
+    let lineage = live(&corpus, &args.slug)?;
+    let Some(dossier) = lineage.current() else {
+        bail!("{} holds no engram to attach", args.slug);
     };
+    let engram = dossier.engram;
+    let label = corpus.label(&engram);
+
+    let today = ctx.today();
     let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
-    // Decided before a screen opens: an error printed after an empty alternate
-    // screen has closed is an error nobody saw the reason for.
+    let replacing = verifiers.holds(&engram);
+
+    // The accident guard: name what is being continued before asking for it, so
+    // attaching the wrong lineage or the wrong generation has a moment to be
+    // noticed. It is not a check — there is nothing here to check against.
+    let heading = if replacing {
+        format!("{label} · replacing the verifier held here")
+    } else {
+        format!(
+            "{label} · {}",
+            crate::sitting::describe(&label, dossier, today, &ladder)
+        )
+    };
+
+    let mut console = dialog::open(args.stdin, ctx)?;
+    let Some(secret) = take_one(
+        ctx,
+        &mut console,
+        today,
+        &heading,
+        "type it as you know it — nothing here can check it",
+        args.stdin,
+    )?
+    else {
+        return Ok(INCOMPLETE);
+    };
+
+    let verifier = make_verifier(&secret)?;
+    drop(secret);
+    verifiers.set(engram, &args.slug, today, &verifier);
+    verifiers.save(&ctx.paths.verifiers())?;
+
+    store.append(
+        ctx.clock.now(),
+        today,
+        Event::Attach(Attached {
+            slug: args.slug.clone(),
+            engram,
+        }),
+    )?;
+
+    let after = Corpus::replay(store.chains().records(), &ladder);
+    write_cache(ctx, &after, &verifiers, today, &ladder)?;
+    let said = format!("{label} attached here · rote took your word for it");
+    dialog::settled(ctx, console.as_mut(), today, &heading, &said)
+}
+
+/// `rote rotate`.
+///
+/// # Errors
+///
+/// When the lineage is unknown, the current secret cannot be proved, the
+/// terminal refuses, or nothing can be written.
+pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
+    let mut store = open_store(ctx)?;
+    let ladder = ctx.config.ladder()?;
+    let corpus = Corpus::replay(store.chains().records(), &ladder);
+    let Some(lineage) = corpus.lineage(&args.slug) else {
+        bail!("there is no lineage called {}", args.slug);
+    };
+    let Some(dossier) = lineage.current() else {
+        bail!("{} holds no engram to rotate", args.slug);
+    };
+    let from = dossier.engram;
+    let label = corpus.label(&from);
+
+    let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
+    // Resolved before any screen opens: an error after an empty alternate
+    // screen is an error nobody saw.
     let current = if args.force {
         None
     } else {
-        Some(verifiers.get(&args.slug)?.ok_or_else(|| {
-            anyhow::anyhow!(
-                "there is no verifier for {} on this machine, so there is nothing to prove against. Use --force to re-enroll",
+        match verifiers.get(&from)? {
+            Some(verifier) => Some(verifier),
+            None => bail!(
+                "{label} is dormant on this machine, so there is nothing to prove against.\n\
+                 rote attach {} if the secret is unchanged; rote rotate --force {} if it is not",
+                args.slug,
                 args.slug
-            )
-        })?)
+            ),
+        }
     };
-    let today = ctx.today();
-    let heading = format!("rekey {}", args.slug);
-    let mut dialog = dialog(args.stdin, ctx)?;
 
-    let mut piped_secrets = if args.stdin {
-        piped(if args.force { 1 } else { 2 })?.into_iter()
+    let today = ctx.today();
+    let heading = label.clone();
+    let lines = if args.force { 1 } else { 2 };
+    let mut fed = if args.stdin {
+        dialog::piped(lines)?
     } else {
-        Vec::new().into_iter()
+        Vec::new()
     };
+    fed.reverse();
+    let mut console = dialog::open(args.stdin, ctx)?;
 
     if let Some(current) = current
-        && let Some(code) = prove(
-            &current,
-            piped_secrets.next(),
-            &mut dialog,
-            today,
-            &heading,
-            ctx,
-        )?
+        && let Some(code) =
+            dialog::prove(&current, fed.pop(), console.as_mut(), today, &heading, ctx)?
     {
         return Ok(code);
     }
 
-    let secret = if let Some(secret) = piped_secrets.next() {
-        secret
-    } else {
-        let Some(console) = dialog.as_mut() else {
-            bail!("--stdin wants a new secret on its own line");
-        };
-        match twice(console, today, &heading, "the new secret, typed twice", ctx)? {
-            Twice::Agreed(secret) => secret,
-            Twice::Abandoned => return abandoned(console, today, &heading),
-            Twice::Differed => return refused(console, today, &heading, DIFFERED),
-        }
+    let Some(secret) = settle(
+        ctx,
+        &mut console,
+        today,
+        &heading,
+        "the new secret, typed twice",
+        fed.pop(),
+    )?
+    else {
+        return Ok(INCOMPLETE);
     };
-    if secret.is_empty() {
-        return match dialog.as_mut() {
-            Some(console) => refused(console, today, &heading, EMPTY),
-            None => bail!("{EMPTY}"),
-        };
-    }
+
+    let to = EngramId::mint()?;
     let verifier = make_verifier(&secret)?;
     drop(secret);
 
-    let version = slug.version.saturating_add(1);
-    verifiers.set(&args.slug, &verifier);
+    // The rotation owes the secret it retires this: keyed by engram, setting the
+    // new one no longer overwrites the old, and a verifier for a secret that has
+    // been rotated away is a live oracle for it.
+    verifiers.remove(&from);
+    verifiers.set(to, &args.slug, today, &verifier);
     verifiers.save(&ctx.paths.verifiers())?;
 
-    store.append(&stamped(
-        ctx,
+    store.append(
+        ctx.clock.now(),
         today,
-        Event::Rekey(Rekeyed {
+        Event::Rotate(Rotated {
             slug: args.slug.clone(),
-            version,
+            from,
+            to,
             proved: !args.force,
         }),
-    ))?;
-    let after = State::replay(store.journal().lines());
-    write_cache(ctx, &after, today)?;
-    let said = format!(
-        "{} rekeyed to version {version} · the ladder starts over",
-        args.slug
-    );
-    match dialog.as_mut() {
-        Some(console) => tui::outcome(console, today, &heading, &said, Tint::Green)?,
-        None => {
-            if !ctx.quiet {
-                println!("{said}");
-            }
-        }
-    }
-    Ok(CLEAN)
+    )?;
+
+    let after = Corpus::replay(store.chains().records(), &ladder);
+    write_cache(ctx, &after, &verifiers, today, &ladder)?;
+    let ordinal = after
+        .lineage(&args.slug)
+        .and_then(|lineage| lineage.ordinal(&to))
+        .unwrap_or(1);
+    let said = format!("{}@{ordinal} rotated · the ladder starts over", args.slug);
+    dialog::settled(ctx, console.as_mut(), today, &heading, &said)
 }
 
+/// `rote retire`.
+///
+/// # Errors
+///
+/// When the lineage is unknown or already retired, or nothing can be written.
 pub fn retire(ctx: &Context, args: &RetireArgs) -> Result<u8> {
-    let mut store = Store::open(ctx.paths.clone())?;
-    let state = State::replay(store.journal().lines());
-    let Some(slug) = state.get(&args.slug) else {
-        bail!("there is no slug called {}", args.slug);
-    };
-    if slug.retired {
-        bail!("{} is already retired", args.slug);
-    }
-    // The verifier goes with it: an oracle for a secret nobody drills any more
-    // is cost with no benefit.
+    let mut store = open_store(ctx)?;
+    let ladder = ctx.config.ladder()?;
+    let corpus = Corpus::replay(store.chains().records(), &ladder);
+    let lineage = live(&corpus, &args.slug)?;
+
     let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
-    verifiers.remove(&args.slug);
+    for dossier in &lineage.engrams {
+        verifiers.remove(&dossier.engram);
+    }
     verifiers.save(&ctx.paths.verifiers())?;
 
     let today = ctx.today();
-    store.append(&stamped(
-        ctx,
+    store.append(
+        ctx.clock.now(),
         today,
         Event::Retire(Retired {
             slug: args.slug.clone(),
         }),
-    ))?;
-    let after = State::replay(store.journal().lines());
-    write_cache(ctx, &after, today)?;
+    )?;
+
+    let after = Corpus::replay(store.chains().records(), &ladder);
+    write_cache(ctx, &after, &verifiers, today, &ladder)?;
     if !ctx.quiet {
         println!(
-            "{} retired · its history stays, its verifier does not",
+            "{} retired · its history stays, its verifiers do not",
             args.slug
         );
     }
     Ok(CLEAN)
 }
 
-pub fn probe(ctx: &Context, args: &ProbeArgs) -> Result<u8> {
-    let mut store = Store::open(ctx.paths.clone())?;
-    let state = State::replay(store.journal().lines());
-    let Some(slug) = state.get(&args.slug) else {
-        bail!("there is no slug called {}", args.slug);
+fn live<'a>(corpus: &'a Corpus, slug: &crate::slug::Slug) -> Result<&'a Lineage> {
+    let Some(lineage) = corpus.lineage(slug) else {
+        bail!("there is no lineage called {slug}");
     };
-    if slug.retired {
-        bail!(
-            "{} is retired, and a horizon on it would never be reached",
-            args.slug
-        );
+    if lineage.retired {
+        bail!("{slug} is retired, so nothing drills it");
     }
-    let today = ctx.today();
-    let until = if args.clear {
-        None
-    } else {
-        let Some(days) = args.days else {
-            bail!("say how far out the horizon sits, with --in <DAYS>, or drop it with --clear");
-        };
-        if days == 0 || days > HORIZON_MAX_DAYS {
-            bail!("a horizon sits one day to a year out, and {days} is neither");
-        }
-        Some(
-            today
-                .checked_add(jiff::Span::new().days(i64::from(days)))
-                .context("that horizon does not land on a date")?,
-        )
-    };
-    store.append(&stamped(
-        ctx,
-        today,
-        Event::Probe(Probed {
-            slug: args.slug.clone(),
-            until,
-        }),
-    ))?;
-    let after = State::replay(store.journal().lines());
-    write_cache(ctx, &after, today)?;
-    if !ctx.quiet {
-        match until {
-            Some(day) => println!("{} held out of the reminder until {day}", args.slug),
-            None => println!("{} back on the schedule", args.slug),
-        }
-    }
-    Ok(CLEAN)
+    Ok(lineage)
 }
 
-const DIFFERED: &str = "the two entries differ";
-const EMPTY: &str = "an empty secret is not a secret";
-const NOT_CURRENT: &str = "that is not the current secret, so nothing was replaced";
-
-/// Prove the current secret before a rotation replaces it.
-///
-/// Without it a verifier could be replaced by one somebody else knows, and the
-/// reading would still say memorised. At a terminal a slipped key costs a try,
-/// not the command; a pipe gets the one line it sent. `Some(code)` means the
-/// rotation stopped here and that is the status to leave on.
-fn prove(
-    current: &Verifier,
-    piped: Option<Secret>,
-    dialog: &mut Option<term::Terminal>,
-    today: Date,
-    heading: &str,
+/// Take one secret, from a pipe once or from a terminal twice.
+fn take_one(
     ctx: &Context,
-) -> Result<Option<u8>> {
-    if let Some(offered) = piped {
-        return if current.accepts(&offered)? {
-            Ok(None)
-        } else {
-            bail!("{NOT_CURRENT}")
-        };
-    }
-    let Some(console) = dialog.as_mut() else {
-        bail!("--stdin wants the current secret first, then the new one");
-    };
-    let tries = ctx.config.max_attempts();
-    for attempt in 1..=tries {
-        let status =
-            (attempt > 1).then(|| format!("not the current secret · try {attempt} of {tries}"));
-        let Some(offered) = typed(
-            console,
-            today,
-            heading,
-            "prove the current secret before it is replaced",
-            status.as_deref(),
-        )?
-        else {
-            return abandoned(console, today, heading).map(Some);
-        };
-        if current.accepts(&offered)? {
-            return Ok(None);
-        }
-    }
-    refused(console, today, heading, NOT_CURRENT).map(Some)
-}
-
-/// The screen a secret is typed on, or nothing when this is a pipe.
-///
-/// The only place a dialog is opened. Raw mode and the alternate screen are
-/// process-wide, so a command that opens a second one puts the terminal back
-/// under the first — and holding that to one call site is what keeps a later
-/// edit from reintroducing it. `Terminal::enter` refuses a second all the same.
-fn dialog(stdin: bool, ctx: &Context) -> Result<Option<term::Terminal>> {
-    if stdin {
-        return Ok(None);
-    }
-    term::Terminal::enter(ctx.style).map(Some)
-}
-
-/// Ask for one secret. `None` means the dialog was abandoned rather than
-/// answered.
-fn typed(
-    console: &mut term::Terminal,
+    console: &mut Option<term::Terminal>,
     today: Date,
     heading: &str,
     intention: &str,
-    status: Option<&str>,
+    stdin: bool,
 ) -> Result<Option<Secret>> {
-    let prompt = tui::Ask {
-        heading,
-        intention,
-        status,
-    };
-    match tui::ask(console, today, &prompt)? {
-        tui::Typed::Submitted(entry) => Ok(Some(entry.secret)),
-        // Nothing here has a vault to consult: the secret being enrolled is the
-        // one the reader brought with them.
-        tui::Typed::Skipped | tui::Typed::Aborted | tui::Typed::Lookup => Ok(None),
-    }
+    let fed = if stdin { dialog::piped(1)?.pop() } else { None };
+    settle(ctx, console, today, heading, intention, fed)
 }
 
-/// How a double entry ended.
-enum Twice {
-    /// Both entries agreed.
-    Agreed(Secret),
-    /// The dialog was walked away from.
-    Abandoned,
-    /// The rounds ran out with the two entries still apart.
-    Differed,
-}
-
-/// Ask for a secret twice until the two agree, for as many rounds as the drill
-/// allows tries. A mismatch is said on the line under the field and the pair
-/// is asked for again; a blind field gives no other way to find the slip.
-fn twice(
-    console: &mut term::Terminal,
+/// A secret from the pipe if there is one, else a double entry at the terminal.
+fn settle(
+    ctx: &Context,
+    console: &mut Option<term::Terminal>,
     today: Date,
     heading: &str,
     intention: &str,
-    ctx: &Context,
-) -> Result<Twice> {
-    let rounds = ctx.config.max_attempts();
-    for round in 1..=rounds {
-        let status = (round > 1).then_some(DIFFERED);
-        let Some(first) = typed(console, today, heading, intention, status)? else {
-            return Ok(Twice::Abandoned);
-        };
-        let Some(again) = typed(console, today, heading, "again", None)? else {
-            return Ok(Twice::Abandoned);
-        };
-        if first.same_as(&again) {
-            return Ok(Twice::Agreed(first));
+    fed: Option<Secret>,
+) -> Result<Option<Secret>> {
+    if let Some(secret) = fed {
+        if secret.is_empty() {
+            bail!("{EMPTY}");
+        }
+        return Ok(Some(secret));
+    }
+    let Some(console) = console.as_mut() else {
+        bail!("--stdin wants the secret on its own line");
+    };
+    match dialog::twice(console, today, heading, intention, ctx)? {
+        Twice::Agreed(secret) => Ok(Some(*secret)),
+        Twice::Abandoned => {
+            dialog::abandoned(console, today, heading)?;
+            Ok(None)
+        }
+        Twice::Differed => {
+            dialog::refused(console, today, heading, DIFFERED)?;
+            Ok(None)
         }
     }
-    Ok(Twice::Differed)
-}
-
-/// Close a dialog that was walked away from.
-fn abandoned(console: &mut term::Terminal, today: Date, heading: &str) -> Result<u8> {
-    tui::outcome(console, today, heading, "nothing was changed", Tint::Dim)?;
-    Ok(INCOMPLETE)
-}
-
-/// Close a dialog on an outcome that is a refusal.
-///
-/// Said on the card and held, rather than raised: the screen is erased on the
-/// way out, so an error printed after it is an error printed to a person who has
-/// already been told nothing.
-fn refused(console: &mut term::Terminal, today: Date, heading: &str, text: &str) -> Result<u8> {
-    tui::outcome(console, today, heading, text, Tint::Red)?;
-    Ok(INCOMPLETE)
-}
-
-/// Read secrets from a pipe, one per line.
-///
-/// Refused when stdin is a terminal: a secret typed into an echoing read lands
-/// on the screen and in scrollback. That the command line itself must carry no
-/// secret is the pipe's own discipline, and no stream check can enforce it.
-fn piped(count: usize) -> Result<Vec<Secret>> {
-    use std::io::{IsTerminal as _, Read as _};
-    if std::io::stdin().is_terminal() {
-        bail!("--stdin is for a pipe. At a terminal, type the secret instead");
-    }
-    let mut buffer = zeroize::Zeroizing::new(Vec::new());
-    std::io::stdin()
-        .read_to_end(&mut buffer)
-        .context("reading stdin")?;
-    let mut secrets = Vec::new();
-    for line in buffer.split(|byte| *byte == b'\n').take(count) {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        secrets.push(
-            Secret::from_bytes(line).context("that is longer than a secret this tool will take")?,
-        );
-    }
-    if secrets.len() < count {
-        bail!("expected {count} lines on stdin, one secret per line");
-    }
-    Ok(secrets)
-}
-
-fn make_verifier(secret: &Secret) -> Result<Verifier> {
-    let mut salt = [0u8; crate::verifier::SALT_LEN];
-    getrandom::fill(&mut salt).context("drawing a salt")?;
-    Ok(Verifier::create(secret, &salt)?)
 }

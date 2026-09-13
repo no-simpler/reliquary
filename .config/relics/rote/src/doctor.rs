@@ -2,18 +2,25 @@
 //!
 //! `assay`'s registry station puts `doctor --format json` to every registered
 //! binary on a two-second budget, so nothing here hashes anything: the report is
-//! a reading of the log and of the parameters the verifiers already carry.
+//! a reading of the corpus and of the parameters the verifiers already carry.
+//!
+//! **Defects only.** A fact that `status` or `stats` already states does not
+//! also belong here — one home per reading, or two of them go stale apart.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use jiff::civil::Date;
 use relic_core::finding::{Detail, Finding, FixHint, Report, Severity, StationId, Summary};
 use relic_core::style::{Style, Tint};
 
-use crate::ladder::{Gate, Standing};
-use crate::model::State;
-use crate::store::{Issue, Journal, Paths, Verifiers};
+use crate::corpus::Corpus;
+use crate::corpus::chain::{Chains, Issue};
+use crate::corpus::record::Event;
+use crate::ladder::{Ladder, Standing};
+use crate::machine::{Flagship, MachineId};
+use crate::store::Paths;
 use crate::verifier::M_COST_KIB;
+use crate::verifier::file::Verifiers;
 
 /// Days past due before an outstanding review is worth reporting. A drill taken
 /// a day late is a drill taken.
@@ -23,111 +30,218 @@ fn station() -> StationId {
     StationId::from_static("rote")
 }
 
+fn verifiers_station() -> StationId {
+    StationId::from_static("rote-verifiers")
+}
+
+fn corpus_station() -> StationId {
+    StationId::from_static("rote-corpus")
+}
+
+fn drill_station() -> StationId {
+    StationId::from_static("rote-drill")
+}
+
+fn machine_station() -> StationId {
+    StationId::from_static("rote-machine")
+}
+
 fn summary(text: &str) -> Summary {
     Summary::lossy(text)
 }
 
+/// Everything a report needs, gathered by the caller so this never reads the
+/// world itself.
+pub struct Health<'a> {
+    /// The chains, as read.
+    pub chains: &'a Chains,
+    /// What they add up to.
+    pub corpus: &'a Corpus,
+    /// What this machine holds.
+    pub verifiers: &'a Verifiers,
+    /// Where everything lives.
+    pub paths: &'a Paths,
+    /// This machine.
+    pub machine: &'a MachineId,
+    /// Whether it may write.
+    pub flagship: &'a Flagship,
+    /// The drill day.
+    pub today: Date,
+    /// The schedule.
+    pub ladder: &'a Ladder,
+}
+
 /// Read the state of the drill.
-pub fn report(
-    journal: &Journal,
-    state: &State,
-    verifiers: &Verifiers,
-    paths: &Paths,
-    today: Date,
-    host: &str,
-) -> Report {
+pub fn report(health: &Health<'_>) -> Report {
     let mut findings = Vec::new();
-    findings.extend(placement_findings(paths));
-    findings.extend(log_findings(journal, host));
-    findings.extend(slug_findings(state, verifiers, today));
-    findings.extend(orphan_findings(state, verifiers, paths));
+    findings.extend(placement(health));
+    findings.extend(verifier_findings(health));
+    findings.extend(chain_findings(health));
+    findings.extend(divergence(health));
+    findings.extend(concurrency(health));
+    findings.extend(drill_findings(health));
+    findings.extend(machine_findings(health));
     Report::ran(station(), findings)
 }
 
 /// The placement rule, enforced rather than trusted: a verifier is an
-/// offline-attackable oracle, and the log tree replicates to two providers and
-/// keeps prior versions. A config that puts one inside the other is broken
-/// however healthy everything else is.
-fn placement_findings(paths: &Paths) -> Vec<Finding> {
-    if !paths.verifiers().starts_with(&paths.log_dir) {
+/// offline-attackable oracle, and the corpus tree replicates to two providers
+/// and keeps prior versions.
+fn placement(health: &Health<'_>) -> Vec<Finding> {
+    if !health.paths.verifiers().starts_with(&health.paths.log_dir) {
         return Vec::new();
     }
     vec![
-        station()
+        verifiers_station()
             .broken(summary(
-                "the verifier file sits inside the log tree, which replicates offsite and keeps prior versions",
+                "the verifier file sits inside the corpus tree, which replicates offsite and keeps prior versions",
             ))
             .detailed_with(Detail::new(format!(
                 "{}\nunder {}",
-                paths.verifiers(),
-                paths.log_dir
+                health.paths.verifiers(),
+                health.paths.log_dir
             )))
             .fixed_by(FixHint::lossy(
-                "point state elsewhere in the config, then rote rekey --force each slug",
+                "point state elsewhere in the config, then rote attach each lineage",
             )),
     ]
 }
 
-/// A verifier the schedule has no use for: its slug is retired, or the log has
-/// never heard of it. An oracle nobody drills is cost with no benefit, and a
-/// verifier that outlived its retirement is one a removal missed.
-fn orphan_findings(state: &State, verifiers: &Verifiers, paths: &Paths) -> Vec<Finding> {
-    let scheduled: BTreeSet<&str> = state
-        .scheduled()
-        .into_iter()
-        .map(|slug| slug.slug.as_str())
-        .collect();
-    let orphans: Vec<String> = verifiers
-        .names()
-        .filter(|name| !scheduled.contains(name))
-        .map(str::to_owned)
-        .collect();
-    if orphans.is_empty() {
-        return Vec::new();
-    }
-    vec![
-        station()
-            .soft(summary(
-                "a verifier is held for a slug that is not on the schedule",
-            ))
-            .detailed_with(Detail::new(orphans.join("\n")))
-            .fixed_by(FixHint::lossy(&format!(
-                "remove the entry from {}",
-                paths.verifiers()
-            ))),
-    ]
-}
+/// What this machine holds that it should not, and what it holds badly.
+fn verifier_findings(health: &Health<'_>) -> Vec<Finding> {
+    let mut weak = Vec::new();
+    let mut unreadable = Vec::new();
+    let mut superseded = Vec::new();
+    let mut orphan = Vec::new();
+    let mut mislabelled = Vec::new();
 
-/// A report for the case where the log could not be read at all. Not knowing is
-/// not a clean bill of health.
-pub fn unreadable(why: &str) -> Report {
-    Report::ran(
-        station(),
-        vec![
-            station()
-                .finds(Severity::Broken, summary("the drill log could not be read"))
-                .detailed_with(Detail::new(why)),
-        ],
-    )
-}
-
-fn log_findings(journal: &Journal, host: &str) -> Vec<Finding> {
-    let mut findings = Vec::new();
-    let mut malformed = Vec::new();
-    let mut chain = Vec::new();
-    let mut future = Vec::new();
-    for issue in &journal.issues {
-        match issue {
-            Issue::Malformed { line, why } => malformed.push(format!("line {line}: {why}")),
-            Issue::ChainBreak { line } => chain.push(format!("line {line}")),
-            Issue::FromTheFuture { line, v } => future.push(format!("line {line}: schema {v}")),
+    for (engram, held) in health.verifiers.held() {
+        match health.verifiers.get(engram) {
+            Ok(Some(verifier)) => {
+                if verifier.meets_floor().is_ok_and(|ok| !ok) {
+                    weak.push(format!(
+                        "{}  m={} against a floor of {M_COST_KIB}",
+                        health.corpus.label(engram),
+                        verifier.m_cost_kib().unwrap_or_default()
+                    ));
+                }
+            }
+            Ok(None) | Err(_) => unreadable.push(health.corpus.label(engram)),
+        }
+        match health.corpus.owner(engram) {
+            None => orphan.push(format!("{}  {}", held.slug, engram)),
+            Some(lineage) => {
+                if held.slug != lineage.slug {
+                    mislabelled.push(format!(
+                        "{engram}  filed under {} and the corpus says {}",
+                        held.slug, lineage.slug
+                    ));
+                }
+                let current = lineage.current().is_some_and(|d| d.engram == *engram);
+                if !current {
+                    superseded.push(health.corpus.label(engram));
+                } else if lineage.retired {
+                    orphan.push(format!("{}  retired", lineage.slug));
+                }
+            }
         }
     }
+
+    let mut findings = Vec::new();
+    if !weak.is_empty() {
+        findings.push(
+            verifiers_station()
+                .broken(summary(
+                    "a verifier is weaker than the artifact it verifies, which makes it the cheaper attack path",
+                ))
+                .detailed_with(Detail::new(weak.join("\n")))
+                .fixed_by(FixHint::lossy("rote rotate the lineage named below")),
+        );
+    }
+    if !unreadable.is_empty() {
+        findings.push(
+            verifiers_station()
+                .broken(summary(
+                    "a verifier will not parse, so the drill cannot judge that engram",
+                ))
+                .detailed_with(Detail::new(unreadable.join("\n")))
+                .fixed_by(FixHint::lossy("rote attach the lineage named below")),
+        );
+    }
+    if !superseded.is_empty() {
+        findings.push(
+            verifiers_station()
+                .broken(summary(
+                    "a verifier is held for an engram the corpus has superseded, which is a live oracle for a secret that was rotated away",
+                ))
+                .detailed_with(Detail::new(superseded.join("\n")))
+                .fixed_by(FixHint::lossy(&format!(
+                    "remove the entry from {}",
+                    health.paths.verifiers()
+                ))),
+        );
+    }
+    if !mislabelled.is_empty() {
+        findings.push(
+            verifiers_station()
+                .soft(summary(
+                    "a verifier names a lineage the corpus does not, so the file has been edited by hand",
+                ))
+                .detailed_with(Detail::new(mislabelled.join("\n"))),
+        );
+    }
+    if !orphan.is_empty() {
+        findings.push(
+            verifiers_station()
+                .soft(summary("a verifier is held for an engram nothing drills"))
+                .detailed_with(Detail::new(orphan.join("\n")))
+                .fixed_by(FixHint::lossy(&format!(
+                    "remove the entry from {}",
+                    health.paths.verifiers()
+                ))),
+        );
+    }
+    findings
+}
+
+/// What is wrong with the files themselves.
+fn chain_findings(health: &Health<'_>) -> Vec<Finding> {
+    let mut future = Vec::new();
+    let mut malformed = Vec::new();
+    let mut broken = Vec::new();
+    let mut gaps = Vec::new();
+    let mut foreign = Vec::new();
+
+    for issue in &health.chains.issues {
+        match issue {
+            Issue::FromTheFuture { machine, line, v } => {
+                future.push(format!("{machine} line {line}  schema {v}"));
+            }
+            Issue::Malformed { machine, line, why } => {
+                malformed.push(format!("{machine} line {line}  {why}"));
+            }
+            Issue::ChainBreak { machine, line } => broken.push(format!("{machine} line {line}")),
+            Issue::SeqBreak {
+                machine,
+                line,
+                expected,
+                found,
+            } => gaps.push(format!(
+                "{machine} line {line}  expected {expected}, found {found}"
+            )),
+            Issue::MachineMismatch { file, claimed } => {
+                foreign.push(format!("{file}  claims {claimed}"));
+            }
+            Issue::Foreign { file } => foreign.push(file.clone()),
+        }
+    }
+
+    let mut findings = Vec::new();
     if !future.is_empty() {
         findings.push(
-            station()
+            corpus_station()
                 .broken(summary(
-                    "the log holds records from a newer schema, so nothing here can be trusted",
+                    "a chain holds records written by a newer rote, so this one will not add to it",
                 ))
                 .detailed_with(Detail::new(future.join("\n")))
                 .fixed_by(FixHint::lossy("upgrade rote on this machine")),
@@ -135,159 +249,208 @@ fn log_findings(journal: &Journal, host: &str) -> Vec<Finding> {
     }
     if !malformed.is_empty() {
         findings.push(
-            station()
-                .broken(summary("the log holds lines that will not parse"))
+            corpus_station()
+                .broken(summary("a chain holds lines that will not parse"))
                 .detailed_with(Detail::new(malformed.join("\n"))),
         );
     }
-    if !chain.is_empty() {
+    if !broken.is_empty() {
         findings.push(
-            station()
+            corpus_station()
                 .broken(summary(
-                    "the log's hash chain is broken, so it has been edited or truncated",
+                    "a chain's digests do not chain, so it has been edited or cut",
                 ))
-                .detailed_with(Detail::new(chain.join("\n"))),
+                .detailed_with(Detail::new(broken.join("\n"))),
         );
     }
-    let strangers: Vec<&String> = journal
-        .hosts
-        .iter()
-        .filter(|written| written.as_str() != host)
-        .collect();
-    if !strangers.is_empty() {
-        let names: Vec<String> = strangers.into_iter().cloned().collect();
+    if !foreign.is_empty() {
         findings.push(
-            station()
-                .soft(summary(
-                    "the log has been written by another machine, and it is not a mergeable structure",
+            corpus_station()
+                .broken(summary(
+                    "something in the chains directory is not a chain, and its records are excluded",
                 ))
-                .detailed_with(Detail::new(names.join("\n")))
-                .fixed_by(FixHint::lossy("drill on one machine, and copy rather than sync")),
+                .detailed_with(Detail::new(foreign.join("\n")))
+                .fixed_by(FixHint::lossy(
+                    "move it out of the chains directory, or delete it if it is a copy",
+                )),
+        );
+    }
+    if !gaps.is_empty() {
+        findings.push(
+            corpus_station()
+                .soft(summary("a chain's positions do not run in order"))
+                .detailed_with(Detail::new(gaps.join("\n"))),
         );
     }
     findings
 }
 
-fn slug_findings(state: &State, verifiers: &Verifiers, today: Date) -> Vec<Finding> {
-    let scheduled = state.scheduled();
-    if scheduled.is_empty() {
-        return vec![station().note(summary("no slugs are being drilled"))];
+/// A capture whose recorded predecessor is not the one merged order gives it.
+///
+/// The witness earning its keep: two machines that wrote without having seen
+/// each other each believed a different history, and this is where that shows.
+fn divergence(health: &Health<'_>) -> Vec<Finding> {
+    let mut rungs: BTreeMap<crate::corpus::record::EngramId, u8> = BTreeMap::new();
+    let mut found = Vec::new();
+    for record in health.chains.records() {
+        let Event::Capture(capture) = &record.event else {
+            continue;
+        };
+        if !capture.scores() {
+            continue;
+        }
+        let seen = rungs.get(&capture.engram).copied().unwrap_or(0);
+        if capture.rung_before != seen {
+            found.push(format!(
+                "{}  {}  says it followed rung {} and merged order gives rung {seen}",
+                health.corpus.label(&capture.engram),
+                record.day,
+                capture.rung_before
+            ));
+        }
+        rungs.insert(capture.engram, capture.rung_after);
     }
-    let mut found = Found::default();
-
-    for slug in scheduled {
-        match slug.standing(today) {
-            Standing::Due => {
-                let late = slug.days_overdue(today);
-                if late > GRACE_DAYS {
-                    found
-                        .overdue
-                        .push(format!("{}: {late} days past due", slug.slug));
-                }
-            }
-            Standing::Probe | Standing::Held { .. } | Standing::Waiting { .. } => {}
-        }
-        match verifiers.get(&slug.slug) {
-            Ok(Some(verifier)) => {
-                if verifier.meets_floor().is_ok_and(|meets| !meets) {
-                    let cost = verifier.m_cost_kib().unwrap_or(0);
-                    found.weak.push(format!(
-                        "{}: {cost} KiB, against a floor of {M_COST_KIB} KiB",
-                        slug.slug
-                    ));
-                }
-            }
-            Ok(None) => found.missing.push(slug.slug.to_string()),
-            Err(error) => found.weak.push(format!("{}: {error}", slug.slug)),
-        }
-        if let Gate::Ready { passes } = slug.gate() {
-            found
-                .ready
-                .push(format!("{}: {passes} cold passes at the cap", slug.slug));
-        }
-        if slug.critical && slug.first_unaided.is_none() {
-            found.unproven.push(slug.slug.to_string());
-        }
-        if slug.aided_mismatch {
-            found.mismatched.push(slug.slug.to_string());
-        }
+    if found.is_empty() {
+        return Vec::new();
     }
-
-    found.into_findings()
+    vec![
+        corpus_station()
+            .soft(summary(
+                "a capture does not follow the one before it, so two chains were written against different histories",
+            ))
+            .detailed_with(Detail::new(found.join("\n")))
+            .fixed_by(FixHint::lossy("drill on one machine · rote machines")),
+    ]
 }
 
-/// What the scan collected, one list per finding it can produce.
-#[derive(Default)]
-struct Found {
-    overdue: Vec<String>,
-    missing: Vec<String>,
-    weak: Vec<String>,
-    ready: Vec<String>,
-    unproven: Vec<String>,
-    mismatched: Vec<String>,
+/// Two machines writing on one drill day, which double-counts retention.
+fn concurrency(health: &Health<'_>) -> Vec<Finding> {
+    let mut days: BTreeMap<Date, BTreeSet<&MachineId>> = BTreeMap::new();
+    for record in health.chains.records() {
+        days.entry(record.day).or_default().insert(&record.machine);
+    }
+    let shared: Vec<String> = days
+        .into_iter()
+        .filter(|(_, machines)| machines.len() > 1)
+        .map(|(day, machines)| {
+            let names: Vec<String> = machines.into_iter().map(ToString::to_string).collect();
+            format!("{day}  {}", names.join(", "))
+        })
+        .collect();
+    if shared.is_empty() {
+        return Vec::new();
+    }
+    vec![
+        corpus_station()
+            .soft(summary(
+                "two machines wrote on one drill day, so a reading may be counted twice",
+            ))
+            .detailed_with(Detail::new(shared.join("\n")))
+            .fixed_by(FixHint::lossy("drill on the flagship · rote machines")),
+    ]
 }
 
-impl Found {
-    fn into_findings(self) -> Vec<Finding> {
-        let mut findings = Vec::new();
-        if !self.weak.is_empty() {
-            findings.push(
-                station()
-                    .broken(summary(
-                        "a verifier is weaker than the artifact it verifies, which makes it the cheaper attack path",
-                    ))
-                    .detailed_with(Detail::new(self.weak.join("\n")))
-                    .fixed_by(FixHint::lossy("rote rekey the slug named below")),
-            );
+/// What is wrong with the drill itself.
+fn drill_findings(health: &Health<'_>) -> Vec<Finding> {
+    let mut overdue = Vec::new();
+    let mut dormant = Vec::new();
+    let mut mismatched = Vec::new();
+
+    for lineage in health.corpus.active() {
+        let Some(dossier) = lineage.current() else {
+            continue;
+        };
+        let label = health.corpus.label(&dossier.engram);
+        if !health.verifiers.holds(&dossier.engram) {
+            dormant.push(label.clone());
         }
-        if !self.missing.is_empty() {
-            findings.push(
-                station()
-                    .soft(summary(
-                        "a slug on the schedule has no verifier on this machine",
-                    ))
-                    .detailed_with(Detail::new(self.missing.join("\n")))
-                    .fixed_by(FixHint::lossy("rote rekey --force the slug named below")),
-            );
+        if matches!(dossier.standing(health.today, health.ladder), Standing::Due) {
+            let late = dossier.days_overdue(health.today, health.ladder);
+            if late > GRACE_DAYS {
+                overdue.push(format!(
+                    "{label}  {}",
+                    relic_core::fmt::plural(
+                        usize::try_from(late).unwrap_or(usize::MAX),
+                        "day late",
+                        "days late"
+                    )
+                ));
+            }
         }
-        if !self.overdue.is_empty() {
-            findings.push(
-                station()
-                    .soft(summary("a drill is overdue"))
-                    .detailed_with(Detail::new(self.overdue.join("\n")))
-                    .fixed_by(FixHint::lossy("rote")),
-            );
+        if dossier.aided_mismatch {
+            mismatched.push(label);
         }
-        if !self.mismatched.is_empty() {
-            findings.push(
-                station()
-                    .soft(summary(
-                        "an aided entry was refused, so the vault and the verifier hold different secrets",
-                    ))
-                    .detailed_with(Detail::new(self.mismatched.join("\n")))
-                    .fixed_by(FixHint::lossy(
-                        "confirm which one is current, then rote rekey",
-                    )),
-            );
-        }
-        if !self.unproven.is_empty() {
-            findings.push(
-                station()
-                    .note(summary(
-                        "a critical slug has never been recalled without the answer in front of it",
-                    ))
-                    .detailed_with(Detail::new(self.unproven.join("\n"))),
-            );
-        }
-        if !self.ready.is_empty() {
-            findings.push(
-                station()
-                    .note(summary("a slug has cleared the cutover gate"))
-                    .detailed_with(Detail::new(self.ready.join("\n"))),
-            );
-        }
-        findings
     }
+
+    let mut findings = Vec::new();
+    if !dormant.is_empty() {
+        findings.push(
+            drill_station()
+                .soft(summary(
+                    "a lineage on the schedule has no verifier on this machine, so it cannot be drilled",
+                ))
+                .detailed_with(Detail::new(dormant.join("\n")))
+                .fixed_by(FixHint::lossy("rote")),
+        );
+    }
+    if !overdue.is_empty() {
+        findings.push(
+            drill_station()
+                .soft(summary("a drill is overdue"))
+                .detailed_with(Detail::new(overdue.join("\n")))
+                .fixed_by(FixHint::lossy("rote")),
+        );
+    }
+    if !mismatched.is_empty() {
+        findings.push(
+            drill_station()
+                .soft(summary(
+                    "an aided capture was refused, so the vault and the verifier hold different secrets",
+                ))
+                .detailed_with(Detail::new(mismatched.join("\n")))
+                .fixed_by(FixHint::lossy(
+                    "confirm which one is current, then rote rotate",
+                )),
+        );
+    }
+    findings
+}
+
+/// What this machine is.
+fn machine_findings(health: &Health<'_>) -> Vec<Finding> {
+    match health.flagship {
+        Flagship::Here => Vec::new(),
+        Flagship::Absent => vec![
+            machine_station()
+                .note(summary(
+                    "this machine is not the flagship, so rote will not write here",
+                ))
+                .detailed_with(Detail::new(format!("{} is absent", health.paths.marker))),
+        ],
+        Flagship::Elsewhere { named } => vec![
+            machine_station()
+                .soft(summary(
+                    "the flagship marker names another machine, so rote will not write here",
+                ))
+                .detailed_with(Detail::new(format!(
+                    "{} names {named}\nthis machine is {}",
+                    health.paths.marker, health.machine
+                ))),
+        ],
+    }
+}
+
+/// A report for the case where the corpus could not be read at all. Not knowing
+/// is not a clean bill of health.
+pub fn unreadable(why: &str) -> Report {
+    Report::ran(
+        station(),
+        vec![
+            corpus_station()
+                .finds(Severity::Broken, summary("the corpus could not be read"))
+                .detailed_with(Detail::new(why)),
+        ],
+    )
 }
 
 /// The human shape: one line per finding, with the verdict last.
@@ -329,301 +492,9 @@ pub fn render(report: &Report, style: Style) -> String {
             findings.len()
         )),
         relic_core::finding::Grade::Broken => {
-            style.bold(&format!("!!> rote BROKEN — {} to look at", findings.len()))
+            style.red(&format!("!!> rote broken — {} to look at", findings.len()))
         }
     };
     lines.push(verdict);
     lines.join("\n")
-}
-
-#[cfg(test)]
-mod tests {
-    use jiff::civil::{Date, date};
-    use relic_core::finding::{Grade, Outcome, Severity};
-
-    use super::{GRACE_DAYS, unreadable};
-    use crate::ladder::Class;
-    use crate::log::{Added, Attempted, Digest, Event, Line, Record, Retired, SCHEMA, SessionId};
-    use crate::model::State;
-    use crate::store::{Journal, Paths, Verifiers};
-    use crate::verifier::Verifier;
-
-    fn paths() -> Paths {
-        Paths {
-            log_dir: "/x/ark/rote".into(),
-            state_dir: "/x/state/rote".into(),
-        }
-    }
-
-    fn report(
-        journal: &Journal,
-        state: &State,
-        verifiers: &Verifiers,
-        today: Date,
-        host: &str,
-    ) -> relic_core::finding::Report {
-        super::report(journal, state, verifiers, &paths(), today, host)
-    }
-
-    const PHC: &str = "$argon2id$v=19$m=262144,t=4,p=1$CQkJCQkJCQkJCQkJCQkJCQ$\
-                       PdWLZDvNGYPMYWPfbSZq7yZO0eFRHmiGnLTuNBAxUC0";
-    const WEAK: &str = "$argon2id$v=19$m=64,t=1,p=1$CQkJCQkJCQkJCQkJCQkJCQ$\
-                        PdWLZDvNGYPMYWPfbSZq7yZO0eFRHmiGnLTuNBAxUC0";
-
-    fn line(day: Date, event: Event) -> Line {
-        Line::Parsed(Box::new(Record {
-            v: SCHEMA,
-            at: day.to_zoned(jiff::tz::TimeZone::UTC).unwrap().timestamp(),
-            day,
-            host: "Mac".to_owned(),
-            prev: Digest::GENESIS,
-            event,
-        }))
-    }
-
-    fn added(day: Date, name: &str) -> Line {
-        line(
-            day,
-            Event::Add(Added {
-                slug: name.parse().unwrap(),
-                version: 1,
-                critical: false,
-            }),
-        )
-    }
-
-    fn review(day: Date, name: &str, effective: u32, before: u8, after: u8) -> Line {
-        line(
-            day,
-            Event::Attempt(Attempted {
-                slug: name.parse().unwrap(),
-                session: SessionId::from_bytes([0; 8]),
-                version: 1,
-                class: Class::Review,
-                attempt: 1,
-                outcome: crate::log::Outcome::Pass,
-                ttfk_ms: Some(900),
-                total_ms: Some(3_000),
-                corrections: 0,
-                paste_refused: 0,
-                scheduled_interval_days: 7,
-                actual_interval_days: Some(effective),
-                effective_interval_days: Some(effective),
-                stretch: false,
-                step_before: before,
-                step_after: after,
-            }),
-        )
-    }
-
-    fn verifiers(names: &[(&str, &str)]) -> Verifiers {
-        let mut out = Verifiers::default();
-        for (name, phc) in names {
-            out.set(&name.parse().unwrap(), &Verifier::parse(phc).unwrap());
-        }
-        out
-    }
-
-    fn findings(report: &relic_core::finding::Report) -> Vec<(Severity, String)> {
-        match &report.outcome {
-            Outcome::Ran(findings) => findings
-                .iter()
-                .map(|f| (f.severity, f.summary.as_str().to_owned()))
-                .collect(),
-            Outcome::Skipped(_) => Vec::new(),
-        }
-    }
-
-    #[test]
-    fn a_healthy_drill_reports_nothing_and_grades_clean() {
-        let lines = vec![added(date(2026, 9, 10), "a")];
-        let report = report(
-            &Journal::default(),
-            &State::replay(&lines),
-            &verifiers(&[("a", PHC)]),
-            date(2026, 9, 10),
-            "Mac",
-        );
-        assert!(findings(&report).is_empty(), "{:?}", findings(&report));
-        assert_eq!(report.grade(), Grade::Ok);
-    }
-
-    #[test]
-    fn an_empty_roster_is_a_note_rather_than_a_complaint() {
-        let report = report(
-            &Journal::default(),
-            &State::default(),
-            &Verifiers::default(),
-            date(2026, 9, 10),
-            "Mac",
-        );
-        assert_eq!(findings(&report).len(), 1);
-        assert_eq!(report.grade(), Grade::Ok, "a note is read, never counted");
-    }
-
-    #[test]
-    fn a_slug_never_reviewed_still_falls_overdue() {
-        let lines = vec![added(date(2026, 9, 1), "a")];
-        let late = report(
-            &Journal::default(),
-            &State::replay(&lines),
-            &verifiers(&[("a", PHC)]),
-            date(2026, 9, 30),
-            "Mac",
-        );
-        assert!(
-            findings(&late).iter().any(|f| f.1.contains("overdue")),
-            "{:?}",
-            findings(&late)
-        );
-        assert_eq!(late.grade(), Grade::Soft);
-    }
-
-    #[test]
-    fn a_verifier_inside_the_log_tree_is_broken() {
-        let inside = Paths {
-            log_dir: "/x/ark/rote".into(),
-            state_dir: "/x/ark/rote/state".into(),
-        };
-        let report = super::report(
-            &Journal::default(),
-            &State::default(),
-            &Verifiers::default(),
-            &inside,
-            date(2026, 9, 10),
-            "Mac",
-        );
-        assert_eq!(report.grade(), Grade::Broken);
-        assert!(
-            findings(&report)
-                .iter()
-                .any(|f| f.1.contains("inside the log tree")),
-            "{:?}",
-            findings(&report)
-        );
-    }
-
-    #[test]
-    fn a_verifier_for_a_retired_or_unknown_slug_is_soft() {
-        let lines = vec![
-            added(date(2026, 9, 1), "a"),
-            added(date(2026, 9, 1), "b"),
-            line(
-                date(2026, 9, 2),
-                Event::Retire(Retired {
-                    slug: "b".parse().unwrap(),
-                }),
-            ),
-        ];
-        let report = report(
-            &Journal::default(),
-            &State::replay(&lines),
-            &verifiers(&[("a", PHC), ("b", PHC), ("ghost", PHC)]),
-            date(2026, 9, 2),
-            "Mac",
-        );
-        let found = findings(&report);
-        let orphan = found
-            .iter()
-            .find(|f| f.1.contains("not on the schedule"))
-            .expect("an orphan finding");
-        assert_eq!(orphan.0, Severity::Soft);
-        assert_eq!(report.grade(), Grade::Soft);
-    }
-
-    #[test]
-    fn a_drill_past_the_grace_is_soft_and_one_inside_it_is_nothing() {
-        let lines = vec![
-            added(date(2026, 9, 1), "a"),
-            review(date(2026, 9, 2), "a", 1, 3, 4),
-        ];
-        let state = State::replay(&lines);
-        let inside = date(2026, 9, 9)
-            .checked_add(jiff::Span::new().days(i64::from(GRACE_DAYS)))
-            .unwrap();
-        let quiet = report(
-            &Journal::default(),
-            &state,
-            &verifiers(&[("a", PHC)]),
-            inside,
-            "Mac",
-        );
-        assert!(findings(&quiet).is_empty(), "{:?}", findings(&quiet));
-
-        let late = report(
-            &Journal::default(),
-            &state,
-            &verifiers(&[("a", PHC)]),
-            date(2026, 9, 30),
-            "Mac",
-        );
-        assert_eq!(findings(&late).first().map(|f| f.0), Some(Severity::Soft));
-        assert_eq!(late.grade(), Grade::Soft);
-    }
-
-    #[test]
-    fn a_missing_verifier_is_soft_and_says_how_to_get_one_back() {
-        let lines = vec![added(date(2026, 9, 10), "a")];
-        let report = report(
-            &Journal::default(),
-            &State::replay(&lines),
-            &Verifiers::default(),
-            date(2026, 9, 10),
-            "Mac",
-        );
-        let found = findings(&report);
-        assert_eq!(found.len(), 1);
-        assert_eq!(found.first().unwrap().0, Severity::Soft);
-        assert!(found.first().unwrap().1.contains("no verifier"));
-    }
-
-    #[test]
-    fn a_verifier_below_the_floor_is_broken() {
-        let lines = vec![added(date(2026, 9, 10), "a")];
-        let report = report(
-            &Journal::default(),
-            &State::replay(&lines),
-            &verifiers(&[("a", WEAK)]),
-            date(2026, 9, 10),
-            "Mac",
-        );
-        assert_eq!(report.grade(), Grade::Broken);
-    }
-
-    #[test]
-    fn an_edited_log_is_broken_and_a_second_machine_is_soft() {
-        let mut journal = Journal::parse("{ not json\n");
-        journal.hosts.insert("Other".to_owned());
-        let report = report(
-            &journal,
-            &State::default(),
-            &Verifiers::default(),
-            date(2026, 9, 10),
-            "Mac",
-        );
-        let severities: Vec<Severity> = findings(&report).into_iter().map(|f| f.0).collect();
-        assert!(severities.contains(&Severity::Broken));
-        assert!(severities.contains(&Severity::Soft));
-        assert_eq!(report.grade(), Grade::Broken);
-    }
-
-    #[test]
-    fn a_log_that_could_not_be_read_is_broken_rather_than_silent() {
-        let report = unreadable("permission denied");
-        assert_eq!(report.grade(), Grade::Broken);
-    }
-
-    #[test]
-    fn the_wire_form_is_a_single_report_the_registry_can_read() {
-        let report = report(
-            &Journal::default(),
-            &State::default(),
-            &Verifiers::default(),
-            date(2026, 9, 10),
-            "Mac",
-        );
-        let text = serde_json::to_string(&report).unwrap();
-        let back: relic_core::finding::Report = serde_json::from_str(&text).unwrap();
-        assert_eq!(back.station.as_str(), "rote");
-    }
 }

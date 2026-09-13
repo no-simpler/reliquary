@@ -1,0 +1,30 @@
+---
+source: rote/tests/wording.rs
+expression: body
+---
+KEYS
+
+  At a drill prompt:
+
+    enter       submit what is typed, or concede by submitting nothing
+    escape      pass this one over
+    ctrl-u      start the entry over
+    ctrl-l      go and look it up, then type it as an aided entry. Offered only
+                after a cold try is already on record
+    ctrl-c      abandon the sitting
+
+  At an attachment prompt, where a verifier is being made rather than checked:
+
+    enter       submit this half of the pair. An empty entry is refused rather
+                than conceded, because there is nothing here to concede to
+    escape      leave the lineage dormant. Nothing is written
+    ctrl-u      start the entry over
+    ctrl-c      abandon the sitting
+
+  There is no lookup at an attachment prompt. Offering one would imply that
+  what is typed is being checked against something, and it is not.
+
+  When nothing is due, bare rote asks whether you want to practice anyway. That
+  is one keystroke and no return: y practices, any other key leaves it.
+
+  A paste is refused everywhere a secret is typed.

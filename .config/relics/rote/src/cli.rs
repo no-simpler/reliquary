@@ -8,8 +8,8 @@ use crate::slug::Slug;
 
 /// Both namespaces, advertised where a reader will look for them.
 pub const ROOT_AFTER_LONG_HELP: &str = "\
-rote guide ladder|irregularity|custody|probes = doctrine
-rote help keys|intervals|records|files|stdin|exit = reference topics";
+rote guide ladder|irregularity|custody = doctrine
+rote help keys|intervals|records|files|machines|stdin|exit = reference topics";
 
 /// The daily drill.
 #[derive(Parser)]
@@ -18,9 +18,10 @@ rote help keys|intervals|records|files|stdin|exit = reference topics";
     version,
     about = "Spaced-repetition drill for the passwords you must hold in your head.",
     long_about = "Spaced-repetition drill for the passwords you must hold in your head.\n\n\
-                  Called bare, rote runs today's session: what is due, plus whatever the filler \
-                  policy adds as unscored practice. It records what was actually done rather than \
-                  insisting on a schedule, so drilling more often, or less, both stay measurable.\n\n\
+                  Called bare, rote asks for whatever the schedule wants today. If nothing is \
+                  due it offers voluntary practice instead, on one keystroke. It keeps a faithful \
+                  record and proposes a schedule; it renders no verdict, so what the numbers mean \
+                  is yours to decide.\n\n\
                   The secret is held in no recoverable form. rote can say wrong; it can never say \
                   what the right answer was.",
     after_long_help = ROOT_AFTER_LONG_HELP,
@@ -28,7 +29,7 @@ rote help keys|intervals|records|files|stdin|exit = reference topics";
     infer_subcommands = true
 )]
 pub struct Cli {
-    /// Bare, this runs today's session.
+    /// Bare, this runs today's sitting.
     #[command(subcommand)]
     pub command: Option<Command>,
 
@@ -36,6 +37,7 @@ pub struct Cli {
     #[arg(long)]
     pub aided: bool,
 
+    /// Flags every command carries.
     #[command(flatten)]
     pub global: Global,
 }
@@ -63,32 +65,36 @@ pub struct Global {
 /// Everything rote can be asked to do.
 #[derive(Subcommand)]
 pub enum Command {
-    /// Show the schedule, the ladder position and the cutover gate.
+    /// Show the schedule, the rung and what this machine holds.
     #[command(visible_alias = "due")]
     Status(ScheduleArgs),
 
-    /// Show retention, latency, lapses and punctuality.
+    /// Show retention, latency, lapses and punctuality, per engram.
     Stats(MeasurementArgs),
 
     /// Show recent records.
     Log(LogArgs),
 
-    /// Drill without scoring, whatever the schedule says.
+    /// Every machine that has written to the corpus, and this one.
+    Machines,
+
+    /// Drill without the schedule asking, whatever it says.
     Practice(PracticeArgs),
 
-    /// Enroll a slug. The secret is typed twice and stored only as a verifier.
-    Add(AddArgs),
+    /// Enroll a lineage. The secret is typed twice and kept only as a verifier.
+    Enroll(EnrollArgs),
 
-    /// Hold a slug out of the reminder until a chosen day, then take it cold.
-    Probe(ProbeArgs),
+    /// Make a verifier here for an engram this machine is dormant on. Nothing is
+    /// verified: rote takes your word that the secret is unchanged.
+    Attach(AttachArgs),
 
-    /// Replace a slug's verifier after a rotation.
-    Rekey(RekeyArgs),
+    /// Supersede a lineage's engram with a new secret. Its ladder starts over.
+    Rotate(RotateArgs),
 
-    /// Take a slug off the schedule. Its history stays; its verifier does not.
+    /// Take a lineage off the schedule. Its history stays; its verifiers do not.
     Retire(RetireArgs),
 
-    /// Report the state of the drill, for assay and for yadm doctor.
+    /// Report the state of the drill, for assay and for coop.
     Doctor,
 
     /// One line for the shell, or nothing. Reads only the reminder cache.
@@ -111,9 +117,13 @@ pub enum Command {
 /// back would make the relic uncommittable.
 #[derive(Args, Default)]
 pub struct ScheduleArgs {
-    /// Include retired slugs.
+    /// Include retired lineages.
     #[arg(long)]
     pub all: bool,
+
+    /// Include engrams that have been superseded.
+    #[arg(long)]
+    pub history: bool,
 }
 
 /// Arguments for the measurement.
@@ -122,6 +132,10 @@ pub struct MeasurementArgs {
     /// How many days the headline figures cover.
     #[arg(long, value_name = "N", default_value_t = crate::stats::WINDOW_DAYS)]
     pub days: u32,
+
+    /// Roll up per lineage, which shows only what survives a rotation.
+    #[arg(long)]
+    pub lineage: bool,
 }
 
 /// Arguments for the record listing.
@@ -131,24 +145,24 @@ pub struct LogArgs {
     #[arg(short = 'n', long, value_name = "N", default_value_t = 20)]
     pub count: usize,
 
-    /// Only this slug.
-    #[arg(long, value_name = "SLUG")]
-    pub slug: Option<Slug>,
+    /// Only this lineage.
+    #[arg(long, value_name = "LINEAGE")]
+    pub lineage: Option<Slug>,
 }
 
 /// Arguments for voluntary practice.
 #[derive(Args)]
 pub struct PracticeArgs {
-    /// Which slugs. All of them when none is named.
-    #[arg(value_name = "SLUG")]
-    pub slugs: Vec<Slug>,
+    /// Which lineages. All of them when none is named.
+    #[arg(value_name = "LINEAGE")]
+    pub lineages: Vec<Slug>,
 }
 
-/// Arguments for enrollment.
+/// Arguments for enrolment.
 #[derive(Args)]
-pub struct AddArgs {
-    /// The slug, which by convention matches the 1Password item title.
-    #[arg(value_name = "SLUG")]
+pub struct EnrollArgs {
+    /// The lineage, which by convention matches the 1Password item title.
+    #[arg(value_name = "LINEAGE")]
     pub slug: Slug,
 
     /// Losing this one is unrecoverable rather than inconvenient. Criticals are
@@ -162,32 +176,27 @@ pub struct AddArgs {
     pub stdin: bool,
 }
 
-/// Arguments for a stretch horizon.
+/// Arguments for an attachment.
 #[derive(Args)]
-pub struct ProbeArgs {
-    /// The slug.
-    #[arg(value_name = "SLUG")]
+pub struct AttachArgs {
+    /// The lineage.
+    #[arg(value_name = "LINEAGE")]
     pub slug: Slug,
 
-    /// How far out the horizon sits, in days. Thirty to ninety is the useful
-    /// range.
-    #[arg(long = "in", value_name = "DAYS", conflicts_with = "clear")]
-    pub days: Option<u32>,
-
-    /// Drop a horizon that is no longer wanted.
+    /// Read the secret from a pipe instead of a terminal.
     #[arg(long)]
-    pub clear: bool,
+    pub stdin: bool,
 }
 
 /// Arguments for a rotation.
 #[derive(Args)]
-pub struct RekeyArgs {
-    /// The slug.
-    #[arg(value_name = "SLUG")]
+pub struct RotateArgs {
+    /// The lineage.
+    #[arg(value_name = "LINEAGE")]
     pub slug: Slug,
 
-    /// Replace without proving the current secret. This is a re-enrollment, and
-    /// the log records it as one.
+    /// Replace without proving the current secret. The record says it was not
+    /// proved.
     #[arg(long)]
     pub force: bool,
 
@@ -199,8 +208,8 @@ pub struct RekeyArgs {
 /// Arguments for retirement.
 #[derive(Args)]
 pub struct RetireArgs {
-    /// The slug.
-    #[arg(value_name = "SLUG")]
+    /// The lineage.
+    #[arg(value_name = "LINEAGE")]
     pub slug: Slug,
 }
 
@@ -240,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn bare_rote_is_the_daily_session() {
+    fn bare_rote_is_the_daily_sitting() {
         let cli = Cli::parse_from(["rote"]);
         assert!(cli.command.is_none());
     }
@@ -259,13 +268,28 @@ mod tests {
     }
 
     #[test]
-    fn a_horizon_is_either_set_or_cleared_and_never_both() {
-        assert!(Cli::try_parse_from(["rote", "probe", "a", "--in", "45", "--clear"]).is_err());
-        assert!(Cli::try_parse_from(["rote", "probe", "a", "--in", "45"]).is_ok());
+    fn a_bad_lineage_name_is_refused_at_the_edge() {
+        assert!(Cli::try_parse_from(["rote", "enroll", "Not A Slug"]).is_err());
     }
 
     #[test]
-    fn a_bad_slug_is_refused_at_the_edge() {
-        assert!(Cli::try_parse_from(["rote", "add", "Not A Slug"]).is_err());
+    fn the_three_secret_taking_verbs_are_distinct_commands() {
+        assert!(matches!(
+            Cli::parse_from(["rote", "enroll", "a"]).command,
+            Some(super::Command::Enroll(_))
+        ));
+        assert!(matches!(
+            Cli::parse_from(["rote", "attach", "a"]).command,
+            Some(super::Command::Attach(_))
+        ));
+        assert!(matches!(
+            Cli::parse_from(["rote", "rotate", "a"]).command,
+            Some(super::Command::Rotate(_))
+        ));
+    }
+
+    #[test]
+    fn the_horizon_is_gone_and_so_is_the_verb_that_set_one() {
+        assert!(Cli::try_parse_from(["rote", "probe", "a"]).is_err());
     }
 }

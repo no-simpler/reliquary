@@ -1,0 +1,24 @@
+---
+source: rote/tests/wording.rs
+expression: body
+---
+IRREGULARITY
+
+  The schedule is a proposal and the actual cadence is yours. Drilling more
+  often than proposed, less often, or not at all for a fortnight are all
+  ordinary, and all three stay measurable.
+
+  Three intervals are recorded. The scheduled one is what the ladder asked for.
+  The actual one is how long it had been since the schedule was last served. The
+  effective one is how long it had been since the secret was in front of a
+  person at all, by any route, and that is the honest retention interval: extra
+  practice cannot dress a one-day recall up as a month-long one, and a fortnight
+  away arrives as long-interval evidence rather than as a gap.
+
+  Those figures are recomputed from the whole record rather than read back off
+  the line that carries them. A machine writes what it could see at the time,
+  and two machines that wrote without having seen each other saw different
+  things.
+
+  A week away from the drill is therefore where long-interval readings come
+  from, and they are banded with everything else in rote stats.

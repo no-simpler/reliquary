@@ -1,38 +1,52 @@
 //! The measurement.
 //!
 //! Everything here is windowed and bucketed rather than assuming a cadence,
-//! because the cadence is a human's and will not hold. The load-bearing field
-//! is `effective_interval_days` — days since the previous entry of **any**
-//! kind — which is what keeps both directions of irregularity honest: extra
-//! practice cannot dress a one-day recall up as a seven-day one, and a fortnight
-//! away arrives as long-horizon evidence rather than as noise.
+//! because the cadence is a human's and will not hold.
+//!
+//! **Computed from merged truth, never from what one writer believed.** The
+//! interval a record carries is what the machine that wrote it could see; two
+//! machines that drilled the same engram without having seen each other would
+//! each claim a full interval for one real gap. So the gap between one drill and
+//! the exposure before it is recomputed here, from the merged corpus, and the
+//! recorded field stays a witness for `doctor` to compare against.
+//!
+//! **Per engram, not per lineage.** A rotation is a different secret and a
+//! different memory, so pooling the two into one retention figure is a number
+//! about nothing. Only what survives a rotation rolls up.
 //!
 //! `rote stats` doubles as a canary for neurological change, which is why
 //! latency is reported at all: it rises before the first failure.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use jiff::civil::Date;
 
-use crate::ladder::{self, Class};
-use crate::log::{Attempted, Event, Line, Outcome};
+use crate::corpus::Corpus;
+use crate::corpus::drill::{Drill, drills};
+use crate::corpus::record::{EngramId, Event, Outcome, Record};
+use crate::ladder::{self, Ladder, Occasion};
 use crate::slug::Slug;
 
-/// Entries older than this are out of the headline figures.
+/// Records older than this are out of the headline figures.
 pub const WINDOW_DAYS: u32 = 90;
 
-/// How many entries each half of the latency comparison wants before it will
+/// How many readings each half of the latency comparison wants before it will
 /// say anything at all.
 pub const TREND_WINDOW: usize = 10;
 
-/// The fewest entries in a half that still supports a reading.
+/// The fewest readings in a half that still supports a reading.
 pub const TREND_FLOOR: usize = 6;
+
+/// A change smaller than this reads as noise rather than as a signal.
+pub const TREND_NOISE_PERCENT: u32 = 20;
 
 /// A pass rate, carrying its own sample size so a percentage is never read
 /// without one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Retention {
-    /// First-attempt passes.
+    /// First-sample passes.
     pub passes: u32,
-    /// First attempts.
+    /// First samples.
     pub total: u32,
 }
 
@@ -50,7 +64,7 @@ impl Retention {
     }
 }
 
-/// One band of effective interval.
+/// One band of interval.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Bucket {
     /// How the band is spelled.
@@ -59,8 +73,8 @@ pub struct Bucket {
     pub retention: Retention,
 }
 
-/// The bands, in order. The tail is what irregular invocation populates, and it
-/// is the only source of decay data at this artifact's horizon.
+/// The bands, in order. The tail is what irregular invocation populates, and
+/// with the ladder reaching a month the cap itself now lands in it.
 const BANDS: [(&str, u32, u32); 5] = [
     ("1d", 0, 1),
     ("2-4d", 2, 4),
@@ -69,10 +83,10 @@ const BANDS: [(&str, u32, u32); 5] = [
     ("31d+", 31, u32::MAX),
 ];
 
-/// Which way latency is moving for a slug.
+/// Which way latency is moving.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trend {
-    /// Not enough entries on one side to say. Reported as such, never as
+    /// Not enough readings on one side to say. Reported as such, never as
     /// "steady".
     Unknown,
     /// Within noise.
@@ -83,13 +97,14 @@ pub enum Trend {
     Falling(u32),
 }
 
-/// A change smaller than this reads as noise rather than as a signal.
-pub const TREND_NOISE_PERCENT: u32 = 20;
-
-/// What the log says about one slug's timings.
+/// What the record says about one engram.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SlugStats {
-    /// The slug.
+pub struct EngramStats {
+    /// The engram.
+    pub engram: EngramId,
+    /// How it is spelled to a person.
+    pub label: String,
+    /// Its lineage.
     pub slug: Slug,
     /// Pass rate over scheduled reviews.
     pub retention: Retention,
@@ -101,29 +116,53 @@ pub struct SlugStats {
     pub trend: Trend,
     /// Recent time-to-first-keystroke, oldest first, for a sparkline.
     pub recent_ttfk: Vec<u64>,
-    /// First-attempt aided entries in the window. Not recall, so it sits beside
-    /// the retention figure rather than inside it.
+    /// Aided drills in the window. Not recall, so it sits beside the retention
+    /// figure rather than inside it.
     pub aided: u32,
+    /// Consecutive unaided first-sample passes, most recent first, whose gap
+    /// since the previous exposure reached the cap interval.
+    ///
+    /// The one number behind *do not change a lock until the new key has
+    /// survived spacing*. It is reported and never judged: what counts as
+    /// enough is a person's call, taken with this in front of them.
+    pub streak: u32,
 }
 
-/// A first-attempt failure on an entry that scored.
+/// What survives a rotation, rolled up over a whole lineage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LineageStats {
+    /// The lineage.
+    pub slug: Slug,
+    /// How many engrams it has held.
+    pub engrams: usize,
+    /// Drills taken across all of them.
+    pub drills: u32,
+    /// Aided drills across all of them.
+    pub aided: u32,
+    /// Lapses across all of them.
+    pub lapses: u32,
+    /// How late its reviews ran.
+    pub punctuality: Punctuality,
+}
+
+/// A first-sample failure on a drill the schedule asked for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Lapse {
-    /// The slug.
-    pub slug: Slug,
+    /// How the engram is spelled to a person.
+    pub label: String,
     /// The drill day.
     pub day: Date,
     /// What the ladder had asked for.
     pub scheduled: u32,
-    /// What it actually got.
-    pub effective: Option<u32>,
+    /// What it actually got, measured across the merged corpus.
+    pub effective: u32,
 }
 
 impl Lapse {
     /// Whether the failure came after a longer gap than the schedule asked for.
     /// A lapse beyond schedule is expected decay; one at or below it is not.
     pub fn beyond_schedule(&self) -> bool {
-        self.effective.is_some_and(|days| days > self.scheduled)
+        self.effective > self.scheduled
     }
 }
 
@@ -138,6 +177,12 @@ pub struct Punctuality {
     pub median_lateness: Option<u64>,
 }
 
+/// One drill, with the gap the merged corpus says preceded it.
+struct Measured<'a> {
+    drill: &'a Drill<'a>,
+    gap: u32,
+}
+
 /// The whole reading.
 #[derive(Clone, Debug)]
 pub struct Stats {
@@ -149,37 +194,33 @@ pub struct Stats {
     /// Pass rate over practice, reported separately so it can be compared
     /// rather than confused.
     pub practice: Retention,
-    /// Aided entries, and how many of them the verifier accepted. A refusal here
+    /// Aided drills, and how many of them the verifier accepted. A refusal here
     /// is not a memory reading at all: it means what the vault holds and what
     /// the verifier expects have diverged.
     pub aided: Retention,
-    /// Retention by effective interval.
+    /// Retention by interval.
     pub buckets: Vec<Bucket>,
-    /// Per slug.
-    pub slugs: Vec<SlugStats>,
-    /// Every first-attempt failure that scored, most recent first.
+    /// Per engram.
+    pub engrams: Vec<EngramStats>,
+    /// What rolls up per lineage.
+    pub lineages: Vec<LineageStats>,
+    /// Every first-sample failure that measured, most recent first.
     pub lapses: Vec<Lapse>,
     /// How late reviews ran.
     pub punctuality: Punctuality,
 }
 
 impl Stats {
-    /// Read the log.
-    pub fn gather<'a>(lines: impl IntoIterator<Item = &'a Line>, today: Date, window: u32) -> Self {
-        let entries: Vec<(Date, &Attempted)> = lines
-            .into_iter()
-            .filter_map(Line::record)
-            .filter_map(|record| match &record.event {
-                Event::Attempt(entry) => Some((record.day, entry)),
-                Event::Add(_) | Event::Rekey(_) | Event::Retire(_) | Event::Probe(_) => None,
-            })
-            .collect();
-
-        let in_window: Vec<(Date, &Attempted)> = entries
-            .iter()
-            .copied()
-            .filter(|(day, _)| ladder::days_between(*day, today) <= window)
-            .collect();
+    /// Read the corpus.
+    pub fn gather(
+        records: &[&Record],
+        corpus: &Corpus,
+        today: Date,
+        window: u32,
+        ladder: &Ladder,
+    ) -> Self {
+        let all = drills(records.iter().copied());
+        let measured = with_gaps(records, &all);
 
         let mut stats = Self {
             window_days: window,
@@ -193,144 +234,193 @@ impl Stats {
                     retention: Retention::default(),
                 })
                 .collect(),
-            slugs: Vec::new(),
+            engrams: Vec::new(),
+            lineages: Vec::new(),
             lapses: Vec::new(),
             punctuality: Punctuality::default(),
         };
 
         let mut lateness: Vec<u64> = Vec::new();
-        for (day, entry) in &in_window {
-            // An aided entry is not a first attempt at anything — it follows a
-            // miss — so it never reaches the first-attempt filter below.
-            if !entry.class.unaided() {
-                if let Some(accepted) = aided_verdict(entry) {
+        for item in &measured {
+            if !in_window(item.drill.day, today, window) {
+                continue;
+            }
+            let Some(first) = item.drill.first() else {
+                continue;
+            };
+            if item.drill.aided {
+                if let Some(accepted) = aided_verdict(first.outcome) {
                     stats.aided.record(accepted);
                 }
                 continue;
             }
-            let Some(passed) = scored(entry) else {
+            let Some(passed) = scored(first.outcome) else {
                 continue;
             };
-            match entry.class {
-                Class::Review => {
+            match item.drill.occasion {
+                Occasion::Review => {
                     stats.retention.record(passed);
-                    if let Some(actual) = entry.actual_interval_days {
-                        let late = actual.saturating_sub(entry.scheduled_interval_days);
-                        lateness.push(u64::from(late));
-                        stats.punctuality.total = stats.punctuality.total.saturating_add(1);
-                        if late <= 1 {
-                            stats.punctuality.on_time = stats.punctuality.on_time.saturating_add(1);
-                        }
+                    let late = first
+                        .actual_interval_days
+                        .saturating_sub(first.scheduled_interval_days);
+                    lateness.push(u64::from(late));
+                    stats.punctuality.total = stats.punctuality.total.saturating_add(1);
+                    if late <= 1 {
+                        stats.punctuality.on_time = stats.punctuality.on_time.saturating_add(1);
+                    }
+                    if !passed {
+                        stats.lapses.push(Lapse {
+                            label: corpus.label(&item.drill.engram),
+                            day: item.drill.day,
+                            scheduled: first.scheduled_interval_days,
+                            effective: item.gap,
+                        });
                     }
                 }
-                Class::Practice => stats.practice.record(passed),
-                Class::Probe | Class::Aided => {}
+                Occasion::Practice => stats.practice.record(passed),
             }
-            // A probe is a cold reading at a chosen horizon, so it belongs in
-            // the bands: it is the only source of decay data out at that
-            // distance, which is the whole reason for taking one.
-            if (entry.class.scores() || entry.class == Class::Probe)
-                && let Some(bucket) = stats.bucket_for(entry.effective_interval_days)
-            {
+            if let Some(bucket) = band_of(&mut stats.buckets, item.gap) {
                 bucket.retention.record(passed);
-            }
-            // It is not a lapse, though. A lapse is the ladder going back to the
-            // foot, and a probe moves the ladder in neither direction — the
-            // horizon was asked for, so failing it is a reading rather than a
-            // slip in the schedule.
-            if entry.class.scores() && !passed {
-                stats.lapses.push(Lapse {
-                    slug: entry.slug.clone(),
-                    day: *day,
-                    scheduled: entry.scheduled_interval_days,
-                    effective: entry.effective_interval_days,
-                });
             }
         }
         stats.punctuality.median_lateness = median(&mut lateness);
         stats.lapses.reverse();
-        stats.slugs = per_slug(&entries, &in_window);
+        stats.engrams = per_engram(&measured, corpus, today, window, ladder);
+        stats.lineages = per_lineage(&measured, corpus, today, window);
         stats
-    }
-
-    fn bucket_for(&mut self, effective: Option<u32>) -> Option<&mut Bucket> {
-        let days = effective?;
-        let index = BANDS
-            .iter()
-            .position(|(_, lo, hi)| days >= *lo && days <= *hi)?;
-        self.buckets.get_mut(index)
     }
 }
 
-/// What an aided entry says about the vault and the verifier: accepted, refused,
-/// or nothing. A blank offered no answer, so it is evidence of no disagreement
-/// and is not counted as one.
-fn aided_verdict(entry: &Attempted) -> Option<bool> {
-    match entry.outcome {
+fn in_window(day: Date, today: Date, window: u32) -> bool {
+    ladder::days_between(day, today) <= window
+}
+
+fn band_of(buckets: &mut [Bucket], days: u32) -> Option<&mut Bucket> {
+    let index = BANDS
+        .iter()
+        .position(|(_, lo, hi)| days >= *lo && days <= *hi)?;
+    buckets.get_mut(index)
+}
+
+/// Walk the merged corpus once, pairing each drill with the gap since that
+/// engram was last in front of a person by any route.
+fn with_gaps<'a>(records: &[&'a Record], all: &'a [Drill<'a>]) -> Vec<Measured<'a>> {
+    let mut exposed: BTreeMap<EngramId, Date> = BTreeMap::new();
+    let mut gaps: BTreeMap<(crate::corpus::record::SittingId, EngramId), u32> = BTreeMap::new();
+    let mut open: BTreeSet<(crate::corpus::record::SittingId, EngramId)> = BTreeSet::new();
+
+    for record in records {
+        match &record.event {
+            Event::Enroll(event) => {
+                exposed.insert(event.engram, record.day);
+            }
+            Event::Rotate(event) => {
+                exposed.insert(event.to, record.day);
+            }
+            Event::Attach(event) => {
+                exposed.insert(event.engram, record.day);
+            }
+            Event::Retire(_) => {}
+            Event::Capture(event) => {
+                if !event.outcome.exposed() {
+                    continue;
+                }
+                let key = (event.sitting, event.engram);
+                if open.insert(key) {
+                    let since = exposed
+                        .get(&event.engram)
+                        .map_or(0, |last| ladder::days_between(*last, record.day));
+                    gaps.insert(key, since);
+                }
+                exposed.insert(event.engram, record.day);
+            }
+        }
+    }
+
+    all.iter()
+        .map(|drill| Measured {
+            drill,
+            gap: gaps
+                .get(&(drill.sitting, drill.engram))
+                .copied()
+                .unwrap_or(0),
+        })
+        .collect()
+}
+
+/// What an aided drill says about the vault and the verifier: accepted, refused,
+/// or nothing. A blank offered no answer, so it is evidence of no disagreement.
+fn aided_verdict(outcome: Outcome) -> Option<bool> {
+    match outcome {
         Outcome::Pass => Some(true),
         Outcome::Fail => Some(false),
         Outcome::Blank | Outcome::Skip | Outcome::Abort => None,
     }
 }
 
-/// Whether an entry counts toward a rate, and whether it passed.
+/// Whether a first sample counts toward a rate, and whether it passed.
 ///
-/// Only the first try scores: a second entry in the same sitting is primed by
-/// the first and measures transcription rather than recall. A skip or an abort
-/// put nothing in front of anyone. A blank did: conceding is a failure of
-/// recall, not an absence of one.
-///
-/// This says nothing about class. An aided entry has an outcome like any other,
-/// and every caller that claims to measure recall filters it out first.
-fn scored(entry: &Attempted) -> Option<bool> {
-    if entry.attempt != 1 {
-        return None;
-    }
-    match entry.outcome {
+/// A skip or an abort put nothing in front of anyone. A blank did: conceding is
+/// a failure of recall, not an absence of one.
+fn scored(outcome: Outcome) -> Option<bool> {
+    match outcome {
         Outcome::Pass => Some(true),
         Outcome::Fail | Outcome::Blank => Some(false),
         Outcome::Skip | Outcome::Abort => None,
     }
 }
 
-fn per_slug(all: &[(Date, &Attempted)], in_window: &[(Date, &Attempted)]) -> Vec<SlugStats> {
-    let mut slugs: Vec<Slug> = all.iter().map(|(_, entry)| entry.slug.clone()).collect();
-    slugs.sort();
-    slugs.dedup();
+fn per_engram(
+    measured: &[Measured<'_>],
+    corpus: &Corpus,
+    today: Date,
+    window: u32,
+    ladder: &Ladder,
+) -> Vec<EngramStats> {
+    let mut order: Vec<EngramId> = measured.iter().map(|item| item.drill.engram).collect();
+    order.sort();
+    order.dedup();
 
-    slugs
+    let mut out: Vec<EngramStats> = order
         .into_iter()
-        .map(|slug| {
+        .filter_map(|engram| {
+            let mine: Vec<&Measured<'_>> = measured
+                .iter()
+                .filter(|item| item.drill.engram == engram)
+                .collect();
+
             let mut retention = Retention::default();
-            for (_, entry) in in_window.iter().filter(|(_, e)| e.slug == slug) {
-                if entry.class == Class::Review
-                    && let Some(passed) = scored(entry)
+            let mut aided = 0u32;
+            for item in mine
+                .iter()
+                .filter(|item| in_window(item.drill.day, today, window))
+            {
+                let Some(first) = item.drill.first() else {
+                    continue;
+                };
+                if item.drill.aided {
+                    if aided_verdict(first.outcome).is_some() {
+                        aided = aided.saturating_add(1);
+                    }
+                    continue;
+                }
+                if item.drill.occasion == Occasion::Review
+                    && let Some(passed) = scored(first.outcome)
                 {
                     retention.record(passed);
                 }
             }
 
-            // Latency is a claim about recall, so an aided entry — which
-            // measures transcription — never enters the series.
-            let firsts: Vec<&Attempted> = all
+            // Latency is a claim about recall, so an aided drill — which
+            // measures transcription — never enters the series. The series
+            // reaches past the window on purpose: a trend wants history.
+            let firsts: Vec<&crate::corpus::record::Captured> = mine
                 .iter()
-                .filter(|(_, entry)| {
-                    entry.slug == slug && entry.class.unaided() && scored(entry).is_some()
-                })
-                .map(|(_, entry)| *entry)
+                .filter(|item| !item.drill.aided)
+                .filter_map(|item| item.drill.first())
+                .filter(|first| scored(first.outcome).is_some())
                 .collect();
 
-            let aided = u32::try_from(
-                in_window
-                    .iter()
-                    .filter(|(_, entry)| {
-                        entry.slug == slug
-                            && !entry.class.unaided()
-                            && aided_verdict(entry).is_some()
-                    })
-                    .count(),
-            )
-            .unwrap_or(u32::MAX);
             let mut ttfk: Vec<u64> = firsts.iter().filter_map(|e| e.ttfk_ms).collect();
             let mut total: Vec<u64> = firsts.iter().filter_map(|e| e.total_ms).collect();
             let recent: Vec<u64> = ttfk
@@ -341,7 +431,11 @@ fn per_slug(all: &[(Date, &Attempted)], in_window: &[(Date, &Attempted)]) -> Vec
                 .copied()
                 .collect();
 
-            SlugStats {
+            let slug = mine.first().map(|item| item.drill.slug.clone())?;
+
+            Some(EngramStats {
+                engram,
+                label: corpus.label(&engram),
                 slug,
                 retention,
                 trend: trend(&ttfk),
@@ -349,6 +443,96 @@ fn per_slug(all: &[(Date, &Attempted)], in_window: &[(Date, &Attempted)]) -> Vec
                 total_ms: median(&mut total),
                 recent_ttfk: recent,
                 aided,
+                streak: streak(&mine, ladder),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.label.cmp(&b.label));
+    out
+}
+
+/// Consecutive unaided first-sample passes at the cap interval or longer,
+/// counted back from the most recent drill.
+///
+/// A pass below the cap is not evidence in either direction and is stepped over;
+/// a failure ends the run. Computed here rather than carried in the projection,
+/// because a threshold belongs where the thresholds are — and because a counter
+/// maintained across a merge would count one real interval twice.
+fn streak(mine: &[&Measured<'_>], ladder: &Ladder) -> u32 {
+    let cap = ladder.cap_days();
+    let mut count = 0u32;
+    for item in mine.iter().rev() {
+        if item.drill.aided || item.drill.occasion != Occasion::Review {
+            continue;
+        }
+        let Some(first) = item.drill.first() else {
+            continue;
+        };
+        match scored(first.outcome) {
+            Some(true) => {
+                if item.gap >= cap {
+                    count = count.saturating_add(1);
+                }
+            }
+            Some(false) => break,
+            None => {}
+        }
+    }
+    count
+}
+
+fn per_lineage(
+    measured: &[Measured<'_>],
+    corpus: &Corpus,
+    today: Date,
+    window: u32,
+) -> Vec<LineageStats> {
+    corpus
+        .lineages()
+        .map(|lineage| {
+            let mine: Vec<&Measured<'_>> = measured
+                .iter()
+                .filter(|item| *item.drill.slug == lineage.slug)
+                .filter(|item| in_window(item.drill.day, today, window))
+                .collect();
+
+            let mut aided = 0u32;
+            let mut lapses = 0u32;
+            let mut punctuality = Punctuality::default();
+            let mut lateness: Vec<u64> = Vec::new();
+            for item in &mine {
+                let Some(first) = item.drill.first() else {
+                    continue;
+                };
+                if item.drill.aided {
+                    aided = aided.saturating_add(1);
+                    continue;
+                }
+                if item.drill.occasion == Occasion::Review
+                    && let Some(passed) = scored(first.outcome)
+                {
+                    let late = first
+                        .actual_interval_days
+                        .saturating_sub(first.scheduled_interval_days);
+                    lateness.push(u64::from(late));
+                    punctuality.total = punctuality.total.saturating_add(1);
+                    if late <= 1 {
+                        punctuality.on_time = punctuality.on_time.saturating_add(1);
+                    }
+                    if !passed {
+                        lapses = lapses.saturating_add(1);
+                    }
+                }
+            }
+            punctuality.median_lateness = median(&mut lateness);
+
+            LineageStats {
+                slug: lineage.slug.clone(),
+                engrams: lineage.engrams.len(),
+                drills: u32::try_from(mine.len()).unwrap_or(u32::MAX),
+                aided,
+                lapses,
+                punctuality,
             }
         })
         .collect()
@@ -356,7 +540,7 @@ fn per_slug(all: &[(Date, &Attempted)], in_window: &[(Date, &Attempted)]) -> Vec
 
 /// Compare the last window of timings against the one before it.
 ///
-/// Fewer than [`TREND_FLOOR`] entries either side is [`Trend::Unknown`] rather
+/// Fewer than [`TREND_FLOOR`] readings either side is [`Trend::Unknown`] rather
 /// than "steady": not knowing is not the same as knowing nothing changed.
 fn trend(ttfk: &[u64]) -> Trend {
     let count = ttfk.len();
@@ -388,7 +572,7 @@ fn trend(ttfk: &[u64]) -> Trend {
 }
 
 /// The lower median. Chosen over a mean so that walking away mid-prompt needs no
-/// special case: one enormous entry moves a mean and does not move this.
+/// special case: one enormous reading moves a mean and does not move this.
 pub fn median(values: &mut [u64]) -> Option<u64> {
     if values.is_empty() {
         return None;
@@ -422,454 +606,240 @@ pub fn sparkline(values: &[u64]) -> String {
 mod tests {
     use jiff::civil::{Date, date};
 
-    use super::{Retention, Stats, TREND_FLOOR, Trend, median, sparkline};
-    use crate::ladder::Class;
-    use crate::log::{Attempted, Digest, Event, Line, Outcome, Record, SCHEMA, SessionId};
+    use super::{Stats, Trend, median, sparkline};
+    use crate::corpus::Corpus;
+    use crate::corpus::record::{
+        Attached, Captured, Digest, EngramId, Enrolled, Event, Outcome, Record, SCHEMA, SittingId,
+    };
+    use crate::ladder::{Ladder, Occasion};
+    use crate::machine::MachineId;
 
-    struct Entry {
-        day: Date,
-        slug: &'static str,
-        class: Class,
-        outcome: Outcome,
-        attempt: u8,
-        scheduled: u32,
-        actual: Option<u32>,
-        effective: Option<u32>,
-        ttfk: Option<u64>,
+    struct Build {
+        records: Vec<Record>,
+        engram: EngramId,
     }
 
-    impl Default for Entry {
-        fn default() -> Self {
-            Self {
-                day: date(2026, 9, 10),
-                slug: "a",
-                class: Class::Review,
-                outcome: Outcome::Pass,
-                attempt: 1,
-                scheduled: 7,
-                actual: Some(7),
-                effective: Some(7),
-                ttfk: Some(1_000),
-            }
+    impl Build {
+        fn new(day: Date) -> Self {
+            let engram = EngramId::mint().unwrap();
+            let mut build = Self {
+                records: Vec::new(),
+                engram,
+            };
+            build.push(
+                day,
+                Event::Enroll(Enrolled {
+                    slug: "a".parse().unwrap(),
+                    engram,
+                    critical: false,
+                }),
+            );
+            build
+        }
+
+        fn push(&mut self, day: Date, event: Event) {
+            let seq = u64::try_from(self.records.len()).unwrap();
+            self.records.push(Record {
+                v: SCHEMA,
+                at: day.to_zoned(jiff::tz::TimeZone::UTC).unwrap().timestamp(),
+                day,
+                machine: MachineId::of("test"),
+                host: "Mac".to_owned(),
+                seq,
+                prev: Digest::GENESIS,
+                event,
+            });
+        }
+
+        fn drill(&mut self, day: Date, occasion: Occasion, aided: bool, outcome: Outcome) {
+            let engram = self.engram;
+            self.push(
+                day,
+                Event::Capture(Captured {
+                    slug: "a".parse().unwrap(),
+                    engram,
+                    sitting: SittingId::mint().unwrap(),
+                    ordinal: 1,
+                    occasion,
+                    aided,
+                    outcome,
+                    ttfk_ms: Some(1_000),
+                    total_ms: Some(3_000),
+                    corrections: 0,
+                    paste_refused: 0,
+                    scheduled_interval_days: 30,
+                    // Deliberately a lie: the writer's belief is a witness, and
+                    // stats must not read it.
+                    actual_interval_days: 30,
+                    effective_interval_days: 30,
+                    rung_before: 6,
+                    rung_after: 6,
+                }),
+            );
+        }
+
+        fn gather(&self, today: Date) -> Stats {
+            let ladder = Ladder::default();
+            let borrowed: Vec<&Record> = self.records.iter().collect();
+            let corpus = Corpus::replay(borrowed.iter().copied(), &ladder);
+            Stats::gather(&borrowed, &corpus, today, 90, &ladder)
         }
     }
 
-    fn line(entry: &Entry) -> Line {
-        Line::Parsed(Box::new(Record {
-            v: SCHEMA,
-            at: entry
-                .day
-                .to_zoned(jiff::tz::TimeZone::UTC)
-                .unwrap()
-                .timestamp(),
-            day: entry.day,
-            host: "Mac".to_owned(),
-            prev: Digest::GENESIS,
-            event: Event::Attempt(Attempted {
-                slug: entry.slug.parse().unwrap(),
-                session: SessionId::from_bytes([0; 8]),
-                version: 1,
-                class: entry.class,
-                attempt: entry.attempt,
-                outcome: entry.outcome,
-                ttfk_ms: entry.ttfk,
-                total_ms: Some(3_000),
-                corrections: 0,
-                paste_refused: 0,
-                scheduled_interval_days: entry.scheduled,
-                actual_interval_days: entry.actual,
-                effective_interval_days: entry.effective,
-                stretch: false,
-                step_before: 4,
-                step_after: 4,
+    #[test]
+    fn the_gap_is_measured_across_the_corpus_and_not_taken_from_the_record() {
+        let mut build = Build::new(date(2026, 9, 1));
+        // Two drills one day apart, each claiming a thirty-day interval.
+        build.drill(date(2026, 9, 2), Occasion::Review, false, Outcome::Pass);
+        build.drill(date(2026, 9, 3), Occasion::Review, false, Outcome::Pass);
+        let stats = build.gather(date(2026, 9, 3));
+
+        let engram = stats.engrams.first().unwrap();
+        assert_eq!(
+            engram.streak, 0,
+            "a one-day gap is not evidence of thirty-day recall, whatever the record claims"
+        );
+        let one_day = stats
+            .buckets
+            .iter()
+            .find(|bucket| bucket.label == "1d")
+            .unwrap();
+        assert_eq!(one_day.retention.total, 2, "both land in the 1d band");
+    }
+
+    #[test]
+    fn a_streak_counts_back_from_the_last_drill_and_a_failure_ends_it() {
+        let mut build = Build::new(date(2026, 7, 2));
+        let mut day = date(2026, 8, 2);
+        for _ in 0..2 {
+            build.drill(day, Occasion::Review, false, Outcome::Pass);
+            day = day.checked_add(jiff::Span::new().days(30)).unwrap();
+        }
+        let streak = build.gather(day).engrams.first().unwrap().streak;
+        assert_eq!(streak, 2, "two cold passes at the cap");
+
+        build.drill(day, Occasion::Review, false, Outcome::Fail);
+        let after = build.gather(day).engrams.first().unwrap().streak;
+        assert_eq!(after, 0, "a lapse ends the run");
+    }
+
+    #[test]
+    fn a_pass_below_the_cap_neither_adds_to_a_streak_nor_clears_it() {
+        let mut build = Build::new(date(2026, 8, 1));
+        build.drill(date(2026, 8, 31), Occasion::Review, false, Outcome::Pass);
+        build.drill(date(2026, 9, 1), Occasion::Review, false, Outcome::Pass);
+        let stats = build.gather(date(2026, 9, 1));
+        assert_eq!(stats.engrams.first().unwrap().streak, 1);
+    }
+
+    #[test]
+    fn an_attachment_restarts_the_interval_without_ending_a_streak() {
+        let mut build = Build::new(date(2026, 8, 1));
+        build.drill(date(2026, 8, 31), Occasion::Review, false, Outcome::Pass);
+        let engram = build.engram;
+        build.push(
+            date(2026, 9, 5),
+            Event::Attach(Attached {
+                slug: "a".parse().unwrap(),
+                engram,
             }),
-        }))
-    }
-
-    fn gather(lines: &[Line]) -> Stats {
-        Stats::gather(lines, date(2026, 9, 10), super::WINDOW_DAYS)
-    }
-
-    #[test]
-    fn an_aided_entry_is_kept_out_of_retention_and_out_of_the_latency_series() {
-        let stats = gather(&[
-            line(&Entry::default()),
-            line(&Entry {
-                class: Class::Aided,
-                ttfk: Some(50),
-                ..Entry::default()
-            }),
-        ]);
-        assert_eq!(
-            stats.retention,
-            Retention {
-                passes: 1,
-                total: 1
-            }
         );
+        build.drill(date(2026, 9, 6), Occasion::Review, false, Outcome::Pass);
+        let stats = build.gather(date(2026, 9, 6));
         assert_eq!(
-            stats.aided,
-            Retention {
-                passes: 1,
-                total: 1
-            }
-        );
-        let slug = stats.slugs.first().unwrap();
-        assert_eq!(slug.aided, 1);
-        assert_eq!(
-            slug.ttfk_ms,
-            Some(1_000),
-            "transcription speed is not recall speed"
-        );
-        assert!(
-            stats
-                .buckets
-                .iter()
-                .all(|bucket| bucket.retention.total <= 1),
-            "an aided entry never lands in an interval band"
-        );
-    }
-
-    #[test]
-    fn an_aided_entry_is_counted_though_it_is_never_the_first_try() {
-        let stats = gather(&[
-            line(&Entry {
-                outcome: Outcome::Fail,
-                ..Entry::default()
-            }),
-            line(&Entry {
-                class: Class::Aided,
-                attempt: 2,
-                ..Entry::default()
-            }),
-        ]);
-        assert_eq!(
-            stats.aided,
-            Retention {
-                passes: 1,
-                total: 1
-            }
-        );
-        assert_eq!(stats.slugs.first().unwrap().aided, 1);
-    }
-
-    #[test]
-    fn a_refused_aided_entry_reads_as_a_disagreement_rather_than_a_lapse() {
-        let stats = gather(&[line(&Entry {
-            class: Class::Aided,
-            outcome: Outcome::Fail,
-            ..Entry::default()
-        })]);
-        assert_eq!(
-            stats.aided,
-            Retention {
-                passes: 0,
-                total: 1
-            }
-        );
-        assert!(stats.lapses.is_empty());
-    }
-
-    #[test]
-    fn a_blank_aided_entry_is_neither_accepted_nor_refused() {
-        let stats = gather(&[line(&Entry {
-            class: Class::Aided,
-            outcome: Outcome::Blank,
-            attempt: 2,
-            ..Entry::default()
-        })]);
-        assert_eq!(stats.aided, Retention::default());
-        assert_eq!(stats.slugs.first().unwrap().aided, 0);
-    }
-
-    #[test]
-    fn a_blank_counts_against_retention() {
-        let stats = gather(&[line(&Entry {
-            outcome: Outcome::Blank,
-            ttfk: None,
-            ..Entry::default()
-        })]);
-        assert_eq!(
-            stats.retention,
-            Retention {
-                passes: 0,
-                total: 1
-            }
-        );
-        assert_eq!(stats.lapses.len(), 1);
-    }
-
-    #[test]
-    fn practice_is_partitioned_out_of_true_retention() {
-        let stats = gather(&[
-            line(&Entry::default()),
-            line(&Entry {
-                outcome: Outcome::Fail,
-                class: Class::Practice,
-                ..Entry::default()
-            }),
-        ]);
-        assert_eq!(
-            stats.retention,
-            Retention {
-                passes: 1,
-                total: 1
-            }
-        );
-        assert_eq!(
-            stats.practice,
-            Retention {
-                passes: 0,
-                total: 1
-            }
-        );
-    }
-
-    #[test]
-    fn only_the_first_try_counts() {
-        let stats = gather(&[
-            line(&Entry {
-                outcome: Outcome::Fail,
-                ..Entry::default()
-            }),
-            line(&Entry {
-                outcome: Outcome::Pass,
-                attempt: 2,
-                ..Entry::default()
-            }),
-        ]);
-        assert_eq!(stats.retention.total, 1);
-        assert_eq!(stats.retention.passes, 0);
-    }
-
-    #[test]
-    fn a_skip_counts_as_nothing_at_all() {
-        let stats = gather(&[line(&Entry {
-            outcome: Outcome::Skip,
-            ..Entry::default()
-        })]);
-        assert_eq!(stats.retention.total, 0);
-        assert_eq!(stats.retention.percent(), None);
-    }
-
-    #[test]
-    fn retention_is_banded_by_the_interval_that_actually_elapsed() {
-        let stats = gather(&[
-            line(&Entry {
-                effective: Some(1),
-                ..Entry::default()
-            }),
-            line(&Entry {
-                effective: Some(45),
-                outcome: Outcome::Fail,
-                ..Entry::default()
-            }),
-        ]);
-        let by = |label: &str| {
-            stats
-                .buckets
-                .iter()
-                .find(|b| b.label == label)
-                .copied()
-                .unwrap()
-                .retention
-        };
-        assert_eq!(by("1d").passes, 1);
-        assert_eq!(
-            by("31d+"),
-            Retention {
-                passes: 0,
-                total: 1
-            }
-        );
-        assert_eq!(by("5-8d").total, 0);
-    }
-
-    #[test]
-    fn a_probe_lands_in_the_bands_without_touching_true_retention() {
-        let stats = gather(&[line(&Entry {
-            class: Class::Probe,
-            effective: Some(45),
-            ..Entry::default()
-        })]);
-        assert_eq!(stats.retention.total, 0);
-        assert!(stats.lapses.is_empty());
-        assert_eq!(
-            stats
-                .buckets
-                .iter()
-                .find(|b| b.label == "31d+")
-                .unwrap()
-                .retention
-                .total,
-            1
-        );
-    }
-
-    #[test]
-    fn a_failed_probe_is_a_reading_rather_than_a_lapse() {
-        // rote guide probes: the horizon was chosen, so failing it is not a
-        // slip in the schedule. It is still decay data, and still banded.
-        let stats = gather(&[line(&Entry {
-            class: Class::Probe,
-            outcome: Outcome::Fail,
-            effective: Some(60),
-            ..Entry::default()
-        })]);
-        assert!(stats.lapses.is_empty(), "{:?}", stats.lapses);
-        assert_eq!(
-            stats
-                .buckets
-                .iter()
-                .find(|bucket| bucket.label == "31d+")
-                .unwrap()
-                .retention
-                .total,
+            stats.engrams.first().unwrap().streak,
             1,
-            "a failed probe is still the only decay data at that horizon"
+            "the drill after an attachment is one day cold, so it adds nothing"
         );
     }
 
     #[test]
-    fn a_failed_practice_entry_is_not_a_lapse_either() {
-        let stats = gather(&[line(&Entry {
-            class: Class::Practice,
-            outcome: Outcome::Fail,
-            ..Entry::default()
-        })]);
-        assert!(stats.lapses.is_empty(), "{:?}", stats.lapses);
-    }
-
-    #[test]
-    fn a_lapse_says_whether_it_came_after_a_longer_gap_than_asked_for() {
-        let stats = gather(&[
-            line(&Entry {
-                outcome: Outcome::Fail,
-                effective: Some(20),
-                ..Entry::default()
-            }),
-            line(&Entry {
-                outcome: Outcome::Fail,
-                effective: Some(3),
-                ..Entry::default()
-            }),
-        ]);
-        assert_eq!(stats.lapses.len(), 2);
-        assert!(!stats.lapses.first().unwrap().beyond_schedule());
-        assert!(stats.lapses.get(1).unwrap().beyond_schedule());
-    }
-
-    #[test]
-    fn punctuality_reads_off_how_late_a_review_actually_ran() {
-        let stats = gather(&[
-            line(&Entry {
-                actual: Some(7),
-                ..Entry::default()
-            }),
-            line(&Entry {
-                actual: Some(8),
-                ..Entry::default()
-            }),
-            line(&Entry {
-                actual: Some(21),
-                ..Entry::default()
-            }),
-        ]);
-        assert_eq!(stats.punctuality.total, 3);
-        assert_eq!(stats.punctuality.on_time, 2);
-        assert_eq!(stats.punctuality.median_lateness, Some(1));
-    }
-
-    #[test]
-    fn entries_outside_the_window_leave_the_headline_alone() {
-        let stats = Stats::gather(
-            &[line(&Entry {
-                day: date(2026, 1, 1),
-                ..Entry::default()
-            })],
-            date(2026, 9, 10),
-            90,
-        );
+    fn aided_drills_stay_out_of_every_figure_that_claims_to_measure_recall() {
+        let mut build = Build::new(date(2026, 9, 1));
+        build.drill(date(2026, 9, 2), Occasion::Review, true, Outcome::Pass);
+        build.drill(date(2026, 9, 3), Occasion::Review, true, Outcome::Fail);
+        let stats = build.gather(date(2026, 9, 3));
         assert_eq!(stats.retention.total, 0);
-        assert_eq!(stats.slugs.len(), 1, "but the slug still has timings");
+        assert_eq!(stats.aided.total, 2);
+        assert_eq!(stats.aided.passes, 1);
+        assert_eq!(stats.engrams.first().unwrap().aided, 2);
+        assert!(stats.lapses.is_empty(), "an aided drill is never a lapse");
     }
 
     #[test]
-    fn a_short_history_reports_the_trend_as_unknown_rather_than_steady() {
-        let lines: Vec<Line> = (0..TREND_FLOOR).map(|_| line(&Entry::default())).collect();
-        let stats = gather(&lines);
-        assert_eq!(stats.slugs.first().unwrap().trend, Trend::Unknown);
-    }
-
-    #[test]
-    fn a_slowing_hand_reads_as_rising() {
-        let mut lines: Vec<Line> = (0..TREND_FLOOR)
-            .map(|_| {
-                line(&Entry {
-                    ttfk: Some(1_000),
-                    ..Entry::default()
-                })
-            })
-            .collect();
-        lines.extend((0..TREND_FLOOR).map(|_| {
-            line(&Entry {
-                ttfk: Some(2_000),
-                ..Entry::default()
-            })
-        }));
-        assert_eq!(
-            gather(&lines).slugs.first().unwrap().trend,
-            Trend::Rising(100)
+    fn practice_is_reported_apart_from_what_the_schedule_asked_for() {
+        let mut build = Build::new(date(2026, 9, 1));
+        build.drill(date(2026, 9, 2), Occasion::Review, false, Outcome::Pass);
+        build.drill(date(2026, 9, 3), Occasion::Practice, false, Outcome::Fail);
+        let stats = build.gather(date(2026, 9, 3));
+        assert_eq!(stats.retention.total, 1);
+        assert_eq!(stats.practice.total, 1);
+        assert_eq!(stats.practice.passes, 0);
+        assert!(
+            stats.lapses.is_empty(),
+            "practice moves no schedule, so a miss there is not a lapse"
         );
     }
 
     #[test]
-    fn a_steady_hand_reads_as_steady() {
-        let lines: Vec<Line> = (0..TREND_FLOOR * 2)
-            .map(|i| {
-                line(&Entry {
-                    ttfk: Some(1_000 + u64::try_from(i).unwrap() % 3),
-                    ..Entry::default()
-                })
-            })
+    fn a_lapse_is_reported_with_the_gap_that_actually_preceded_it() {
+        let mut build = Build::new(date(2026, 8, 1));
+        build.drill(date(2026, 8, 20), Occasion::Review, false, Outcome::Fail);
+        let stats = build.gather(date(2026, 8, 20));
+        let lapse = stats.lapses.first().unwrap();
+        assert_eq!(lapse.effective, 19);
+        assert_eq!(lapse.scheduled, 30);
+        assert!(!lapse.beyond_schedule());
+        assert_eq!(lapse.label, "a@1");
+    }
+
+    #[test]
+    fn a_rotation_splits_the_measurement_in_two() {
+        let mut build = Build::new(date(2026, 9, 1));
+        build.drill(date(2026, 9, 2), Occasion::Review, false, Outcome::Pass);
+        let first = build.engram;
+        let second = EngramId::mint().unwrap();
+        build.push(
+            date(2026, 9, 3),
+            Event::Rotate(crate::corpus::record::Rotated {
+                slug: "a".parse().unwrap(),
+                from: first,
+                to: second,
+                proved: true,
+            }),
+        );
+        build.engram = second;
+        build.drill(date(2026, 9, 4), Occasion::Review, false, Outcome::Fail);
+
+        let stats = build.gather(date(2026, 9, 4));
+        assert_eq!(stats.engrams.len(), 2, "one row per engram, never pooled");
+        let labels: Vec<&str> = stats
+            .engrams
+            .iter()
+            .map(|engram| engram.label.as_str())
             .collect();
-        assert_eq!(gather(&lines).slugs.first().unwrap().trend, Trend::Steady);
+        assert!(labels.contains(&"a@1") && labels.contains(&"a@2"));
+
+        let rolled = stats.lineages.first().unwrap();
+        assert_eq!(rolled.engrams, 2);
+        assert_eq!(rolled.drills, 2);
+        assert_eq!(rolled.lapses, 1);
     }
 
     #[test]
-    fn the_median_ignores_the_prompt_someone_walked_away_from() {
-        assert_eq!(median(&mut [1, 2, 3, 4, 900_000]), Some(3));
+    fn a_trend_says_it_does_not_know_rather_than_saying_steady() {
+        let mut build = Build::new(date(2026, 9, 1));
+        build.drill(date(2026, 9, 2), Occasion::Review, false, Outcome::Pass);
+        let stats = build.gather(date(2026, 9, 2));
+        assert_eq!(stats.engrams.first().unwrap().trend, Trend::Unknown);
+    }
+
+    #[test]
+    fn the_median_is_the_lower_one_and_an_empty_series_has_none() {
         assert_eq!(median(&mut []), None);
-        assert_eq!(median(&mut [5]), Some(5));
-        assert_eq!(median(&mut [4, 2]), Some(2));
-    }
-
-    #[test]
-    fn a_sparkline_spans_the_values_it_is_given() {
-        assert_eq!(sparkline(&[]), "");
-        assert_eq!(sparkline(&[5, 5, 5]), "▁▁▁");
-        assert_eq!(sparkline(&[0, 100]), "▁█");
-        assert_eq!(sparkline(&[0, 50, 100]).chars().count(), 3);
-    }
-
-    #[test]
-    fn every_slug_gets_its_own_row_in_name_order() {
-        let stats = gather(&[
-            line(&Entry {
-                slug: "zeta",
-                ..Entry::default()
-            }),
-            line(&Entry {
-                slug: "alpha",
-                ..Entry::default()
-            }),
-            line(&Entry {
-                slug: "alpha",
-                ..Entry::default()
-            }),
-        ]);
-        let names: Vec<&str> = stats.slugs.iter().map(|s| s.slug.as_str()).collect();
-        assert_eq!(names, vec!["alpha", "zeta"]);
-        assert_eq!(stats.slugs.first().unwrap().retention.total, 2);
+        assert_eq!(median(&mut [3, 1, 2]), Some(2));
+        assert_eq!(median(&mut [4, 1, 2, 3]), Some(2));
+        assert!(sparkline(&[]).is_empty());
+        assert_eq!(sparkline(&[1, 2, 3]).chars().count(), 3);
     }
 }

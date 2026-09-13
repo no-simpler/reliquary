@@ -1,1017 +1,784 @@
-// Clippy's in-test carve-outs (see `clippy.toml`) reach `#[test]` functions and
-// `#[cfg(test)]` modules — not the helpers beside them. An integration test
-// crate is test code end to end, so the carve-out belongs at its root, where its
-// scope is still exactly the tests.
-#![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
-
-//! The binary, driven as it ships.
+//! The published binary, through its own command line.
 //!
-//! The suite **seeds** the store rather than enrolling through it: real
-//! enrollment costs 256 MiB and six seconds in a debug build, and `relic test`
-//! has to stay fast. Two tests pay the real cost so the enrollment path is not
-//! untested; everything else writes a log and a cheap verifier directly.
+//! Everything that can be asserted without a terminal. The card, the placement,
+//! the cursor and the refusal of a paste only exist at a tty; `CLAUDE.md`
+//! records how to reach those.
 
-use argon2::password_hash::{PasswordHasher as _, SaltString};
-use argon2::{Algorithm, Argon2, Params, Version};
-use assert_cmd::Command;
-use predicates::str::contains;
-use sha2::{Digest as _, Sha256};
-use tempfile::TempDir;
+mod support;
 
-/// The schema the seeded records claim. A duplicate of the binary's own, like
-/// the memory cost below: the suite drives the shipped binary and cannot reach
-/// into it for a constant.
-const SCHEMA: u32 = 2;
+use predicates::prelude::*;
+use rote::corpus::record::Outcome;
+use support::{Drilled, Rote, day, days_ago, today};
 
-/// A scratch machine: its own log, its own state, its own home.
-struct Rote {
-    _dir: TempDir,
-    ark: std::path::PathBuf,
-    state: std::path::PathBuf,
-    home: std::path::PathBuf,
-    prev: String,
-}
-
-impl Rote {
-    fn new() -> Self {
-        let dir = tempfile::tempdir().expect("a scratch directory");
-        // The macOS temp root is itself a symlink, and the binary resolves what
-        // it prints.
-        let base = dir
-            .path()
-            .canonicalize()
-            .expect("a resolved scratch directory");
-        let ark = base.join("ark");
-        let state = base.join("state");
-        let home = base.join("home");
-        std::fs::create_dir_all(&ark).expect("an ark");
-        std::fs::create_dir_all(&state).expect("a state directory");
-        std::fs::create_dir_all(&home).expect("a home");
-        Self {
-            _dir: dir,
-            ark,
-            state,
-            home,
-            prev: "0".repeat(64),
-        }
-    }
-
-    fn run(&self, args: &[&str]) -> Command {
-        let mut command = Command::cargo_bin("rote").expect("the binary");
-        command
-            .args(args)
-            .env("ROTE_ROOT", &self.ark)
-            .env("ROTE_STATE", &self.state)
-            .env("ROTE_CONFIG", self.home.join("config.toml"))
-            .env("ROTE_HOST", "Scratch")
-            .env("HOME", &self.home)
-            // Pin the agent shape, so assertions do not depend on a terminal.
-            .env("CLAUDECODE", "1")
-            .env_remove("ROTE_UI")
-            .env_remove("NO_COLOR");
-        command
-    }
-
-    fn log_path(&self) -> std::path::PathBuf {
-        self.ark.join("log.jsonl")
-    }
-
-    fn log(&self) -> String {
-        std::fs::read_to_string(self.log_path()).unwrap_or_default()
-    }
-
-    /// Append one already-shaped event, chained to what is there.
-    fn seed(&mut self, day: &str, event: &serde_json::Value) {
-        let record = serde_json::json!({
-            "v": SCHEMA,
-            "at": format!("{day}T08:00:00Z"),
-            "day": day,
-            "host": "Scratch",
-            "prev": self.prev,
-            "event": event.clone(),
-        });
-        let line = serde_json::to_string(&record).expect("a record");
-        self.prev = hex(&Sha256::digest(line.as_bytes()));
-        let mut text = self.log();
-        text.push_str(&line);
-        text.push('\n');
-        std::fs::write(self.log_path(), text).expect("a log");
-    }
-
-    fn add(&mut self, day: &str, slug: &str, critical: bool) {
-        self.seed(
-            day,
-            &serde_json::json!({"kind": "add", "slug": slug, "version": 1, "critical": critical}),
-        );
-        self.verifier(slug);
-    }
-
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "a fixture that names every field of the record it builds"
-    )]
-    fn attempt(
-        &mut self,
-        day: &str,
-        slug: &str,
-        class: &str,
-        outcome: &str,
-        effective: u32,
-        step_before: u8,
-        step_after: u8,
-    ) {
-        self.seed(
-            day,
-            &serde_json::json!({
-                "kind": "attempt",
-                "slug": slug,
-                "session": "0102030405060708",
-                "version": 1,
-                "class": class,
-                "attempt": 1,
-                "outcome": outcome,
-                "ttfk_ms": 1200,
-                "total_ms": 3400,
-                "corrections": 0,
-                "paste_refused": 0,
-                "scheduled_interval_days": 7,
-                "actual_interval_days": effective,
-                "effective_interval_days": effective,
-                "stretch": false,
-                "step_before": step_before,
-                "step_after": step_after,
-            }),
-        );
-    }
-
-    /// A verifier at the shipped parameters, so `doctor` reads it as healthy.
-    ///
-    /// Minted once for the whole suite: the point of the memory cost is that it
-    /// is expensive, and a fixture that pays it per test would be a fixture
-    /// people delete.
-    fn verifier(&self, slug: &str) {
-        self.write_verifier(slug, shipped_verifier());
-    }
-
-    /// A verifier below the memory floor. Its own test, because that is what a
-    /// downgraded one looks like.
-    fn weak_verifier(&self, slug: &str) {
-        self.write_verifier(slug, &mint(64, 1, SECRET));
-    }
-
-    fn write_verifier(&self, slug: &str, phc: &str) {
-        use std::fmt::Write as _;
-        let path = self.state.join("verifiers.toml");
-        let mut text = std::fs::read_to_string(&path).unwrap_or_default();
-        let _ = writeln!(text, "[{slug}]\nphc = \"{phc}\"");
-        std::fs::write(path, text).expect("a verifier file");
-    }
-
-    fn json(&self, args: &[&str]) -> serde_json::Value {
-        let output = self.run(args).output().expect("a run");
-        serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
-            panic!(
-                "{args:?} did not answer with JSON: {error}\n{}",
-                String::from_utf8_lossy(&output.stdout)
-            )
-        })
-    }
-}
-
-/// The secret every seeded verifier is for.
-const SECRET: &str = "hunter2";
-
-/// One verifier at the shipped cost, for the whole suite.
-fn shipped_verifier() -> &'static str {
-    static ONCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    ONCE.get_or_init(|| mint(rote_m_cost(), 4, SECRET))
-}
-
-/// The floor the binary declares. A duplicate, like `SCHEMA`.
-fn rote_m_cost() -> u32 {
-    262_144
-}
-
-fn mint(m_cost: u32, t_cost: u32, secret: &str) -> String {
-    let params = Params::new(m_cost, t_cost, 1, Some(32)).expect("parameters");
-    let salt = SaltString::encode_b64(&[7u8; 16]).expect("a salt");
-    Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
-        .hash_password(secret.as_bytes(), &salt)
-        .expect("a hash")
-        .to_string()
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut out, byte| {
-        let _ = write!(out, "{byte:02x}");
-        out
-    })
-}
-
-fn today() -> String {
-    jiff::Zoned::now().date().to_string()
-}
-
-fn days_ago(days: i64) -> String {
-    jiff::Zoned::now()
-        .date()
-        .checked_sub(jiff::Span::new().days(days))
-        .expect("a date")
-        .to_string()
-}
-
-// Describing the tool. These answer before there is a store.
+// ── describing the tool ──────────────────────────────────────────────────────
 
 #[test]
-fn help_guide_and_completions_answer_before_a_store_exists() {
+fn the_root_help_advertises_both_namespaces() {
+    Rote::new()
+        .cmd(&["--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rote guide"))
+        .stdout(predicate::str::contains("rote help"));
+}
+
+#[test]
+fn every_reference_topic_answers() {
     let rote = Rote::new();
-    rote.run(&["guide"])
-        .assert()
-        .success()
-        .stdout(contains("ROTE"));
-    rote.run(&["help", "intervals"])
-        .assert()
-        .success()
-        .stdout(contains("INTERVALS"));
-    rote.run(&["help", "topics"])
-        .assert()
-        .success()
-        .stdout(contains("records"));
-    rote.run(&["completions", "fish"])
-        .assert()
-        .success()
-        .stdout(contains("rote"));
-    assert!(
-        !rote.log_path().exists(),
-        "describing the tool wrote nothing"
-    );
-}
-
-#[test]
-fn the_root_help_advertises_every_topic_that_exists() {
-    let rote = Rote::new();
-    let output = rote.run(&["--help"]).output().expect("a run");
-    let help = String::from_utf8_lossy(&output.stdout);
-    for topic in ["ladder", "irregularity", "custody", "probes"] {
-        assert!(
-            help.contains(topic),
-            "guide topic {topic} is not advertised"
-        );
-    }
-    for topic in ["intervals", "records", "files", "stdin", "exit"] {
-        assert!(help.contains(topic), "help topic {topic} is not advertised");
+    for topic in [
+        "keys",
+        "intervals",
+        "records",
+        "files",
+        "machines",
+        "stdin",
+        "exit",
+    ] {
+        rote.cmd(&["help", topic])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(topic.to_uppercase()));
     }
 }
 
 #[test]
-fn a_refusal_is_told_apart_from_a_finding() {
-    let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    // Three: rote could not do the thing at all.
-    rote.run(&["retire", "ghost"]).assert().code(3);
-    // Zero: it did, and found nothing wrong.
-    rote.run(&["doctor"]).assert().code(0);
+fn the_guide_carries_doctrine_and_names_the_good_faith_principle() {
+    Rote::new()
+        .cmd(&["guide"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("THE LADDER"))
+        .stdout(predicate::str::contains("good faith"));
 }
 
 #[test]
 fn an_unknown_topic_names_the_ones_that_exist() {
-    let rote = Rote::new();
-    rote.run(&["guide", "nonsense"])
+    Rote::new()
+        .cmd(&["help", "nonsense"])
         .assert()
         .failure()
-        .stderr(contains("ladder"));
-    rote.run(&["help", "nonsense"])
-        .assert()
-        .failure()
-        .stderr(contains("intervals"));
+        .stderr(predicate::str::contains("records"));
 }
 
 #[test]
-fn help_falls_through_to_a_command_of_that_name() {
-    let rote = Rote::new();
-    rote.run(&["help", "probe"])
+fn completions_are_generated_for_a_real_shell() {
+    Rote::new()
+        .cmd(&["completions", "fish"])
         .assert()
         .success()
-        .stdout(contains("horizon"));
-}
-
-// Enrollment.
-
-#[test]
-fn a_secret_from_a_pipe_enrols_and_shows_up_on_the_schedule() {
-    let rote = Rote::new();
-    rote.run(&["add", "escrow-p", "--critical", "--stdin"])
-        .write_stdin("correct horse battery staple\n")
-        .assert()
-        .success()
-        .stdout(contains("enrolled"));
-
-    let status = rote.json(&["status", "--json"]);
-    let slug = &status["slugs"][0];
-    assert_eq!(slug["slug"], "escrow-p");
-    assert_eq!(slug["critical"], true);
-    assert_eq!(slug["verifier"], "ok");
-    assert_eq!(slug["standing"], "waiting");
+        .stdout(predicate::str::contains("rote"));
 }
 
 #[test]
-fn an_enrolled_secret_is_the_one_the_drill_will_test() {
+fn the_retired_verbs_are_gone() {
     let rote = Rote::new();
-    rote.run(&["add", "a", "--stdin"])
-        .write_stdin("correct horse battery staple\n")
-        .assert()
-        .success();
-    // Rekey proves the current secret, which is the only path that puts a typed
-    // answer through the real verifier without a terminal.
-    rote.run(&["rekey", "a", "--stdin"])
-        .write_stdin("correct horse battery staple\nsomething else entirely\n")
-        .assert()
-        .success();
-    rote.run(&["rekey", "a", "--stdin"])
-        .write_stdin("correct horse battery staple\nthird\n")
-        .assert()
-        .failure()
-        .stderr(contains("not the current secret"));
-}
-
-#[test]
-fn nothing_of_the_secret_reaches_the_log() {
-    let secret = "correct horse battery staple";
-    let rote = Rote::new();
-    rote.run(&["add", "a", "--stdin"])
-        .write_stdin(format!("{secret}\n"))
-        .assert()
-        .success();
-
-    let log = rote.log();
-    // Not the input, and not any prefix of it. Four characters is short enough
-    // to catch a truncation and long enough not to match a hash by accident.
-    for length in 4..=secret.chars().count() {
-        let prefix: String = secret.chars().take(length).collect();
-        assert!(!log.contains(&prefix), "the log carries {prefix:?}");
+    for verb in ["add", "rekey", "probe"] {
+        rote.cmd(&[verb, "a"]).assert().failure();
     }
-    assert!(!log.contains("argon2"), "no verifier is in the log either");
+}
 
-    // Nor its length, which is what a fixed key set is for.
-    let record: serde_json::Value =
-        serde_json::from_str(log.lines().next().expect("a record")).expect("a record");
-    let mut keys: Vec<&str> = record
-        .as_object()
-        .expect("an object")
-        .keys()
-        .map(String::as_str)
-        .collect();
-    keys.sort_unstable();
-    assert_eq!(keys, vec!["at", "day", "event", "host", "prev", "v"]);
-    let mut event: Vec<&str> = record["event"]
-        .as_object()
-        .expect("an object")
-        .keys()
-        .map(String::as_str)
-        .collect();
-    event.sort_unstable();
-    assert_eq!(event, vec!["critical", "kind", "slug", "version"]);
+// ── the flagship gate ────────────────────────────────────────────────────────
+
+#[test]
+fn a_machine_with_no_marker_refuses_to_write_and_says_how_to_fix_it() {
+    let rote = Rote::new();
+    rote.demote();
+    rote.cmd(&["enroll", "escrow-p", "--stdin"])
+        .write_stdin("whatever\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not the flagship"))
+        .stderr(predicate::str::contains("Reads are fine"));
 }
 
 #[test]
-fn a_slug_cannot_be_enrolled_twice() {
+fn a_marker_naming_another_machine_refuses_and_names_it() {
+    let rote = Rote::new();
+    let other = rote::machine::MachineId::of("somebody else");
+    rote.marker_names(&other);
+    rote.cmd(&["enroll", "a", "--stdin"])
+        .write_stdin("whatever\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(other.to_string()));
+}
+
+#[test]
+fn reading_still_works_where_writing_does_not() {
     let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    rote.run(&["add", "a", "--stdin"])
+    rote.enroll(day(2026, 9, 1), "escrow-p", true);
+    rote.demote();
+    rote.cmd(&["status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("escrow-p@1"));
+    rote.cmd(&["stats"]).assert().success();
+    rote.cmd(&["machines"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("not the flagship"));
+}
+
+#[test]
+fn an_empty_marker_authorises_and_the_machines_table_says_which_machine_this_is() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2026, 9, 1), "a", false);
+    let machine = rote.machine.to_string();
+    rote.cmd(&["machines"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&machine))
+        .stdout(predicate::str::contains("Scratch"));
+}
+
+// ── enrolment ────────────────────────────────────────────────────────────────
+
+#[test]
+fn enrolling_writes_a_verifier_and_a_record() {
+    let rote = Rote::new();
+    rote.cmd(&["enroll", "escrow-p", "--critical", "--stdin"])
+        .write_stdin(format!("{}\n", support::SECRET))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("escrow-p@1 enrolled"));
+
+    let chain = std::fs::read_to_string(rote.chain()).unwrap();
+    assert!(chain.contains("\"kind\":\"enroll\""));
+    assert!(chain.contains("\"critical\":true"));
+    assert!(
+        std::fs::read_to_string(rote.verifiers_path())
+            .unwrap()
+            .contains("phc")
+    );
+}
+
+#[test]
+fn enrolling_a_live_lineage_names_all_three_ways_forward() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2026, 9, 1), "escrow-p", false);
+    rote.cmd(&["enroll", "escrow-p", "--stdin"])
         .write_stdin("x\n")
         .assert()
         .failure()
-        .stderr(contains("already enrolled"));
+        .stderr(predicate::str::contains("already enrolled"))
+        .stderr(predicate::str::contains("rote rotate"))
+        .stderr(predicate::str::contains("rote attach"));
 }
 
 #[test]
-fn an_empty_secret_is_refused() {
-    let rote = Rote::new();
-    rote.run(&["add", "a", "--stdin"])
+fn enrolling_a_retired_lineage_points_at_the_verb_that_reopens_it() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2026, 9, 1), "a", false);
+    rote.retire(day(2026, 9, 2), "a");
+    rote.cmd(&["enroll", "a", "--stdin"])
+        .write_stdin("x\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("rote rotate --force"));
+}
+
+#[test]
+fn an_empty_secret_is_not_a_secret() {
+    Rote::new()
+        .cmd(&["enroll", "a", "--stdin"])
         .write_stdin("\n")
         .assert()
         .failure()
-        .stderr(contains("not a secret"));
+        .stderr(predicate::str::contains("empty secret"));
 }
 
-// Rotation and retirement.
+#[test]
+fn a_bad_lineage_name_is_refused_at_the_edge() {
+    Rote::new()
+        .cmd(&["enroll", "Not A Name"])
+        .assert()
+        .failure();
+}
+
+// ── attachment ───────────────────────────────────────────────────────────────
 
 #[test]
-fn a_rotation_starts_the_ladder_over_and_bumps_the_version() {
+fn attaching_restores_a_verifier_and_leaves_the_record_alone() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(30), "a", false);
-    rote.attempt(&days_ago(1), "a", "review", "pass", 7, 3, 4);
+    let engram = rote.enroll(day(2026, 9, 1), "escrow-p", false);
+    rote.capture(day(2026, 9, 2), "escrow-p", engram, Drilled::passed());
+    // What a restore onto a new machine looks like.
+    rote.drop_verifiers();
 
-    rote.run(&["rekey", "a", "--stdin"])
-        .write_stdin("hunter2\nnew secret\n")
+    rote.cmd(&["attach", "escrow-p", "--stdin"])
+        .write_stdin(format!("{}\n", support::SECRET))
         .assert()
         .success()
-        .stdout(contains("version 2"));
+        .stdout(predicate::str::contains("took your word for it"));
 
-    let slug = &rote.json(&["status", "--json"])["slugs"][0];
-    assert_eq!(slug["version"], 2);
-    assert_eq!(slug["step"], 0);
-    assert_eq!(slug["last_attempt"], serde_json::Value::Null);
+    let chain = std::fs::read_to_string(rote.chain()).unwrap();
+    assert!(chain.contains("\"kind\":\"attach\""));
+
+    rote.cmd(&["status", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"rung\": 1"))
+        .stdout(predicate::str::contains("\"here\": \"attached\""));
 }
 
 #[test]
-fn a_forced_rotation_is_logged_as_a_re_enrolment() {
+fn attaching_takes_any_secret_at_all_because_there_is_nothing_to_check_it_against() {
     let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    rote.run(&["rekey", "a", "--force", "--stdin"])
-        .write_stdin("new secret\n")
+    rote.enroll(day(2026, 9, 1), "a", false);
+    rote.drop_verifiers();
+    rote.cmd(&["attach", "a", "--stdin"])
+        .write_stdin("something else entirely\n")
         .assert()
         .success();
-    rote.run(&["log"])
-        .assert()
-        .success()
-        .stdout(contains("without proving the old one"));
 }
 
 #[test]
-fn retiring_takes_the_slug_off_the_schedule_and_the_verifier_with_it() {
+fn attaching_over_a_verifier_that_is_already_here_says_it_is_replacing_one() {
     let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    rote.run(&["retire", "a"]).assert().success();
-
-    let verifiers = std::fs::read_to_string(rote.state.join("verifiers.toml")).expect("the file");
-    assert!(
-        !verifiers.contains("argon2"),
-        "an oracle for a secret nobody drills is cost with no benefit"
-    );
-    assert_eq!(
-        rote.json(&["status", "--json"])["slugs"]
-            .as_array()
-            .unwrap()
-            .len(),
-        0
-    );
-    assert_eq!(
-        rote.json(&["status", "--all", "--json"])["slugs"][0]["retired"],
-        true
-    );
-    // Listed, but not as something that will be asked for again.
-    rote.run(&["status", "--all"])
+    rote.enroll(day(2026, 9, 1), "a", false);
+    rote.cmd(&["attach", "a", "--stdin"])
+        .write_stdin(format!("{}\n", support::SECRET))
         .assert()
-        .success()
-        .stdout(contains("retired"));
-    rote.run(&["retire", "a"])
-        .assert()
-        .failure()
-        .stderr(contains("already retired"));
+        .success();
 }
 
 #[test]
-fn a_command_about_a_slug_that_does_not_exist_says_so() {
-    let rote = Rote::new();
-    for args in [
-        vec!["retire", "ghost"],
-        vec!["probe", "ghost", "--in", "45"],
-        vec!["practice", "ghost"],
-    ] {
-        rote.run(&args)
-            .assert()
-            .failure()
-            .stderr(contains("no slug called ghost"));
-    }
-}
-
-// Horizons.
-
-#[test]
-fn a_horizon_holds_a_slug_and_then_is_dropped() {
+fn attaching_an_unknown_or_retired_lineage_is_refused() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(30), "a", false);
-    rote.run(&["probe", "a", "--in", "45"])
-        .assert()
-        .success()
-        .stdout(contains("held out of the reminder"));
-    assert_eq!(
-        rote.json(&["status", "--json"])["slugs"][0]["standing"],
-        "held"
-    );
-
-    rote.run(&["probe", "a", "--clear"])
-        .assert()
-        .success()
-        .stdout(contains("back on the schedule"));
-    assert_eq!(
-        rote.json(&["status", "--json"])["slugs"][0]["standing"],
-        "due"
-    );
-}
-
-#[test]
-fn a_horizon_is_at_least_a_day_and_never_on_a_retired_slug() {
-    let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    rote.run(&["probe", "a", "--in", "0"])
-        .assert()
-        .failure()
-        .stderr(contains("one day to a year"));
-    rote.run(&["retire", "a"]).assert().success();
-    rote.run(&["probe", "a", "--in", "45"])
-        .assert()
-        .failure()
-        .stderr(contains("retired"));
-}
-
-#[test]
-fn a_retired_slug_says_how_to_come_back() {
-    let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    rote.run(&["retire", "a"]).assert().success();
-    rote.run(&["add", "a", "--stdin"])
+    rote.cmd(&["attach", "ghost", "--stdin"])
         .write_stdin("x\n")
         .assert()
         .failure()
-        .stderr(contains("rote rekey --force a"));
-    rote.run(&["rekey", "a", "--force", "--stdin"])
-        .write_stdin("new secret\n")
-        .assert()
-        .success();
-    assert_eq!(
-        rote.json(&["status", "--json"])["slugs"][0]["retired"],
-        false
-    );
-}
+        .stderr(predicate::str::contains("no lineage called ghost"));
 
-#[test]
-fn a_horizon_needs_a_length_or_a_clear() {
-    let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    rote.run(&["probe", "a"])
+    rote.enroll(day(2026, 9, 1), "a", false);
+    rote.retire(day(2026, 9, 2), "a");
+    rote.cmd(&["attach", "a", "--stdin"])
+        .write_stdin("x\n")
         .assert()
         .failure()
-        .stderr(contains("--in"));
+        .stderr(predicate::str::contains("retired"));
 }
 
-// Reading.
-
 #[test]
-fn the_schedule_reads_the_ladder_and_the_gate() {
+fn a_dormant_lineage_is_reported_and_is_not_counted_as_due() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(40), "a", false);
-    for ago in [28, 21, 14] {
-        rote.attempt(&days_ago(ago), "a", "review", "pass", 7, 4, 4);
-    }
-    let slug = &rote.json(&["status", "--json"])["slugs"][0];
-    assert_eq!(slug["step"], 4);
-    assert_eq!(slug["interval_days"], 7);
-    assert_eq!(slug["cap_passes"], 3);
-    assert_eq!(slug["gate"], "ready");
-    assert_eq!(slug["standing"], "due");
-
-    rote.run(&["status"])
+    rote.enroll_dormant(day(2026, 9, 1), "escrow-p");
+    rote.cmd(&["status"])
         .assert()
         .success()
-        .stdout(contains("ready · 3 at cap"));
-}
-
-#[test]
-fn practising_inside_the_interval_stops_the_gate_and_says_why() {
-    let mut rote = Rote::new();
-    rote.add(&days_ago(40), "a", false);
-    rote.attempt(&days_ago(21), "a", "review", "pass", 7, 4, 4);
-    rote.attempt(&days_ago(1), "a", "practice", "pass", 1, 4, 4);
-
-    let slug = &rote.json(&["status", "--json"])["slugs"][0];
-    assert_eq!(slug["cap_passes"], 1, "practice buys nothing");
-    assert_eq!(slug["gate"], "climbing");
-    rote.run(&["status"])
+        .stdout(predicate::str::contains("dormant"));
+    rote.cmd(&["banner", "--json"])
         .assert()
         .success()
-        .stdout(contains("why the next one will not count"));
+        .stdout(predicate::str::contains("dormant on this machine"))
+        .stdout(predicate::str::contains("\"fix\": \"rote\""))
+        .stdout(predicate::str::contains("\"severity\": \"soft\""))
+        .stdout(predicate::str::contains("drills due").not());
 }
 
 #[test]
-fn an_aided_entry_buys_nothing_and_costs_nothing() {
+fn attaching_clears_the_reminder_it_was_raised_by() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(40), "a", false);
-    for ago in [28, 21, 14] {
-        rote.attempt(&days_ago(ago), "a", "review", "pass", 7, 4, 4);
-    }
-    rote.attempt(&days_ago(1), "a", "aided", "pass", 1, 4, 4);
-
-    let slug = &rote.json(&["status", "--json"])["slugs"][0];
-    assert_eq!(slug["step"], 4, "an aided entry cannot move the ladder");
-    assert_eq!(
-        slug["cap_passes"], 3,
-        "nor retract evidence already gathered"
-    );
-    assert_eq!(slug["gate"], "ready");
-    assert_eq!(
-        slug["stood_alone"],
-        days_ago(28),
-        "the memory started at the first cold pass"
-    );
-
-    let stats = rote.json(&["stats", "--json"]);
-    assert_eq!(stats["retention"]["total"], 3);
-    assert_eq!(stats["aided"]["total"], 1);
-    assert_eq!(stats["slugs"][0]["total"], 3);
-    assert_eq!(stats["slugs"][0]["aided"], 1);
-}
-
-#[test]
-fn a_slug_that_has_only_ever_been_aided_has_not_stood_alone() {
-    let mut rote = Rote::new();
-    rote.add(&days_ago(3), "escrow-p", true);
-    rote.attempt(&days_ago(2), "escrow-p", "review", "blank", 1, 0, 0);
-    rote.attempt(&days_ago(2), "escrow-p", "aided", "pass", 1, 1, 0);
-
-    let slug = &rote.json(&["status", "--json"])["slugs"][0];
-    assert_eq!(slug["stood_alone"], serde_json::Value::Null);
-    rote.run(&["status"])
+    rote.enroll_dormant(day(2026, 9, 1), "a");
+    rote.cmd(&["status"]).assert().success();
+    rote.cmd(&["attach", "a", "--stdin"])
+        .write_stdin(format!("{}\n", support::SECRET))
         .assert()
-        .stdout(contains("has not stood alone yet"));
+        .success();
+    rote.cmd(&["banner", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dormant").not());
+}
 
-    let report = rote.json(&["doctor", "--format", "json"]);
-    let summaries = report["outcome"]["ran"].to_string();
+// ── rotation and retirement ──────────────────────────────────────────────────
+
+#[test]
+fn rotating_proves_the_current_secret_and_forgets_it_afterwards() {
+    let mut rote = Rote::new();
+    let first = rote.enroll(day(2026, 9, 1), "escrow-p", false);
+    rote.cmd(&["rotate", "escrow-p", "--stdin"])
+        .write_stdin(format!("{}\nsomething new\n", support::SECRET))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("escrow-p@2 rotated"));
+
+    let held = std::fs::read_to_string(rote.verifiers_path()).unwrap();
     assert!(
-        summaries.contains("never been recalled without the answer in front of it"),
-        "doctor said: {summaries}"
+        !held.contains(&first.to_string()),
+        "a verifier for a secret that has been rotated away is a live oracle for it"
     );
 }
 
 #[test]
-fn a_refused_aided_entry_reports_the_vault_and_the_verifier_apart() {
+fn rotating_refuses_a_secret_that_is_not_the_current_one() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(3), "a", false);
-    rote.attempt(&days_ago(1), "a", "aided", "fail", 1, 0, 0);
-
-    assert_eq!(
-        rote.json(&["status", "--json"])["slugs"][0]["aided_mismatch"],
-        true
-    );
-    let report = rote.json(&["doctor", "--format", "json"]);
-    assert!(
-        report["outcome"]["ran"]
-            .to_string()
-            .contains("hold different secrets"),
-        "doctor said: {}",
-        report["outcome"]["ran"]
-    );
+    rote.enroll(day(2026, 9, 1), "a", false);
+    rote.cmd(&["rotate", "a", "--stdin"])
+        .write_stdin("not it\nsomething new\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not the current secret"));
 }
 
 #[test]
-fn true_retention_keeps_practice_out_of_it() {
+fn rotating_a_dormant_engram_names_attach_as_the_thing_you_probably_meant() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(40), "a", false);
-    rote.attempt(&days_ago(20), "a", "review", "pass", 7, 4, 4);
-    rote.attempt(&days_ago(10), "a", "practice", "fail", 1, 4, 4);
-
-    let stats = rote.json(&["stats", "--json"]);
-    assert_eq!(
-        stats["retention"],
-        serde_json::json!({"passes": 1, "total": 1})
-    );
-    assert_eq!(
-        stats["practice"],
-        serde_json::json!({"passes": 0, "total": 1})
-    );
+    rote.enroll_dormant(day(2026, 9, 1), "escrow-p");
+    rote.cmd(&["rotate", "escrow-p", "--stdin"])
+        .write_stdin("x\ny\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("nothing to prove against"))
+        .stderr(predicate::str::contains("rote attach escrow-p"));
 }
 
 #[test]
-fn a_long_absence_lands_in_the_long_interval_band() {
+fn forcing_a_rotation_records_that_the_old_secret_was_not_proved() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(60), "a", false);
-    rote.attempt(&days_ago(5), "a", "review", "pass", 45, 4, 4);
-
-    let stats = rote.json(&["stats", "--json"]);
-    let band = stats["buckets"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|bucket| bucket["interval"] == "31d+")
-        .expect("a long band");
-    assert_eq!(band["total"], 1);
-    assert_eq!(band["passes"], 1);
+    rote.enroll_dormant(day(2026, 9, 1), "a");
+    rote.cmd(&["rotate", "a", "--force", "--stdin"])
+        .write_stdin("a new one\n")
+        .assert()
+        .success();
+    let chain = std::fs::read_to_string(rote.chain()).unwrap();
+    assert!(chain.contains("\"proved\":false"));
 }
 
 #[test]
-fn a_lapse_says_whether_it_came_after_a_longer_gap_than_asked_for() {
+fn retiring_keeps_the_history_and_drops_every_verifier() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(60), "a", false);
-    rote.attempt(&days_ago(5), "a", "review", "fail", 40, 4, 0);
-    let lapse = &rote.json(&["stats", "--json"])["lapses"][0];
-    assert_eq!(lapse["slug"], "a");
-    assert_eq!(lapse["beyond_schedule"], true);
-}
-
-#[test]
-fn the_records_can_be_listed_and_narrowed_to_one_slug() {
-    let mut rote = Rote::new();
-    rote.add(&days_ago(3), "a", false);
-    rote.add(&days_ago(3), "b", false);
-    rote.attempt(&days_ago(1), "a", "review", "pass", 1, 0, 1);
-
-    rote.run(&["log"])
+    rote.enroll(day(2026, 9, 1), "a", false);
+    rote.cmd(&["retire", "a"])
         .assert()
         .success()
-        .stdout(contains("records · 3 of 3"));
-    let records = rote.json(&["log", "--slug", "a", "--json"])["records"]
-        .as_array()
-        .expect("records")
-        .len();
-    assert_eq!(records, 2);
+        .stdout(predicate::str::contains("its history stays"));
+    let held = std::fs::read_to_string(rote.verifiers_path()).unwrap_or_default();
+    assert!(!held.contains("phc"));
+    rote.cmd(&["status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("a@1").not());
+    rote.cmd(&["status", "--all"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("a@1"));
 }
 
-// Sittings, without a terminal.
+// ── the readings ─────────────────────────────────────────────────────────────
 
 #[test]
-fn nothing_due_says_when_the_next_one_is() {
+fn status_shows_the_rung_the_schedule_and_what_this_machine_holds() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(1), "a", false);
-    rote.attempt(&today(), "a", "review", "pass", 1, 0, 1);
-    rote.run(&[])
+    let engram = rote.enroll(day(2026, 9, 1), "escrow-p", true);
+    rote.capture(day(2026, 9, 2), "escrow-p", engram, Drilled::passed());
+    rote.cmd(&["status"])
         .assert()
         .success()
-        .stdout(contains("nothing due"));
+        .stdout(predicate::str::contains("ENGRAM"))
+        .stdout(predicate::str::contains("escrow-p@1"))
+        .stdout(predicate::str::contains("attached"));
 }
 
 #[test]
-fn an_empty_roster_points_at_enrolment() {
-    let rote = Rote::new();
-    rote.run(&[])
+fn due_is_the_short_way_to_the_schedule() {
+    Rote::new().cmd(&["due"]).assert().success();
+}
+
+#[test]
+fn history_shows_superseded_engrams_and_the_default_does_not() {
+    let mut rote = Rote::new();
+    let first = rote.enroll(day(2026, 9, 1), "a", false);
+    rote.rotate(day(2026, 9, 2), "a", first, true);
+    rote.cmd(&["status"])
         .assert()
         .success()
-        .stdout(contains("rote add"));
+        .stdout(predicate::str::contains("a@2"))
+        .stdout(predicate::str::contains("a@1").not());
+    rote.cmd(&["status", "--history"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("a@1"))
+        .stdout(predicate::str::contains("superseded"));
+}
+
+#[test]
+fn stats_are_per_engram_and_never_pooled_across_a_rotation() {
+    let mut rote = Rote::new();
+    let first = rote.enroll(day(2026, 9, 1), "a", false);
+    rote.capture(day(2026, 9, 2), "a", first, Drilled::passed());
+    let second = rote.rotate(day(2026, 9, 3), "a", first, true);
+    rote.capture(day(2026, 9, 4), "a", second, Drilled::missed());
+    rote.cmd(&["stats"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("a@1"))
+        .stdout(predicate::str::contains("a@2"))
+        .stdout(predicate::str::contains("STREAK"));
+}
+
+#[test]
+fn the_lineage_rollup_carries_only_what_survives_a_rotation() {
+    let mut rote = Rote::new();
+    let first = rote.enroll(day(2026, 9, 1), "a", false);
+    rote.rotate(day(2026, 9, 2), "a", first, true);
+    rote.cmd(&["stats", "--lineage"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("LINEAGE"))
+        .stdout(predicate::str::contains("ENGRAMS"))
+        .stdout(predicate::str::contains("RETENTION").not());
+}
+
+#[test]
+fn the_log_names_the_engram_and_what_each_record_did() {
+    let mut rote = Rote::new();
+    let engram = rote.enroll(day(2026, 9, 1), "a", false);
+    rote.attach(day(2026, 9, 2), "a", engram);
+    rote.cmd(&["log"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("enroll"))
+        .stdout(predicate::str::contains("attach"))
+        .stdout(predicate::str::contains("nothing was checked"));
+}
+
+#[test]
+fn the_log_narrows_to_one_lineage() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2026, 9, 1), "a", false);
+    rote.enroll(day(2026, 9, 1), "b", false);
+    rote.cmd(&["log", "--lineage", "a"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("a@1"))
+        .stdout(predicate::str::contains("b@1").not());
+}
+
+#[test]
+fn the_json_shapes_are_documents_rather_than_prose() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2026, 9, 1), "a", false);
+    for args in [
+        vec!["status", "--json"],
+        vec!["stats", "--json"],
+        vec!["log", "--json"],
+        vec!["machines", "--json"],
+        vec!["doctor", "--json"],
+        vec!["banner", "--json"],
+    ] {
+        let out = rote.cmd(&args).assert().get_output().stdout.clone();
+        let text = String::from_utf8(out).unwrap();
+        serde_json::from_str::<serde_json::Value>(&text)
+            .unwrap_or_else(|_| panic!("{args:?} did not answer with a document: {text}"));
+    }
+}
+
+// ── sittings without a terminal ──────────────────────────────────────────────
+
+#[test]
+fn nothing_enrolled_says_so_rather_than_opening_a_screen() {
+    Rote::new()
+        .cmd(&[])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rote enroll"));
+}
+
+#[test]
+fn nothing_due_says_when_the_next_one_is_and_offers_no_prompt_off_a_terminal() {
+    let mut rote = Rote::new();
+    let engram = rote.enroll(days_ago(1), "a", false);
+    rote.capture(today(), "a", engram, Drilled::passed());
+    rote.cmd(&[])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("nothing due"));
 }
 
 #[test]
 fn a_drill_refuses_to_run_where_it_cannot_be_typed() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(3), "a", false);
-    rote.run(&[])
+    rote.enroll(day(2020, 1, 1), "a", false);
+    rote.cmd(&[])
         .assert()
         .failure()
-        .stderr(contains("typed at a terminal"));
+        .stderr(predicate::str::contains("terminal"));
 }
 
 #[test]
-fn a_slug_with_no_verifier_is_reported_rather_than_prompted() {
-    let mut rote = Rote::new();
-    rote.seed(
-        &days_ago(3),
-        &serde_json::json!({"kind": "add", "slug": "a", "version": 1, "critical": false}),
-    );
-    let assertion = rote.run(&[]).assert().code(2);
-    assertion.stdout(contains("rote rekey --force"));
-}
-
-// Health.
-
-#[test]
-fn doctor_answers_the_registry_with_one_report() {
-    let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    let report = rote.json(&["doctor", "--format", "json"]);
-    assert_eq!(report["station"], "rote");
-    assert!(report["outcome"]["ran"].is_array());
-    rote.run(&["doctor"]).assert().success();
-}
-
-#[test]
-fn doctor_grades_an_overdue_drill_soft_and_a_broken_log_broken() {
-    let mut rote = Rote::new();
-    rote.add(&days_ago(40), "a", false);
-    rote.attempt(&days_ago(20), "a", "review", "pass", 7, 4, 4);
-    rote.run(&["doctor"])
+fn practice_on_an_unknown_lineage_is_refused() {
+    Rote::new()
+        .cmd(&["practice", "ghost"])
         .assert()
-        .code(1)
-        .stdout(contains("overdue"));
-
-    let text = rote
-        .log()
-        .replace("\"critical\":false", "\"critical\":true");
-    std::fs::write(rote.log_path(), text).expect("an edited log");
-    rote.run(&["doctor"])
-        .assert()
-        .code(2)
-        .stdout(contains("hash chain"));
+        .failure()
+        .stderr(predicate::str::contains("no lineage called ghost"));
 }
 
-#[test]
-fn a_verifier_nobody_drills_is_reported() {
-    let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    rote.verifier("ghost");
-    rote.run(&["doctor"])
-        .assert()
-        .code(1)
-        .stdout(contains("not on the schedule"))
-        .stdout(contains("ghost"));
-}
+// ── health ───────────────────────────────────────────────────────────────────
 
 #[test]
-fn a_never_reviewed_slug_falls_overdue() {
+fn a_clean_machine_reports_nothing() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(30), "a", false);
-    rote.run(&["doctor"])
-        .assert()
-        .code(1)
-        .stdout(contains("overdue"));
-}
-
-#[test]
-fn a_blank_aided_entry_is_not_a_disagreement() {
-    let mut rote = Rote::new();
-    rote.add(&days_ago(3), "a", false);
-    rote.attempt(&days_ago(1), "a", "aided", "blank", 1, 0, 0);
-    assert_eq!(
-        rote.json(&["status", "--json"])["slugs"][0]["aided_mismatch"],
-        false
-    );
-    assert_eq!(rote.json(&["stats", "--json"])["aided"]["total"], 0);
-}
-
-#[test]
-fn the_first_review_counts_toward_punctuality() {
-    let mut rote = Rote::new();
-    rote.add(&days_ago(10), "a", false);
-    rote.run(&["add", "b", "--stdin"])
-        .write_stdin("x\n")
-        .assert()
-        .success();
-    // Seeded records carry their own intervals; the enrollment path is what
-    // exercises the anchor. The status reading is enough to see it.
-    let slug = &rote.json(&["status", "--json"])["slugs"][0];
-    assert_eq!(slug["standing"], "due");
-}
-
-#[test]
-fn a_weak_verifier_is_broken_and_a_missing_one_is_soft() {
-    let mut rote = Rote::new();
-    rote.seed(
-        &today(),
-        &serde_json::json!({"kind": "add", "slug": "a", "version": 1, "critical": false}),
-    );
-    rote.weak_verifier("a");
-    rote.run(&["doctor"])
-        .assert()
-        .code(2)
-        .stdout(contains("cheaper attack path"));
-
-    std::fs::write(rote.state.join("verifiers.toml"), "").expect("an empty file");
-    rote.run(&["doctor"])
-        .assert()
-        .code(1)
-        .stdout(contains("no verifier"));
-}
-
-#[test]
-fn a_log_written_elsewhere_is_reported_rather_than_merged() {
-    let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    let text = rote
-        .log()
-        .replace("\"host\":\"Scratch\"", "\"host\":\"Other\"");
-    std::fs::write(rote.log_path(), text).expect("an edited log");
-    rote.run(&["doctor"])
-        .assert()
-        .code(1)
-        .stdout(contains("another machine"));
-}
-
-#[test]
-fn a_malformed_line_is_kept_and_reported_rather_than_dropped() {
-    let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    let mut text = rote.log();
-    text.push_str("{ not json\n");
-    std::fs::write(rote.log_path(), text).expect("an edited log");
-
-    rote.run(&["doctor"])
-        .assert()
-        .code(2)
-        .stdout(contains("will not parse"));
-    rote.run(&["log"])
+    let engram = rote.enroll(days_ago(1), "a", false);
+    rote.capture(today(), "a", engram, Drilled::passed());
+    rote.cmd(&["doctor", "--format", "human"])
         .assert()
         .success()
-        .stdout(contains("malformed"));
+        .stdout(predicate::str::contains("rote ok"));
 }
 
 #[test]
-fn a_record_from_a_newer_schema_stops_the_writer_before_it_touches_anything() {
-    let mut rote = Rote::new();
-    rote.add(&today(), "a", false);
-    let text = rote
-        .log()
-        .replace(&format!("\"v\":{SCHEMA}"), &format!("\"v\":{}", SCHEMA + 1));
-    std::fs::write(rote.log_path(), text).expect("an edited log");
-
-    rote.run(&["retire", "a"])
-        .assert()
-        .failure()
-        .stderr(contains("newer rote"));
-    let verifiers = std::fs::read_to_string(rote.state.join("verifiers.toml")).expect("the file");
-    assert!(
-        verifiers.contains("argon2"),
-        "the refusal came before the verifier was removed"
-    );
-}
-
-// The reminder.
-
-#[test]
-fn the_reminder_is_silent_with_no_cache_and_counts_what_is_due() {
-    let mut rote = Rote::new();
-    rote.run(&["banner"]).assert().success().stdout("");
-
-    rote.add(&days_ago(3), "a", false);
-    rote.add(&days_ago(3), "escrow-p", true);
-    // Reading the schedule repairs the reminder, which is what makes a restored
-    // or hand-edited log show up in the next terminal.
-    rote.run(&["status"]).assert().success();
-
-    let output = rote.run(&["banner"]).output().expect("a run");
-    let text = String::from_utf8_lossy(&output.stdout);
-    assert!(text.contains("2 drills due"), "{text}");
-}
-
-#[test]
-fn the_banner_answers_a_report_for_whatever_reads_it_next() {
-    let mut rote = Rote::new();
-    rote.add(&days_ago(3), "a", false);
-    rote.add(&days_ago(3), "b", true);
-    rote.run(&["status"]).assert().success();
-
-    let output = rote
-        .run(&["banner", "--format", "json"])
-        .output()
-        .expect("a run");
-    let report: relic_core::finding::Report =
-        serde_json::from_slice(&output.stdout).expect("a report, not prose");
-    let finding = report.findings().first().expect("one finding");
-    assert_eq!(finding.summary.as_str(), "2 drills due");
-    assert_eq!(finding.fix.as_ref().expect("a fix").as_str(), "rote");
-    assert_eq!(finding.severity, relic_core::finding::Severity::Soft);
-}
-
-#[test]
-fn the_banner_answers_an_empty_report_when_nothing_is_due() {
+fn the_doctor_speaks_the_protocol_assay_collects() {
     let rote = Rote::new();
-    let output = rote
-        .run(&["banner", "--format", "json"])
-        .output()
-        .expect("a run");
-    let report: relic_core::finding::Report =
-        serde_json::from_slice(&output.stdout).expect("a report, not prose");
-    assert!(report.findings().is_empty());
-    assert_eq!(report.grade(), relic_core::finding::Grade::Ok);
-}
-
-// The files.
-
-#[test]
-fn the_verifier_never_lands_in_the_tree_that_goes_offsite() {
-    let rote = Rote::new();
-    rote.run(&["add", "a", "--stdin"])
-        .write_stdin("correct horse battery staple\n")
+    let out = rote
+        .cmd(&["doctor", "--json"])
         .assert()
-        .success();
-    let ark: Vec<String> = std::fs::read_dir(&rote.ark)
-        .expect("the ark")
-        .filter_map(|entry| Some(entry.ok()?.file_name().to_string_lossy().into_owned()))
-        .collect();
-    assert!(ark.contains(&"log.jsonl".to_owned()));
-    assert!(!ark.iter().any(|name| name.contains("verifier")), "{ark:?}");
-    assert!(rote.state.join("verifiers.toml").exists());
-}
-
-#[test]
-fn every_file_it_writes_is_private() {
-    use std::os::unix::fs::PermissionsExt as _;
-    let rote = Rote::new();
-    rote.run(&["add", "a", "--stdin"])
-        .write_stdin("correct horse battery staple\n")
-        .assert()
-        .success();
-    for path in [
-        rote.log_path(),
-        rote.state.join("verifiers.toml"),
-        rote.state.join("cache.json"),
-    ] {
-        let mode = std::fs::metadata(&path)
-            .unwrap_or_else(|_| panic!("{path:?} should exist"))
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600, "{path:?}");
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(report["station"], "rote");
+    assert!(report["outcome"]["ran"].is_array());
+    for finding in report["outcome"]["ran"].as_array().unwrap() {
+        let station = finding["station"].as_str().unwrap();
+        assert!(
+            station == "rote" || station.starts_with("rote-"),
+            "{station} is not namespaced"
+        );
     }
 }
 
 #[test]
-fn a_config_file_is_read_and_a_broken_one_refuses_rather_than_falling_back() {
+fn a_verifier_for_a_superseded_engram_is_broken_rather_than_merely_untidy() {
     let mut rote = Rote::new();
-    rote.add(&days_ago(10), "a", false);
-    std::fs::write(rote.home.join("config.toml"), "filler = \"none\"\n").expect("a config");
-    rote.run(&["status"]).assert().success();
+    let first = rote.enroll(day(2026, 9, 1), "a", false);
+    rote.rotate(day(2026, 9, 2), "a", first, true);
+    // The rotation forgot it; put it back, which is what a hand-edited file or a
+    // half-finished rotation leaves behind.
+    rote.hold(first, "a", day(2026, 9, 1));
+    rote.cmd(&["doctor", "--format", "human"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("superseded"));
+}
 
-    std::fs::write(rote.home.join("config.toml"), "nonsense = true\n").expect("a config");
-    rote.run(&["status"])
+#[test]
+fn a_verifier_below_the_memory_floor_is_broken() {
+    let mut rote = Rote::new();
+    let engram = rote.enroll_dormant(day(2026, 9, 1), "a");
+    rote.hold_weak(engram, "a", day(2026, 9, 1));
+    rote.cmd(&["doctor", "--format", "human"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("weaker than the artifact"));
+}
+
+#[test]
+fn a_dormant_lineage_is_soft_and_points_at_the_sitting() {
+    let mut rote = Rote::new();
+    rote.enroll_dormant(today(), "a");
+    rote.cmd(&["doctor", "--format", "human"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("no verifier on this machine"))
+        .stdout(predicate::str::contains("fix: rote"));
+}
+
+#[test]
+fn an_overdue_drill_is_reported_once_the_grace_is_spent() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2020, 1, 1), "a", false);
+    rote.cmd(&["doctor", "--format", "human"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("overdue"));
+}
+
+#[test]
+fn a_refused_aided_capture_is_the_vault_drift_signal() {
+    let mut rote = Rote::new();
+    let engram = rote.enroll(day(2026, 9, 1), "a", false);
+    rote.capture(day(2026, 9, 2), "a", engram, Drilled::aided(Outcome::Fail));
+    rote.cmd(&["doctor", "--format", "human"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("different secrets"));
+}
+
+#[test]
+fn something_in_the_chains_directory_that_is_not_a_chain_is_excluded_and_reported() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2026, 9, 1), "a", false);
+    let copy = rote.chains().join(format!("{} (1).jsonl", rote.machine));
+    std::fs::copy(rote.chain(), &copy).unwrap();
+
+    rote.cmd(&["doctor", "--format", "human"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("not a chain"));
+    rote.cmd(&["status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("a@1"));
+}
+
+#[test]
+fn a_record_from_a_newer_schema_stops_a_write_rather_than_being_half_read() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2026, 9, 1), "a", false);
+    let chain = std::fs::read_to_string(rote.chain()).unwrap();
+    std::fs::write(rote.chain(), chain.replace("\"v\":3", "\"v\":99")).unwrap();
+
+    rote.cmd(&["enroll", "b", "--stdin"])
+        .write_stdin("x\n")
         .assert()
         .failure()
-        .stderr(contains("nonsense"));
+        .stderr(predicate::str::contains("newer rote"));
+}
+
+#[test]
+fn two_machines_writing_on_one_day_is_reported_as_a_double_count() {
+    let mut first = Rote::new();
+    let engram = first.enroll(day(2026, 9, 1), "a", false);
+    let mut second = Rote::beside(&first, "two");
+    second.capture(day(2026, 9, 1), "a", engram, Drilled::passed());
+    first
+        .cmd(&["doctor", "--format", "human"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("two machines wrote"));
+    first
+        .cmd(&["machines"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(second.machine.to_string()));
+}
+
+#[test]
+fn a_capture_written_against_a_history_the_merge_does_not_give_is_reported() {
+    let mut first = Rote::new();
+    let engram = first.enroll(day(2026, 9, 1), "a", false);
+    first.capture(day(2026, 9, 2), "a", engram, Drilled::passed());
+    let mut second = Rote::beside(&first, "two");
+    // A machine that had not seen the first capture, so it believed the rung was
+    // still at the foot.
+    second.capture(day(2026, 9, 3), "a", engram, Drilled::passed());
+    first
+        .cmd(&["doctor", "--format", "human"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("different histories"));
+}
+
+// ── the reminder ─────────────────────────────────────────────────────────────
+
+#[test]
+fn the_reminder_says_nothing_when_there_is_nothing_to_say() {
+    Rote::new()
+        .cmd(&["banner"])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
+fn the_reminder_counts_and_never_names() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2020, 1, 1), "escrow-p", false);
+    rote.cmd(&["status"]).assert().success();
+    rote.cmd(&["banner"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 drill due"))
+        .stdout(predicate::str::contains("escrow-p").not());
+}
+
+#[test]
+fn the_reminder_reads_only_its_cache() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2020, 1, 1), "a", false);
+    rote.cmd(&["status"]).assert().success();
+    // Everything else gone; the reminder still answers from the cache alone.
+    std::fs::remove_dir_all(rote.chains()).unwrap();
+    rote.cmd(&["banner"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("due"));
+}
+
+// ── the files ────────────────────────────────────────────────────────────────
+
+#[test]
+fn nothing_but_the_record_lands_in_the_tree_that_goes_offsite() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2026, 9, 1), "a", false);
+    let mut found = Vec::new();
+    for entry in walk(&rote.ark) {
+        found.push(entry);
+    }
+    assert!(
+        found.iter().all(|path| path.contains("chains")),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn what_rote_writes_is_private_the_moment_it_exists() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let rote = Rote::new();
+    rote.cmd(&["enroll", "a", "--stdin"])
+        .write_stdin(format!("{}\n", support::SECRET))
+        .assert()
+        .success();
+    for path in [rote.chain(), rote.verifiers_path()] {
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "{path}");
+    }
+}
+
+#[test]
+fn a_config_that_declares_a_ladder_that_is_not_one_is_refused_loudly() {
+    let rote = Rote::new();
+    rote.configure("ladder = [7, 2]\n");
+    rote.cmd(&["status"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("ladder"));
+}
+
+#[test]
+fn a_config_ladder_changes_the_schedule_it_proposes() {
+    let mut rote = Rote::new();
+    rote.configure("ladder = [3]\n");
+    rote.enroll(day(2026, 9, 1), "a", false);
+    rote.cmd(&["status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("3d"));
+}
+
+#[test]
+fn a_config_that_still_names_the_filler_policy_says_so() {
+    let rote = Rote::new();
+    rote.configure("filler = \"all\"\n");
+    rote.cmd(&["status"]).assert().failure();
+}
+
+fn walk(root: &camino::Utf8Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir()
+            && let Ok(path) = camino::Utf8PathBuf::from_path_buf(path.clone())
+        {
+            out.extend(walk(&path));
+        }
+        out.push(path.to_string_lossy().into_owned());
+    }
+    out
 }

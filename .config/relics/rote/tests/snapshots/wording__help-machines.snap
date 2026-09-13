@@ -1,0 +1,28 @@
+---
+source: rote/tests/wording.rs
+expression: body
+---
+MACHINES
+
+  A machine has an identity and a label. The identity is derived from the
+  platform's own hardware identifier, hashed and truncated, so it is stable
+  across a reinstall and there is no file holding it that could be copied onto a
+  second computer. The label is the hostname, which is mutable and is never an
+  identity. Both are recorded on every line.
+
+  Each machine writes its own chain. An append-only hash chain is not a
+  mergeable structure, so two machines never share one file: the corpus is the
+  merge of all of them, ordered by instant, then machine, then position. A
+  flagship handover is a new file rather than a fork in an old one.
+
+  Only the flagship writes. The marker is a file rote reads and never creates.
+  An empty marker authorises whoever holds it; a marker with a machine identity
+  in it authorises only that machine, which is how a copied marker fails loudly
+  instead of quietly admitting a second writer. It is an accident guard and not
+  a lock.
+
+  Attachment is per machine. The record carries the attach events, permanently;
+  which verifiers this machine holds is a local fact. The two can legitimately
+  disagree, and neither is authoritative over the other.
+
+  rote machines shows every machine that has written, and which one this is.

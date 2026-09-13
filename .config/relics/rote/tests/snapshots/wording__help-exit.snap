@@ -1,0 +1,13 @@
+---
+source: rote/tests/wording.rs
+expression: body
+---
+EXIT
+
+  0   nothing to report. Everything due was answered, or nothing was due
+  1   something was missed, or the doctor found something soft
+  2   a sitting was abandoned, or the doctor found something broken
+  3   rote refused or could not run
+
+  A sitting that only attached exits 0: nothing was judged either way. Refusing
+  to write because this machine is not the flagship is 3.

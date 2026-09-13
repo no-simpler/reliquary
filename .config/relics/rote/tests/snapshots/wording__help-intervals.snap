@@ -1,0 +1,24 @@
+---
+source: rote/tests/wording.rs
+expression: body
+---
+INTERVALS
+
+  The ladder is 1, 1, 2, 4, 7, 14, 30 days by default, held at the last of them.
+  An unaided first pass on a due drill moves up a rung; a first miss returns to
+  the foot. Set your own with the ladder key in the config.
+
+  Three intervals are recorded against every sample.
+
+    scheduled   what the ladder asked for
+    actual      days since the schedule was last served
+    effective   days since the secret was in front of a person at all
+
+  Every figure in rote stats is computed from the whole record rather than read
+  back off the line that carries it, so two machines that wrote without having
+  seen each other cannot each claim a full interval for one real gap.
+
+  The streak in rote stats counts unaided passes at the cap interval or longer,
+  back from the most recent drill. A pass at a shorter interval is not evidence
+  either way and is stepped over; a miss ends the run. It is reported and never
+  judged.

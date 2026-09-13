@@ -305,6 +305,47 @@ pub fn ask(console: &mut dyn Console, today: jiff::civil::Date, prompt: &Ask<'_>
     read_secret(console, false, &mut build)
 }
 
+/// Ask a yes-or-no question and read one keystroke.
+///
+/// One key, no enter: this is asked on the most frequent path there is, and a
+/// question that wants a word and a return is a question that will be resented
+/// daily. Only `y` says yes, so a stray key never starts something.
+///
+/// # Errors
+///
+/// When the terminal cannot be read or written.
+pub fn offer(
+    console: &mut dyn Console,
+    today: jiff::civil::Date,
+    heading: &str,
+    question: &str,
+) -> Result<bool> {
+    let style = console.style();
+    let mut drawn = Card::new("rote", card::stamp(today), style);
+    drawn.reserve(ASK_SLOTS);
+    drawn.say(heading, Tint::Bold).gap();
+    drawn.say(question, Tint::Dim);
+    drawn.pad_to(ASK_SLOTS.saturating_sub(1));
+    drawn.say("y to practice · any other key to leave it", Tint::Dim);
+    console.anchor(drawn.height());
+    console.paint(&drawn)?;
+    console.arm();
+    Ok(match console.next()? {
+        Some(Key::Char('y' | 'Y')) => true,
+        None
+        | Some(
+            Key::Char(_)
+            | Key::Enter
+            | Key::Escape
+            | Key::Interrupt
+            | Key::Backspace
+            | Key::Clear
+            | Key::Lookup
+            | Key::Paste,
+        ) => false,
+    })
+}
+
 /// The closing card: one outcome, held until it has been read.
 ///
 /// A dialog leaves nothing in scrollback, so this is where an outcome is read

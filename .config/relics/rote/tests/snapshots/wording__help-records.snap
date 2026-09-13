@@ -1,0 +1,29 @@
+---
+source: rote/tests/wording.rs
+expression: body
+---
+RECORDS
+
+  One JSON object per line, appended and never rewritten, one file per machine.
+  Every record carries the schema, the instant, the drill day, the machine, the
+  hostname it wore, its position in its own chain, the digest of the line before
+  it, and one event.
+
+  Five kinds of event: enroll, rotate, attach, retire, capture.
+
+  A capture is one typed sample. It records the lineage and the engram, the
+  sitting, which sample within the drill, the occasion, whether it was aided,
+  the outcome, time to the first keystroke, time to submit, backspaces, refused
+  pastes, the three intervals, and the rung either side.
+
+  Two occasions: review, which the schedule asked for, and practice, which it
+  did not. Aided rides beside the occasion as a flag rather than replacing it,
+  so an aided review is still a review.
+
+  Five outcomes: pass, fail, blank, skip, abandoned.
+
+  Nothing derived from the secret is recorded: not its length, not a prefix, not
+  a character class. The digest chain is tamper evidence and corruption
+  detection rather than a control. It catches edits and deletions inside a
+  chain. It does not catch a chain being truncated at the end or deleted
+  outright.

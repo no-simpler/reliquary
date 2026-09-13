@@ -1,0 +1,225 @@
+//! The terminal side of the commands that take a secret.
+//!
+//! One place opens a dialog, because raw mode and the alternate screen are
+//! process-wide: a command that opens a second one restores the terminal under
+//! the first and turns echo on beneath the next prompt.
+//!
+//! The policy for taking a secret twice is not here — it is in `intake`, pure,
+//! because the sitting needs the same policy and draws a different card.
+
+use anyhow::{Context as _, Result, bail};
+use jiff::civil::Date;
+use relic_core::style::Tint;
+
+use super::Context;
+use crate::exit::{CLEAN, INCOMPLETE};
+use crate::intake::{DIFFERED, NOT_CURRENT, Pair, Pairing};
+use crate::secret::Secret;
+use crate::tui::{self, term};
+use crate::verifier::Verifier;
+
+/// The screen a secret is typed on, or nothing when this is a pipe.
+///
+/// # Errors
+///
+/// When the terminal cannot be entered.
+pub fn open(stdin: bool, ctx: &Context) -> Result<Option<term::Terminal>> {
+    if stdin {
+        return Ok(None);
+    }
+    term::Terminal::enter(ctx.style).map(Some)
+}
+
+/// Ask for one secret. `None` means the dialog was abandoned rather than
+/// answered.
+///
+/// # Errors
+///
+/// When the terminal cannot be read or written.
+pub fn typed(
+    console: &mut term::Terminal,
+    today: Date,
+    heading: &str,
+    intention: &str,
+    status: Option<&str>,
+) -> Result<Option<Secret>> {
+    let prompt = tui::Ask {
+        heading,
+        intention,
+        status,
+    };
+    match tui::ask(console, today, &prompt)? {
+        tui::Typed::Submitted(entry) => Ok(Some(entry.secret)),
+        // Nothing here has a vault to consult: the secret being taken is the one
+        // the reader brought with them.
+        tui::Typed::Skipped | tui::Typed::Aborted | tui::Typed::Lookup => Ok(None),
+    }
+}
+
+/// How a double entry ended.
+pub enum Twice {
+    /// Both entries agreed.
+    Agreed(Box<Secret>),
+    /// The dialog was walked away from.
+    Abandoned,
+    /// The rounds ran out with the two entries still apart.
+    Differed,
+}
+
+/// Ask for a secret twice until the two agree, for as many rounds as the drill
+/// allows tries.
+///
+/// # Errors
+///
+/// When the terminal cannot be read or written.
+pub fn twice(
+    console: &mut term::Terminal,
+    today: Date,
+    heading: &str,
+    intention: &str,
+    ctx: &Context,
+) -> Result<Twice> {
+    let mut pair = Pair::new(ctx.config.max_attempts());
+    let mut status: Option<&str> = None;
+    loop {
+        let asking = if pair.holds_one() { "again" } else { intention };
+        let Some(offered) = typed(console, today, heading, asking, status)? else {
+            return Ok(Twice::Abandoned);
+        };
+        match pair.offer(offered) {
+            Pairing::Again => status = None,
+            Pairing::Agreed(secret) => return Ok(Twice::Agreed(secret)),
+            Pairing::Differed => status = Some(DIFFERED),
+            Pairing::OutOfRounds => return Ok(Twice::Differed),
+            Pairing::Empty => status = Some(crate::intake::EMPTY),
+        }
+    }
+}
+
+/// Prove the current secret before a rotation replaces it.
+///
+/// Without it a verifier could be replaced by one somebody else knows, and the
+/// reading would still say memorised. `Some(code)` means the rotation stopped
+/// here and that is the status to leave on.
+///
+/// # Errors
+///
+/// When the terminal cannot be read or written, or a pipe offered the wrong
+/// secret.
+pub fn prove(
+    current: &Verifier,
+    piped: Option<Secret>,
+    console: Option<&mut term::Terminal>,
+    today: Date,
+    heading: &str,
+    ctx: &Context,
+) -> Result<Option<u8>> {
+    if let Some(offered) = piped {
+        return if current.accepts(&offered)? {
+            Ok(None)
+        } else {
+            bail!("{NOT_CURRENT}, so nothing was replaced")
+        };
+    }
+    let Some(console) = console else {
+        bail!("--stdin wants the current secret first, then the new one");
+    };
+    let tries = ctx.config.max_attempts();
+    for attempt in 1..=tries {
+        let status = (attempt > 1).then(|| format!("{NOT_CURRENT} · try {attempt} of {tries}"));
+        let Some(offered) = typed(
+            console,
+            today,
+            heading,
+            "prove the current secret before it is replaced",
+            status.as_deref(),
+        )?
+        else {
+            return abandoned(console, today, heading).map(Some);
+        };
+        if current.accepts(&offered)? {
+            return Ok(None);
+        }
+    }
+    refused(console, today, heading, NOT_CURRENT).map(Some)
+}
+
+/// Close a dialog that was walked away from.
+///
+/// # Errors
+///
+/// When the terminal cannot be written.
+pub fn abandoned(console: &mut term::Terminal, today: Date, heading: &str) -> Result<u8> {
+    tui::outcome(console, today, heading, "nothing was changed", Tint::Dim)?;
+    Ok(INCOMPLETE)
+}
+
+/// Close a dialog on an outcome that is a refusal.
+///
+/// Said on the card and held, rather than raised: the screen is erased on the
+/// way out, so an error printed after it is an error printed to a person who has
+/// already been told nothing.
+///
+/// # Errors
+///
+/// When the terminal cannot be written.
+pub fn refused(console: &mut term::Terminal, today: Date, heading: &str, text: &str) -> Result<u8> {
+    tui::outcome(console, today, heading, text, Tint::Red)?;
+    Ok(INCOMPLETE)
+}
+
+/// Close a dialog on the outcome it was opened for, or say it on stdout when
+/// there was no dialog at all.
+///
+/// # Errors
+///
+/// When the terminal cannot be written.
+pub fn settled(
+    ctx: &Context,
+    console: Option<&mut term::Terminal>,
+    today: Date,
+    heading: &str,
+    said: &str,
+) -> Result<u8> {
+    match console {
+        Some(console) => tui::outcome(console, today, heading, said, Tint::Green)?,
+        None => {
+            if !ctx.quiet {
+                println!("{said}");
+            }
+        }
+    }
+    Ok(CLEAN)
+}
+
+/// Read secrets from a pipe, one per line.
+///
+/// Refused when stdin is a terminal: a secret typed into an echoing read lands
+/// on the screen and in scrollback. That the command line itself must carry no
+/// secret is the pipe's own discipline, and no stream check can enforce it.
+///
+/// # Errors
+///
+/// When stdin is a terminal, cannot be read, or offered fewer lines than asked
+/// for.
+pub fn piped(count: usize) -> Result<Vec<Secret>> {
+    use std::io::{IsTerminal as _, Read as _};
+    if std::io::stdin().is_terminal() {
+        bail!("--stdin is for a pipe. At a terminal, type the secret instead");
+    }
+    let mut buffer = zeroize::Zeroizing::new(Vec::new());
+    std::io::stdin()
+        .read_to_end(&mut buffer)
+        .context("reading stdin")?;
+    let mut secrets = Vec::new();
+    for line in buffer.split(|byte| *byte == b'\n').take(count) {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        secrets.push(
+            Secret::from_bytes(line).context("that is longer than a secret this tool will take")?,
+        );
+    }
+    if secrets.len() < count {
+        bail!("expected {count} lines on stdin, one secret per line");
+    }
+    Ok(secrets)
+}

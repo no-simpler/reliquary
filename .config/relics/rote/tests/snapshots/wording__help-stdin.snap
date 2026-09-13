@@ -1,0 +1,21 @@
+---
+source: rote/tests/wording.rs
+expression: body
+---
+STDIN
+
+  One rule: a pipe is asked for each distinct secret exactly once. Double entry
+  exists to catch a typo at a keyboard, and a pipe cannot mistype.
+
+    rote enroll --stdin         one line, the new secret
+    rote attach --stdin         one line, the secret this engram holds
+    rote rotate --stdin         two lines, the current secret then the new one
+    rote rotate --force --stdin one line, the new secret
+
+  Refused when stdin is a terminal. The threat is an echoing read: a secret
+  typed into one lands on the screen and in scrollback.
+
+  What the pipe must not be is a command line. No stream check can see one, so
+  that discipline is yours: a vault at the other end, never an echo.
+
+  The drill accepts no stdin at all.

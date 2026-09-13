@@ -9,6 +9,7 @@ pub const TOPICS: &[(&str, &str)] = &[
     ("intervals", INTERVALS),
     ("records", RECORDS),
     ("files", FILES),
+    ("machines", MACHINES),
     ("stdin", STDIN),
     ("exit", EXIT),
 ];
@@ -33,132 +34,159 @@ pub fn topic_names() -> String {
 const KEYS: &str = "\
 KEYS
 
-  What a prompt takes. The card names only the lookup, because that is the only
-  one a person could not already guess, and it says so only where it is on
-  offer.
+  At a drill prompt:
 
-    enter        submit what is in the field
-    enter        on an empty field, concede: a failure of recall, recorded
-    escape       leave this slug where it stands and go on to the next
-    ctrl-u       clear the field and start the entry again
-    ctrl-l       go and look it up, then type it as an aided entry
-    ctrl-c       abandon the sitting
+    enter       submit what is typed, or concede by submitting nothing
+    escape      pass this one over
+    ctrl-u      start the entry over
+    ctrl-l      go and look it up, then type it as an aided entry. Offered only
+                after a cold try is already on record
+    ctrl-c      abandon the sitting
 
-  Ctrl-L is offered only after a cold attempt is on record, and does nothing
-  before then. Consulting the vault first and typing what it says would make the
-  reading a transcription, and the whole point is that the cold attempt is
-  recorded either way. It stays on offer once the cold tries are spent: the
-  field says out of tries, a typed answer is refused rather than judged, and
-  ctrl-l or escape are what is left.
+  At an attachment prompt, where a verifier is being made rather than checked:
 
-  A paste is refused rather than accepted. A drill answered from a vault
-  measures nothing.
-";
+    enter       submit this half of the pair. An empty entry is refused rather
+                than conceded, because there is nothing here to concede to
+    escape      leave the lineage dormant. Nothing is written
+    ctrl-u      start the entry over
+    ctrl-c      abandon the sitting
+
+  There is no lookup at an attachment prompt. Offering one would imply that
+  what is typed is being checked against something, and it is not.
+
+  When nothing is due, bare rote asks whether you want to practice anyway. That
+  is one keystroke and no return: y practices, any other key leaves it.
+
+  A paste is refused everywhere a secret is typed.";
 
 const INTERVALS: &str = "\
 INTERVALS
 
-  The ladder is 1, 1, 2, 4, 7 days, held at 7. A first-attempt pass moves one
-  step up; a first-attempt failure returns to the foot.
+  The ladder is 1, 1, 2, 4, 7, 14, 30 days by default, held at the last of them.
+  An unaided first pass on a due drill moves up a rung; a first miss returns to
+  the foot. Set your own with the ladder key in the config.
 
-  Three intervals are recorded against every entry, and they answer different
-  questions.
+  Three intervals are recorded against every sample.
 
     scheduled   what the ladder asked for
-    actual      days since the schedule's anchor: the previous review or
-                probe, else enrollment
-    effective   days since the previous entry of any kind
+    actual      days since the schedule was last served
+    effective   days since the secret was in front of a person at all
 
-  Effective is the honest one, and it is what every statistic and the cutover
-  gate read. Practicing a slug the day before its review does not make that
-  review seven-day evidence, and the numbers say so.
+  Every figure in rote stats is computed from the whole record rather than read
+  back off the line that carries it, so two machines that wrote without having
+  seen each other cannot each claim a full interval for one real gap.
 
-  An entry whose effective interval reaches twice the scheduled one is marked a
-  stretch, whether it was a deliberate probe or a fortnight away from the
-  machine.
-";
+  The streak in rote stats counts unaided passes at the cap interval or longer,
+  back from the most recent drill. A pass at a shorter interval is not evidence
+  either way and is stepped over; a miss ends the run. It is reported and never
+  judged.";
 
 const RECORDS: &str = "\
 RECORDS
 
-  One JSON object per line, appended and never rewritten. Every record carries
-  the schema version, the instant, the drill day it was credited to, the machine
-  that wrote it, and the SHA-256 of the line before it.
+  One JSON object per line, appended and never rewritten, one file per machine.
+  Every record carries the schema, the instant, the drill day, the machine, the
+  hostname it wore, its position in its own chain, the digest of the line before
+  it, and one event.
 
-  Five kinds: add, rekey, retire, probe, attempt.
+  Five kinds of event: enroll, rotate, attach, retire, capture.
 
-  An attempt records the class, which try it was, how it ended, the time to the
-  first keystroke, the time from there to submission, the corrections, any
-  refused pastes, the three intervals, and the ladder step either side.
+  A capture is one typed sample. It records the lineage and the engram, the
+  sitting, which sample within the drill, the occasion, whether it was aided,
+  the outcome, time to the first keystroke, time to submit, backspaces, refused
+  pastes, the three intervals, and the rung either side.
 
-  Four classes: review, practice, probe, aided. Only a review moves the ladder.
-  An aided entry is one where the answer was looked up first, so it is kept out
-  of every figure that claims to measure recall.
+  Two occasions: review, which the schedule asked for, and practice, which it
+  did not. Aided rides beside the occasion as a flag rather than replacing it,
+  so an aided review is still a review.
 
-  Five outcomes: pass, fail, blank, skip, abandoned. A blank is an empty entry,
-  which is a failure of recall and is counted as one. A skip and an abandonment
-  put nothing in front of anyone and are counted as nothing.
+  Five outcomes: pass, fail, blank, skip, abandoned.
 
-  It does not record the input, its length, or any prefix. Nothing in the log is
-  a secret, and the verifiers are not in it.
-
-  The chain of digests is tamper evidence, not a control: anyone who can edit
-  the file can recompute it. It is there so that an edit or a truncation is
-  visible instead of silent. rote doctor checks it.
-";
+  Nothing derived from the secret is recorded: not its length, not a prefix, not
+  a character class. The digest chain is tamper evidence and corruption
+  detection rather than a control. It catches edits and deletions inside a
+  chain. It does not catch a chain being truncated at the end or deleted
+  outright.";
 
 const FILES: &str = "\
 FILES
 
-  ~/Trove/ark/rote/log.jsonl      the log. Durable, and restic's to keep
-  ~/.local/state/rote/            the verifiers and the reminder cache
-  ~/.config/rote/config.toml      optional
+  ~/Trove/ark/rote/chains/           one append-only chain per machine
+  ~/.local/state/rote/verifiers.toml the verifiers this machine holds
+  ~/.local/state/rote/cache.json     what the reminder reads
+  ~/.local/state/rote/chain.lock     guards this machine's chain
+  ~/.local/state/reliquary/flagship  the marker rote reads and never writes
+  ~/.config/rote/config.toml         optional
 
-  The two homes are deliberate. An argon2id verifier is an offline-attackable
-  confirmation oracle, and it is regenerable by re-enrollment, so it has no
-  business in a tree that replicates to two providers and keeps prior versions.
-  The log is the opposite: not regenerable, and carrying no secret material.
+  The record is durable and goes offsite. The verifiers never leave the machine:
+  a verifier is an offline-attackable confirmation oracle, and it is regenerable
+  by typing the secret again, so it belongs where losing the local copy loses
+  nothing.
 
-  A slug whose verifier is missing is a first-class state, not a corruption. It
-  is what a restore onto a new machine looks like. The history survives; the
-  oracle does not.
+  An engram with no verifier here is a first-class state, not a corruption. It
+  is what a restore onto a new machine looks like, and rote attach is how it
+  comes back.
 
-  Config keys, all optional: root, state, rollover-hour, max-attempts, filler.
-  Filler is one of below-cap, all, none.
+  Config keys: root, state, rollover-hour, max-attempts, ladder.
 
-  Overrides for a trial run or a test: ROTE_ROOT, ROTE_STATE, ROTE_CONFIG,
-  ROTE_UI, ROTE_HOST.
-";
+  Environment: ROTE_ROOT, ROTE_STATE, ROTE_CONFIG, ROTE_UI, ROTE_HOST,
+  ROTE_FLAGSHIP, ROTE_MACHINE.";
+
+const MACHINES: &str = "\
+MACHINES
+
+  A machine has an identity and a label. The identity is derived from the
+  platform's own hardware identifier, hashed and truncated, so it is stable
+  across a reinstall and there is no file holding it that could be copied onto a
+  second computer. The label is the hostname, which is mutable and is never an
+  identity. Both are recorded on every line.
+
+  Each machine writes its own chain. An append-only hash chain is not a
+  mergeable structure, so two machines never share one file: the corpus is the
+  merge of all of them, ordered by instant, then machine, then position. A
+  flagship handover is a new file rather than a fork in an old one.
+
+  Only the flagship writes. The marker is a file rote reads and never creates.
+  An empty marker authorises whoever holds it; a marker with a machine identity
+  in it authorises only that machine, which is how a copied marker fails loudly
+  instead of quietly admitting a second writer. It is an accident guard and not
+  a lock.
+
+  Attachment is per machine. The record carries the attach events, permanently;
+  which verifiers this machine holds is a local fact. The two can legitimately
+  disagree, and neither is authoritative over the other.
+
+  rote machines shows every machine that has written, and which one this is.";
 
 const STDIN: &str = "\
 STDIN
 
-  rote add --stdin and rote rekey --stdin read secrets from a pipe, one per
-  line. rekey wants the current secret first, then the new one, unless --force
-  is given, in which case it wants only the new one.
+  One rule: a pipe is asked for each distinct secret exactly once. Double entry
+  exists to catch a typo at a keyboard, and a pipe cannot mistype.
 
-  Both refuse to run when stdin is a terminal, because a secret typed into an
-  echoing read lands on the screen and in scrollback. What no stream check can
-  see is the command line itself: a secret written into one lands in shell
-  history, so the pipe's other end should be a vault, never an echo.
+    rote enroll --stdin         one line, the new secret
+    rote attach --stdin         one line, the secret this engram holds
+    rote rotate --stdin         two lines, the current secret then the new one
+    rote rotate --force --stdin one line, the new secret
 
-  The drill itself never reads stdin. It has to be typed at a terminal, and a
-  paste is refused.
-";
+  Refused when stdin is a terminal. The threat is an echoing read: a secret
+  typed into one lands on the screen and in scrollback.
+
+  What the pipe must not be is a command line. No stream check can see one, so
+  that discipline is yours: a vault at the other end, never an echo.
+
+  The drill accepts no stdin at all.";
 
 const EXIT: &str = "\
-EXIT CODES
+EXIT
 
-  0   clean, or nothing was due
-  1   a first-attempt failure, or a soft finding from doctor
-  2   the sitting was abandoned, or doctor found something broken, or the
-      command line would not parse
-  3   rote could not run at all, and so found out nothing
+  0   nothing to report. Everything due was answered, or nothing was due
+  1   something was missed, or the doctor found something soft
+  2   a sitting was abandoned, or the doctor found something broken
+  3   rote refused or could not run
 
-  doctor exits on its grade, so a non-zero status there means it had something
-  to report rather than that it failed to run. Three is the other case: not
-  knowing is never reported as a clean bill of health.
-";
+  A sitting that only attached exits 0: nothing was judged either way. Refusing
+  to write because this machine is not the flagship is 3.";
 
 #[cfg(test)]
 mod tests {
@@ -194,6 +222,27 @@ mod tests {
     fn no_topic_uses_backticks() {
         for (name, body) in TOPICS {
             assert!(!body.contains('`'), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_root_help_advertises_every_topic_that_exists() {
+        for (name, _) in TOPICS {
+            assert!(
+                crate::cli::ROOT_AFTER_LONG_HELP.contains(name),
+                "{name} is not advertised"
+            );
+        }
+    }
+
+    #[test]
+    fn every_occasion_and_landing_is_spelled_in_the_records_topic() {
+        let body = topic("records").unwrap();
+        for occasion in [
+            crate::ladder::Occasion::Review,
+            crate::ladder::Occasion::Practice,
+        ] {
+            assert!(body.contains(occasion.word()), "{}", occasion.word());
         }
     }
 }

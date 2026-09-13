@@ -16,6 +16,8 @@
 //! confirmation oracle, and it is regenerable by re-enrollment, so it has no
 //! business in a tree that replicates to two providers and keeps prior versions.
 
+pub mod file;
+
 use argon2::password_hash::{Ident, Output, ParamsString, PasswordHash, Salt, SaltString};
 use argon2::{Algorithm, Argon2, Block, Params, Version};
 use zeroize::Zeroize as _;

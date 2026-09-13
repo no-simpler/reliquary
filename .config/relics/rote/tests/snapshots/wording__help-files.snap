@@ -1,0 +1,26 @@
+---
+source: rote/tests/wording.rs
+expression: body
+---
+FILES
+
+  ~/Trove/ark/rote/chains/           one append-only chain per machine
+  ~/.local/state/rote/verifiers.toml the verifiers this machine holds
+  ~/.local/state/rote/cache.json     what the reminder reads
+  ~/.local/state/rote/chain.lock     guards this machine's chain
+  ~/.local/state/reliquary/flagship  the marker rote reads and never writes
+  ~/.config/rote/config.toml         optional
+
+  The record is durable and goes offsite. The verifiers never leave the machine:
+  a verifier is an offline-attackable confirmation oracle, and it is regenerable
+  by typing the secret again, so it belongs where losing the local copy loses
+  nothing.
+
+  An engram with no verifier here is a first-class state, not a corruption. It
+  is what a restore onto a new machine looks like, and rote attach is how it
+  comes back.
+
+  Config keys: root, state, rollover-hour, max-attempts, ladder.
+
+  Environment: ROTE_ROOT, ROTE_STATE, ROTE_CONFIG, ROTE_UI, ROTE_HOST,
+  ROTE_FLAGSHIP, ROTE_MACHINE.

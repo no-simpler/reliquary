@@ -1,30 +1,13 @@
 //! Spaced-repetition drill for the passwords you must hold in your head.
 
-mod cli;
-mod cmd;
-mod config;
-mod doctor;
-mod drill;
-mod exit;
-mod guide;
-mod help;
-mod ladder;
-mod log;
-mod model;
-mod render;
-mod secret;
-mod slug;
-mod stats;
-mod store;
-mod tui;
-mod verifier;
-
 use clap::Parser as _;
 
-use crate::exit::REFUSED;
+use rote::cli::Cli;
+use rote::cmd;
+use rote::exit::REFUSED;
 
 fn main() -> std::process::ExitCode {
-    let cli = match cli::Cli::try_parse() {
+    let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
             let _ = error.print();

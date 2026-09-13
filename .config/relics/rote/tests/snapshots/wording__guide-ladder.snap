@@ -1,0 +1,27 @@
+---
+source: rote/tests/wording.rs
+expression: body
+---
+THE LADDER
+
+  Expanding intervals, 1, 1, 2, 4, 7, 14, 30 days, held at a month. An unaided
+  first pass moves up a rung; a first miss returns to the foot, which keeps a
+  shaky secret at daily intervals without a separate learning mode. The shape is
+  from Bonneau and Schechter, USENIX Security 2014, who held 56-bit secrets at
+  roughly 88% unaided recall on a schedule of this kind. The intervals are
+  configurable; the shape is the default and not a rule.
+
+  The cap is not a claim about memory. It is how stale the evidence is allowed
+  to get: at a month you are never more than a month from finding out whether
+  you still have it, and the record accumulates month-long retention data as a
+  by-product of ordinary use. Nothing has to be remembered to collect it.
+
+  rote records and proposes. It renders no verdict. It will not refuse a drill
+  that is not due, it will not refuse a second one the same day, and nothing
+  else in the system is made conditional on a drill being current. What the
+  numbers mean is yours to decide, which is why every threshold that once
+  produced a word now produces a number in rote stats.
+
+  A rotation is a different secret and a different memory, so it starts a new
+  engram at the foot and the measurement starts again with it. Nothing is
+  pooled across one.

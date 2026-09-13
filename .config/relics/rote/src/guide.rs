@@ -10,7 +10,6 @@ pub const TOPICS: &[(&str, &str)] = &[
     ("ladder", LADDER),
     ("irregularity", IRREGULARITY),
     ("custody", CUSTODY),
-    ("probes", PROBES),
 ];
 
 /// The frame every guide arrives in.
@@ -22,140 +21,104 @@ ROTE
 
 // Deliberately not opened with a continuation: that would swallow this block's
 // leading indentation along with the newline.
+/// The usage block every rendering is framed with.
 pub const USAGE: &str = "  rote help   CLI usage";
 
 const LADDER: &str = "\
 THE LADDER
 
-  Expanding intervals, 1, 1, 2, 4, 7 days, held at a week. A first-attempt pass
-  moves up a step; a first-attempt failure returns to the foot, which keeps a
-  shaky secret at daily intervals without a separate learning mode.
+  Expanding intervals, 1, 1, 2, 4, 7, 14, 30 days, held at a month. An unaided
+  first pass moves up a rung; a first miss returns to the foot, which keeps a
+  shaky secret at daily intervals without a separate learning mode. The shape is
+  from Bonneau and Schechter, USENIX Security 2014, who held 56-bit secrets at
+  roughly 88% unaided recall on a schedule of this kind. The intervals are
+  configurable; the shape is the default and not a rule.
 
-  The shape is from Bonneau and Schechter, USENIX Security 2014, who held
-  56-bit secrets at roughly 88% unaided recall on a schedule of this kind.
+  The cap is not a claim about memory. It is how stale the evidence is allowed
+  to get: at a month you are never more than a month from finding out whether
+  you still have it, and the record accumulates month-long retention data as a
+  by-product of ordinary use. Nothing has to be remembered to collect it.
 
-  rote records rather than gates. It will not refuse an entry that is not due,
-  it will not refuse a second entry the same day, and it does not make anything
-  else in the system conditional on a drill being current. Those were all
-  available and were declined: the ladder is what rote expects, not what it
-  requires, and a person who wants to drill more should not have to argue with
-  the instrument that measures them.
+  rote records and proposes. It renders no verdict. It will not refuse a drill
+  that is not due, it will not refuse a second one the same day, and nothing
+  else in the system is made conditional on a drill being current. What the
+  numbers mean is yours to decide, which is why every threshold that once
+  produced a word now produces a number in rote stats.
 
-  The one place it is strict is the cutover gate, and that is a verdict rather
-  than a permission: it will not report a slug ready on evidence that does not
-  meet the bar.
-
-  Do not change a lock until the new key has survived spacing. Read that off
-  rote status: three consecutive first-attempt passes at a cold seven-day
-  interval, which is about five weeks from a fresh enrollment.
-
-  One entry per sitting scores. A second entry a minute later is primed by the
-  first and measures transcription rather than recall, so the retries exist to
-  tell a slipped key from a real loss, and nothing more.
-
-  The drill runs before the lookup. The card says so at the prompt, because that
-  is where the rule applies, and it offers the lookup afterwards rather than
-  pretending nobody needs one. See rote help keys.
-";
+  A rotation is a different secret and a different memory, so it starts a new
+  engram at the foot and the measurement starts again with it. Nothing is
+  pooled across one.";
 
 const IRREGULARITY: &str = "\
 IRREGULARITY
 
-  A human schedule will not hold, and rote is built for that rather than
-  against it.
+  The schedule is a proposal and the actual cadence is yours. Drilling more
+  often than proposed, less often, or not at all for a fortnight are all
+  ordinary, and all three stay measurable.
 
-  Drilling more often than the ladder asks costs nothing. The extra entries are
-  practice: recorded in full, kept out of the retention figures, and unable to
-  move the ladder in either direction. What they do move is the effective
-  interval, and because the gate reads that rather than the schedule, a week of
-  daily practice simply means the next review is one-day evidence and is
-  reported as such.
+  Three intervals are recorded. The scheduled one is what the ladder asked for.
+  The actual one is how long it had been since the schedule was last served. The
+  effective one is how long it had been since the secret was in front of a
+  person at all, by any route, and that is the honest retention interval: extra
+  practice cannot dress a one-day recall up as a month-long one, and a fortnight
+  away arrives as long-interval evidence rather than as a gap.
 
-  Drilling less often costs nothing either. An entry after a fortnight scores
-  normally, and because its effective interval is twice the scheduled one it is
-  marked a stretch and lands in the long-interval band. A holiday becomes decay
-  data rather than a gap.
+  Those figures are recomputed from the whole record rather than read back off
+  the line that carries them. A machine writes what it could see at the time,
+  and two machines that wrote without having seen each other saw different
+  things.
 
-  A failure after a long absence is still a failure and still resets the
-  ladder, but the statistics keep it apart from a failure inside the schedule.
-  One is expected decay; the other is not.
-
-  The daily session is composed from what is due plus, as practice, whatever is
-  still climbing the ladder. A slug at the cap drops out of that filler so it
-  can earn a cold entry at the cap interval. Set filler to all in the config to
-  drill everything every day, and accept that the gate then has nothing cold to
-  read.
-";
+  A week away from the drill is therefore where long-interval readings come
+  from, and they are banded with everything else in rote stats.";
 
 const CUSTODY: &str = "\
 CUSTODY
 
-  The secret is held as an argon2id verifier and in no recoverable form. rote
-  can say wrong. It can never say what the right answer was, which is the
-  property that makes it safe to run every morning.
+  The secret is kept as an argon2id verifier over a random salt, in no
+  recoverable form. rote can say wrong. It can never say what the right answer
+  was, and there is no reveal.
 
-  It never renders a typed secret. No echo, no reveal, no confirmation display,
-  no error that quotes what was entered. The sitting runs on the alternate
-  screen and leaves nothing in scrollback.
+  The stance is good faith throughout. rote guards against accident and
+  confusion and not against you: it records what it was told and what it saw,
+  and it verifies only what it can. You could make the record say anything you
+  liked. You are trusted not to, and at worst to do it by mistake.
 
-  A paste is refused rather than accepted, because a drill answered from a
-  vault measures nothing. That is a low bar and the only one there is: rote
-  cannot tell that the answer was on a second screen, and does not pretend to.
-  It assumes good faith, which is reasonable for a tool with one user who wants
-  the measurement to be true.
-
-  What it owes that person is a clear intention and somewhere to put the truth.
-  The prompt asks for memory only, and for an empty entry when memory gives
-  nothing, so that conceding is a keystroke rather than a reason to type
-  something to get past the screen. A blank is a failure of recall and counts as
-  one; typed nonsense would count as the same thing while looking like an
-  attempt.
-
-  After a miss the card offers the lookup, on ctrl-l. Take it and the next entry
-  is aided:
-  recorded in full, out of retention, out of the latency series, out of the
-  buckets, and unable to move the ladder. Week one is aided almost entirely, and
-  that is the honest shape of week one rather than a fault in it. rote status
-  reports the day a slug first stood alone, which is where its memory actually
-  starts. rote --aided says the same about a sitting begun after a lookup.
+  The drill is blind and refuses a paste, because an answer read out of a vault
+  measures nothing. Submitting nothing concedes: that is a failure of recall and
+  is recorded as one, which is more honest than typing something to get past the
+  prompt. After a miss the lookup is offered, and an entry taken that way is
+  aided: recorded in full, kept out of every figure that claims to measure a
+  memory. The first week is aided almost throughout, and that is the shape of a
+  first week rather than a run of failures.
 
   An aided entry earns its keep twice. Typing what the vault shows and being
-  told wrong is the one routine signal that the item and the verifier have
-  drifted apart, which otherwise goes unnoticed until the drill is rehearsing a
-  secret nothing else uses.
+  told wrong is the one routine signal that the vault item and the verifier hold
+  different secrets, which is otherwise undetectable.
 
-  The slug is the title of the matching 1Password item, by convention and not
-  by integration. Nothing is stored, nothing goes out of sync, and the drill
-  does not fail in exactly the world an escrow exists for.
+  Three verbs take a secret, and the difference between them is the whole point.
 
-  A rotation is rote rekey, and it proves the current secret before accepting a
-  new one. Without that, a verifier could be replaced by one somebody else
-  knows, and the reading would still say memorised.
-";
+  enroll opens a lineage with its first engram.
 
-const PROBES: &str = "\
-STRETCH PROBES
+  rotate proves the current secret, supersedes its engram, and starts a new one
+  at the foot. A different secret, a different memory.
 
-  The ladder holds at a week, so nothing on it says whether a phrase survives
-  three months. Nobody has published that figure for an artifact of this kind,
-  which makes the log the only source of it.
+  attach makes a verifier on this machine for the engram that is already
+  current, and leaves its record untouched. The same secret, a machine that lost
+  its copy — which is what a restored flagship looks like, since a verifier is
+  never backed up.
 
-  rote probe holds a slug out of the reminder until a chosen day, thirty to
-  ninety out, and labels the entry taken on or after it. The horizon is spent
-  by that entry, and the schedule counts from it.
+  rote cannot tell an attach from a rotate by looking at what was typed. It
+  holds nothing to check a claim against, so an attach has no failure mode for
+  the wrong secret: it records which claim was made and verifies neither. That
+  is a better trade than the alternative, where losing a laptop costs the whole
+  record of a memory you still hold. Before it asks, it names what it is about
+  to continue, so attaching the wrong lineage has a moment to be noticed.
 
-  A probe does not move the ladder in either direction. The horizon was chosen,
-  so failing it is a reading rather than a lapse in the schedule. It does count
-  toward the cutover gate when it passes cold at the cap interval or beyond,
-  because that is exactly the evidence the gate wants.
+  The lineage name matches the 1Password item title by convention and not by
+  integration. Nothing is stored, nothing goes out of sync, no vault reference
+  is added, and the drill does not fail in exactly the world escrow exists for.";
 
-  A long absence produces the same evidence without being asked for. Probes are
-  for when the absence has to be deliberate.
-";
-
-/// The intro, then whichever topics were asked for, then the usage block. Every
-/// invocation is a whole document, so a topic never arrives without the frame
-/// that makes it legible.
+/// Assemble a guide: the frame, the topics asked for, and the usage line.
 ///
 /// # Errors
 ///
@@ -209,9 +172,9 @@ mod tests {
 
     #[test]
     fn a_topic_still_arrives_inside_the_frame() {
-        let text = render(&["probes".to_owned()]).unwrap();
+        let text = render(&["custody".to_owned()]).unwrap();
         assert!(text.starts_with(INTRO));
-        assert!(text.contains("STRETCH PROBES"));
+        assert!(text.contains("CUSTODY"));
         assert!(!text.contains("THE LADDER"));
         assert!(text.ends_with(USAGE));
     }
