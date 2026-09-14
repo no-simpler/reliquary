@@ -40,6 +40,7 @@ use zeroize::Zeroize as _;
 
 use super::card::{self, Card};
 use super::{Input, Key, Screen};
+use crate::secret::Pasted;
 
 /// The narrowest terminal a card fits in, with a column either side.
 const MIN_COLS: usize = card::WIDTH + 2;
@@ -312,15 +313,7 @@ impl Input for Terminal {
 
     fn next(&mut self) -> Result<Option<Key>> {
         loop {
-            let event = self.event()?;
-            let key = key_of(&event);
-            // A refused paste is, more often than not, the secret itself, read
-            // out of the vault. crossterm hands it over as a String it would
-            // otherwise drop with the bytes still in it.
-            if let Event::Paste(mut text) = event {
-                text.zeroize();
-            }
-            if let Some(key) = key {
+            if let Some(key) = key_of(self.event()?) {
                 return Ok(Some(key));
             }
         }
@@ -362,8 +355,10 @@ impl Screen for Terminal {
                     kind: KeyEventKind::Press,
                     ..
                 }) => return Ok(()),
+                // Nothing is being typed here, but a paste is a paste: it is
+                // wiped rather than dropped with the bytes still in it.
+                Event::Paste(mut text) => text.zeroize(),
                 Event::Key(_)
-                | Event::Paste(_)
                 | Event::Mouse(_)
                 | Event::Resize(_, _)
                 | Event::FocusGained
@@ -378,9 +373,13 @@ impl Screen for Terminal {
 /// Only a bare character reaches the buffer. A modified key is either one of the
 /// three commands below or nothing at all, which is what stops an escape
 /// sequence being typed into a secret.
-pub fn key_of(event: &Event) -> Option<Key> {
+///
+/// The event is taken by value so that pasted text is moved into the key rather
+/// than copied out of it. Whether that text ever reaches a field is the prompt's
+/// to decide; dropping the key wipes it either way.
+pub fn key_of(event: Event) -> Option<Key> {
     match event {
-        Event::Paste(_) => Some(Key::Paste),
+        Event::Paste(text) => Some(Key::Paste(Pasted::new(text))),
         Event::Key(key) => {
             if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
                 return None;
@@ -420,6 +419,7 @@ mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     use super::{Key, claim, key_of, place, release};
+    use crate::secret::Pasted;
 
     fn press(code: KeyCode, modifiers: KeyModifiers) -> Event {
         Event::Key(KeyEvent {
@@ -433,15 +433,15 @@ mod tests {
     #[test]
     fn a_bare_character_reaches_the_buffer() {
         assert_eq!(
-            key_of(&press(KeyCode::Char('a'), KeyModifiers::NONE)),
+            key_of(press(KeyCode::Char('a'), KeyModifiers::NONE)),
             Some(Key::Char('a'))
         );
         assert_eq!(
-            key_of(&press(KeyCode::Char('A'), KeyModifiers::SHIFT)),
+            key_of(press(KeyCode::Char('A'), KeyModifiers::SHIFT)),
             Some(Key::Char('A'))
         );
         assert_eq!(
-            key_of(&press(KeyCode::Char(' '), KeyModifiers::NONE)),
+            key_of(press(KeyCode::Char(' '), KeyModifiers::NONE)),
             Some(Key::Char(' '))
         );
     }
@@ -449,53 +449,60 @@ mod tests {
     #[test]
     fn the_three_commands_are_the_only_modified_keys_that_do_anything() {
         assert_eq!(
-            key_of(&press(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            key_of(press(KeyCode::Char('c'), KeyModifiers::CONTROL)),
             Some(Key::Interrupt)
         );
         assert_eq!(
-            key_of(&press(KeyCode::Char('d'), KeyModifiers::CONTROL)),
+            key_of(press(KeyCode::Char('d'), KeyModifiers::CONTROL)),
             Some(Key::Interrupt)
         );
         assert_eq!(
-            key_of(&press(KeyCode::Char('u'), KeyModifiers::CONTROL)),
+            key_of(press(KeyCode::Char('u'), KeyModifiers::CONTROL)),
             Some(Key::Clear)
         );
         assert_eq!(
-            key_of(&press(KeyCode::Char('a'), KeyModifiers::CONTROL)),
+            key_of(press(KeyCode::Char('a'), KeyModifiers::CONTROL)),
             None,
             "an unmapped control key must not become a character"
         );
-        assert_eq!(key_of(&press(KeyCode::Char('a'), KeyModifiers::ALT)), None);
+        assert_eq!(key_of(press(KeyCode::Char('a'), KeyModifiers::ALT)), None);
     }
 
     #[test]
     fn submitting_skipping_and_correcting_map_across() {
         assert_eq!(
-            key_of(&press(KeyCode::Enter, KeyModifiers::NONE)),
+            key_of(press(KeyCode::Enter, KeyModifiers::NONE)),
             Some(Key::Enter)
         );
         assert_eq!(
-            key_of(&press(KeyCode::Esc, KeyModifiers::NONE)),
+            key_of(press(KeyCode::Esc, KeyModifiers::NONE)),
             Some(Key::Escape)
         );
         assert_eq!(
-            key_of(&press(KeyCode::Backspace, KeyModifiers::NONE)),
+            key_of(press(KeyCode::Backspace, KeyModifiers::NONE)),
             Some(Key::Backspace)
         );
     }
 
     #[test]
-    fn a_paste_arrives_as_a_paste_rather_than_as_characters() {
+    fn a_paste_arrives_as_a_paste_carrying_what_was_pasted() {
         assert_eq!(
-            key_of(&Event::Paste("hunter2".to_owned())),
-            Some(Key::Paste)
+            key_of(Event::Paste("hunter2".to_owned())),
+            Some(Key::Paste(Pasted::new("hunter2".to_owned()))),
+            "the text has to reach the prompt that decides what to do with it"
         );
+    }
+
+    #[test]
+    fn a_pasted_secret_is_not_what_a_failing_assertion_prints() {
+        let key = key_of(Event::Paste("hunter2".to_owned())).unwrap();
+        assert_eq!(format!("{key:?}"), "Paste(Pasted(<redacted>))");
     }
 
     #[test]
     fn a_key_release_is_not_a_keystroke() {
         assert_eq!(
-            key_of(&Event::Key(KeyEvent {
+            key_of(Event::Key(KeyEvent {
                 code: KeyCode::Char('a'),
                 modifiers: KeyModifiers::NONE,
                 kind: KeyEventKind::Release,
@@ -507,10 +514,10 @@ mod tests {
 
     #[test]
     fn everything_else_is_ignored_rather_than_guessed_at() {
-        assert_eq!(key_of(&Event::Resize(80, 24)), None);
-        assert_eq!(key_of(&Event::FocusGained), None);
-        assert_eq!(key_of(&press(KeyCode::F(1), KeyModifiers::NONE)), None);
-        assert_eq!(key_of(&press(KeyCode::Left, KeyModifiers::NONE)), None);
+        assert_eq!(key_of(Event::Resize(80, 24)), None);
+        assert_eq!(key_of(Event::FocusGained), None);
+        assert_eq!(key_of(press(KeyCode::F(1), KeyModifiers::NONE)), None);
+        assert_eq!(key_of(press(KeyCode::Left, KeyModifiers::NONE)), None);
     }
 
     #[test]

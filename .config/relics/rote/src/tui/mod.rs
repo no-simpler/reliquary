@@ -14,12 +14,16 @@ use relic_core::style::{Style, Tint};
 
 pub use card::Card;
 
-use crate::secret::Secret;
+use crate::secret::{Pasted, Secret};
 
 /// A key, as a dialog understands it. Anything else the terminal sends is
 /// nothing: only a character reaches the buffer, so an escape sequence cannot be
 /// typed into a secret.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Neither `Copy` nor `Clone`, because one variant carries what was pasted and
+/// a secret that can be duplicated in passing is a secret with copies nothing
+/// wipes.
+#[derive(Debug, PartialEq, Eq)]
 pub enum Key {
     /// A printable character.
     Char(char),
@@ -35,9 +39,11 @@ pub enum Key {
     Interrupt,
     /// Start the entry over.
     Clear,
-    /// A bracketed paste arrived. It is refused: a secret must be typed, and a
-    /// paste is a lookup wearing a drill's clothes.
-    Paste,
+    /// A bracketed paste arrived, carrying what it carried. Whether the text
+    /// reaches the field is the prompt's to say: it is taken wherever nothing
+    /// is being measured, and refused at a cold try, which is the one prompt
+    /// that is. Held so that dropping it wipes it.
+    Paste(Pasted),
 }
 
 /// Where keys come from, and the stopwatch that runs beside them.
@@ -142,7 +148,9 @@ pub struct Timings {
     pub total_ms: Option<u64>,
     /// Backspaces and clears that removed something.
     pub corrections: u32,
-    /// Pastes refused.
+    /// Pastes that reached the field.
+    pub paste_accepted: u32,
+    /// Pastes that did not.
     pub paste_refused: u32,
 }
 
@@ -184,17 +192,23 @@ impl Refusal {
 /// what to draw whenever the screen has to change, which is what lets a drill
 /// and an enrollment share this while looking like themselves.
 ///
+/// `lookup` says whether the vault is on offer here; `paste` says whether text
+/// from one is taken. They are separate because one prompt has both and one has
+/// neither.
+///
 /// # Errors
 ///
 /// When the terminal cannot be read or written.
 pub fn read_secret(
     console: &mut dyn Console,
     lookup: bool,
+    paste: bool,
     card: &mut dyn FnMut(Refusal) -> Card,
 ) -> Result<Typed> {
     let mut secret = Secret::new();
     let mut ttfk: Option<u64> = None;
     let mut corrections = 0u32;
+    let mut accepted = 0u32;
     let mut refused = 0u32;
     console.arm();
     loop {
@@ -230,6 +244,7 @@ pub fn read_secret(
                         ttfk_ms: ttfk,
                         total_ms: total,
                         corrections,
+                        paste_accepted: accepted,
                         paste_refused: refused,
                     },
                 }));
@@ -240,7 +255,17 @@ pub fn read_secret(
             // Unoffered, so it is nothing at all rather than a key that
             // sometimes works.
             Key::Lookup => {}
-            Key::Paste => {
+            // Not a keystroke, so it starts no stopwatch and stops none. The
+            // text is dropped at the end of either arm, which wipes it.
+            Key::Paste(text) if paste => {
+                if secret.push_str(text.expose()) {
+                    accepted = accepted.saturating_add(1);
+                } else {
+                    refused = refused.saturating_add(1);
+                    refuse(console, card, Refusal::Full)?;
+                }
+            }
+            Key::Paste(_) => {
                 refused = refused.saturating_add(1);
                 refuse(console, card, Refusal::Paste)?;
             }
@@ -281,6 +306,10 @@ pub struct Ask<'a> {
 /// and the shared entry line — so an enrollment and a drill are recognizably the
 /// same instrument.
 ///
+/// Every prompt that arrives here takes a paste and offers no lookup: nothing
+/// typed at one is measured, and there is nothing here to consult a vault
+/// against.
+///
 /// # Errors
 ///
 /// When the terminal cannot be read or written.
@@ -302,7 +331,7 @@ pub fn ask(console: &mut dyn Console, today: jiff::civil::Date, prompt: &Ask<'_>
     let opening = build(Refusal::None);
     console.anchor(opening.height());
     console.paint(&opening)?;
-    read_secret(console, false, &mut build)
+    read_secret(console, false, true, &mut build)
 }
 
 /// Ask a yes-or-no question and read one keystroke.
@@ -341,7 +370,7 @@ pub fn offer(
             | Key::Backspace
             | Key::Clear
             | Key::Lookup
-            | Key::Paste,
+            | Key::Paste(_),
         ) => false,
     })
 }
@@ -379,12 +408,14 @@ mod tests {
     use relic_core::style::Style;
 
     use super::{Ask, Card, Input, Key, Refusal, Screen, Typed, ask, read_secret};
-    use crate::secret::CAPACITY;
+    use crate::secret::{CAPACITY, Pasted};
 
     /// A scripted terminal that records every card it is handed.
+    ///
+    /// The keys are consumed rather than copied, because one of them carries a
+    /// secret and [`Key`] is deliberately neither `Copy` nor `Clone`.
     struct Fake {
-        keys: Vec<Key>,
-        at: usize,
+        keys: std::vec::IntoIter<Key>,
         frames: Vec<Vec<String>>,
         flashes: usize,
         anchored: usize,
@@ -393,8 +424,7 @@ mod tests {
     impl Fake {
         fn new(keys: Vec<Key>) -> Self {
             Self {
-                keys,
-                at: 0,
+                keys: keys.into_iter(),
                 frames: Vec::new(),
                 flashes: 0,
                 anchored: 0,
@@ -406,9 +436,7 @@ mod tests {
         fn arm(&mut self) {}
 
         fn next(&mut self) -> anyhow::Result<Option<Key>> {
-            let key = self.keys.get(self.at).copied();
-            self.at = self.at.saturating_add(1);
-            Ok(key)
+            Ok(self.keys.next())
         }
 
         fn elapsed_ms(&self) -> u64 {
@@ -446,31 +474,114 @@ mod tests {
         keys
     }
 
-    #[test]
-    fn a_full_buffer_refuses_the_character_and_says_so() {
-        let mut keys: Vec<Key> = std::iter::repeat_n(Key::Char('x'), CAPACITY + 3).collect();
-        keys.push(Key::Enter);
+    fn paste(text: &str) -> Key {
+        Key::Paste(Pasted::new(text.to_owned()))
+    }
+
+    /// Read one secret from a scripted terminal under one paste policy.
+    fn read(keys: Vec<Key>, allowed: bool) -> (Typed, Vec<Refusal>, usize) {
         let mut console = Fake::new(keys);
         let mut refusals = Vec::new();
-        let typed = read_secret(&mut console, false, &mut |refusal| {
+        let typed = read_secret(&mut console, false, allowed, &mut |refusal| {
             refusals.push(refusal);
             Card::new("rote", "x", Style::PLAIN)
         })
         .unwrap();
-        let Typed::Submitted(entry) = typed else {
-            panic!("submitted");
-        };
+        (typed, refusals, console.flashes)
+    }
+
+    fn submitted(typed: Typed) -> super::Entry {
+        match typed {
+            Typed::Submitted(entry) => entry,
+            Typed::Skipped | Typed::Aborted | Typed::Lookup => panic!("submitted"),
+        }
+    }
+
+    #[test]
+    fn a_full_buffer_refuses_the_character_and_says_so() {
+        let mut keys: Vec<Key> = (0..CAPACITY + 3).map(|_| Key::Char('x')).collect();
+        keys.push(Key::Enter);
+        let (typed, refusals, flashes) = read(keys, false);
+        let entry = submitted(typed);
         assert_eq!(
             entry.secret.expose().len(),
             CAPACITY,
             "nothing past the capacity"
         );
-        assert_eq!(console.flashes, 3, "each refused character is a flash");
+        assert_eq!(flashes, 3, "each refused character is a flash");
         assert!(refusals.contains(&Refusal::Full));
         assert!(
             refusals.contains(&Refusal::None),
             "and the card calms down after"
         );
+    }
+
+    #[test]
+    fn a_paste_is_refused_where_something_is_being_measured() {
+        let (typed, refusals, flashes) = read(vec![paste("hunter2"), Key::Enter], false);
+        let entry = submitted(typed);
+        assert!(
+            entry.secret.is_empty(),
+            "nothing pasted reaches a field that refuses a paste"
+        );
+        let timings = entry.forget();
+        assert_eq!(timings.paste_refused, 1);
+        assert_eq!(timings.paste_accepted, 0);
+        assert_eq!(flashes, 1, "a refusal is said rather than swallowed");
+        assert!(refusals.contains(&Refusal::Paste));
+    }
+
+    #[test]
+    fn a_paste_reaches_the_field_where_nothing_is() {
+        let (typed, refusals, flashes) = read(vec![paste("hunter2"), Key::Enter], true);
+        let entry = submitted(typed);
+        assert_eq!(entry.secret.expose(), b"hunter2");
+        let timings = entry.forget();
+        assert_eq!(timings.paste_accepted, 1);
+        assert_eq!(timings.paste_refused, 0);
+        assert_eq!(flashes, 0);
+        assert!(
+            refusals.is_empty(),
+            "nothing was refused, so nothing is said"
+        );
+    }
+
+    #[test]
+    fn a_paste_is_not_a_keystroke_and_times_nothing() {
+        let entry = submitted(read(vec![paste("hunter2"), Key::Enter], true).0);
+        let timings = entry.forget();
+        assert_eq!(
+            timings.ttfk_ms, None,
+            "an entry with no keystroke in it claims no latency"
+        );
+        assert_eq!(timings.total_ms, None);
+        assert_eq!(timings.corrections, 0);
+    }
+
+    #[test]
+    fn a_paste_lands_beside_what_was_already_typed() {
+        let entry = submitted(read(vec![Key::Char('a'), paste("bc"), Key::Enter], true).0);
+        assert_eq!(entry.secret.expose(), b"abc");
+    }
+
+    #[test]
+    fn a_paste_that_will_not_fit_is_refused_whole_rather_than_half_entered() {
+        let long = "x".repeat(CAPACITY);
+        let (typed, refusals, flashes) = read(vec![Key::Char('a'), paste(&long), Key::Enter], true);
+        let entry = submitted(typed);
+        assert_eq!(
+            entry.secret.expose(),
+            b"a",
+            "half a secret in the field is the one outcome worse than none"
+        );
+        let timings = entry.forget();
+        assert_eq!(timings.paste_accepted, 0);
+        assert_eq!(
+            timings.paste_refused, 1,
+            "it is still a paste that was seen"
+        );
+        assert_eq!(flashes, 1);
+        assert!(refusals.contains(&Refusal::Full));
     }
 
     #[test]
@@ -494,7 +605,8 @@ mod tests {
 
     #[test]
     fn the_status_sits_under_the_field_and_a_refusal_overrides_it() {
-        let mut console = Fake::new(vec![Key::Paste, Key::Char('x'), Key::Enter]);
+        let long = "x".repeat(CAPACITY + 1);
+        let mut console = Fake::new(vec![paste(&long), Key::Char('x'), Key::Enter]);
         let ask_for = Ask {
             heading: "enroll a",
             intention: "again",
@@ -504,9 +616,23 @@ mod tests {
         let opening = console.frames.first().unwrap().join("\n");
         assert!(opening.contains("the two entries differ"), "{opening}");
         let flashed = console.frames.get(1).unwrap().join("\n");
-        assert!(flashed.contains("do not paste"), "{flashed}");
+        assert!(flashed.contains("longer than a secret"), "{flashed}");
         assert!(!flashed.contains("entries differ"), "{flashed}");
         let calm = console.frames.get(2).unwrap().join("\n");
         assert!(calm.contains("the two entries differ"), "{calm}");
+    }
+
+    #[test]
+    fn a_prompt_that_takes_a_secret_twice_takes_a_paste() {
+        let mut console = Fake::new(vec![paste("hunter2"), Key::Enter]);
+        let ask_for = Ask {
+            heading: "enroll a",
+            intention: "type it twice",
+            status: None,
+        };
+        let typed = ask(&mut console, date(2026, 9, 10), &ask_for).unwrap();
+        let entry = submitted(typed);
+        assert_eq!(entry.secret.expose(), b"hunter2");
+        assert_eq!(console.flashes, 0);
     }
 }

@@ -1,4 +1,4 @@
-//! The typed value, and the only type in this crate that ever holds one.
+//! The typed value, and the two types in this crate that ever hold one.
 //!
 //! Three properties, and each is load-bearing:
 //!
@@ -13,6 +13,11 @@
 //! - **It cannot be printed.** No `Display`, no `Serialize`, and a `Debug` that
 //!   says nothing. Every path to the bytes goes through [`Secret::expose`], so
 //!   auditing the crate is one grep.
+//!
+//! [`Pasted`] is the one other type here that holds a typed value, and it holds
+//! it under the same three properties minus the fixed buffer, which the
+//! terminal allocated before this crate saw it. It lives beside [`Secret`] so
+//! that the grep stays one grep.
 
 use std::fmt;
 
@@ -64,6 +69,20 @@ impl Secret {
         true
     }
 
+    /// Append text that arrived as a paste. False when it will not fit, in
+    /// which case nothing was appended.
+    ///
+    /// Whole or not at all, for the reason [`Secret::from_bytes`] gives: a
+    /// secret half-entered without anybody noticing is what this type exists to
+    /// prevent, and the caller says so rather than swallowing it.
+    pub fn push_str(&mut self, text: &str) -> bool {
+        if self.bytes.len().saturating_add(text.len()) > CAPACITY {
+            return false;
+        }
+        self.bytes.extend_from_slice(text.as_bytes());
+        true
+    }
+
     /// Remove the last character. False when there was nothing to remove.
     pub fn pop(&mut self) -> bool {
         let boundary = self
@@ -111,6 +130,45 @@ impl Secret {
     }
 }
 
+/// Text the terminal delivered as a bracketed paste.
+///
+/// Held the way a typed value is held, because a paste is usually the secret
+/// itself read out of a vault: it wipes itself on drop, it cannot be printed,
+/// and the one way to the bytes is [`Pasted::expose`]. It is not a [`Secret`]
+/// and never becomes one on its own — it is either appended to the buffer at a
+/// prompt that takes it, or dropped at a prompt that does not.
+pub struct Pasted(Zeroizing<String>);
+
+impl Pasted {
+    /// Take what the terminal read, moved rather than copied, so the only
+    /// buffer holding it is the one it arrived in.
+    pub fn new(text: String) -> Self {
+        Self(Zeroizing::new(text))
+    }
+
+    /// The text. The one way in, and therefore the one thing to audit.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Compared so that a key can be, which is what the suite asserts on. Not
+/// constant time, and it does not need to be: neither side is a stored secret
+/// being guessed at.
+impl PartialEq for Pasted {
+    fn eq(&self, other: &Self) -> bool {
+        self.expose() == other.expose()
+    }
+}
+
+impl Eq for Pasted {}
+
+impl fmt::Debug for Pasted {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Pasted(<redacted>)")
+    }
+}
+
 impl Default for Secret {
     fn default() -> Self {
         Self::new()
@@ -125,7 +183,7 @@ impl fmt::Debug for Secret {
 
 #[cfg(test)]
 mod tests {
-    use super::{CAPACITY, Secret};
+    use super::{CAPACITY, Pasted, Secret};
 
     #[test]
     fn typing_and_correcting_reach_the_bytes_typed() {
@@ -188,6 +246,39 @@ mod tests {
             Secret::from_bytes(&vec![b'x'; CAPACITY + 1]).is_none(),
             "truncating would enroll a verifier for something nobody typed"
         );
+    }
+
+    #[test]
+    fn a_paste_is_appended_whole_or_not_at_all() {
+        let mut secret = Secret::new();
+        assert!(secret.push('a'));
+        assert!(secret.push_str("bc"));
+        assert_eq!(secret.expose(), b"abc");
+        assert!(
+            !secret.push_str(&"x".repeat(CAPACITY)),
+            "it does not fit beside what is already there"
+        );
+        assert_eq!(
+            secret.expose(),
+            b"abc",
+            "and half of it must not be left in the field"
+        );
+    }
+
+    #[test]
+    fn a_paste_that_exactly_fills_the_field_is_taken() {
+        let mut secret = Secret::new();
+        assert!(secret.push_str(&"x".repeat(CAPACITY)));
+        assert_eq!(secret.expose().len(), CAPACITY);
+        assert!(!secret.push_str("x"));
+    }
+
+    #[test]
+    fn a_paste_cannot_be_printed_either() {
+        let pasted = Pasted::new("hunter2".to_owned());
+        assert_eq!(pasted.expose(), "hunter2");
+        assert_eq!(format!("{pasted:?}"), "Pasted(<redacted>)");
+        assert!(!format!("{pasted:#?}").contains("hunter"));
     }
 
     #[test]

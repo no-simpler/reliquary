@@ -666,6 +666,7 @@ mod tests {
                     ttfk_ms: Some(1_000),
                     total_ms: Some(3_000),
                     corrections: 0,
+                    paste_accepted: 0,
                     paste_refused: 0,
                     scheduled_interval_days: 30,
                     // Deliberately a lie: the writer's belief is a witness, and

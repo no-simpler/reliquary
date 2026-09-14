@@ -13,13 +13,29 @@ CUSTODY
   and it verifies only what it can. You could make the record say anything you
   liked. You are trusted not to, and at worst to do it by mistake.
 
-  The drill is blind and refuses a paste, because an answer read out of a vault
-  measures nothing. Submitting nothing concedes: that is a failure of recall and
-  is recorded as one, which is more honest than typing something to get past the
-  prompt. After a miss the lookup is offered, and an entry taken that way is
+  The drill is blind. Submitting nothing concedes: that is a failure of recall
+  and is recorded as one, which is more honest than typing something to get past
+  the prompt. After a miss the lookup is offered, and an entry taken that way is
   aided: recorded in full, kept out of every figure that claims to measure a
   memory. The first week is aided almost throughout, and that is the shape of a
   first week rather than a run of failures.
+
+  A cold try is the one prompt that refuses a paste. The aided entry after
+  ctrl-l accepts one, so does an attachment, and so does every prompt in enroll,
+  attach and rotate. The line is measurement and not scripting: an answer pasted
+  into a cold try is a re-study rather than a retrieval, and retrieval is what
+  strengthens a memory (Roediger and Karpicke 2006). So a paste there would
+  weaken the very memory it claimed to test and write a pass that stands for
+  none, after which the item most in need of drilling is the one the schedule
+  asks for least.
+
+  That refusal is a commitment device against your own hurry, and it is nothing
+  more. Bracketed paste is advisory: the terminal is asked to mark a paste and
+  there is no way to learn whether it agreed, so wherever it does not, a paste
+  arrives as typing and is taken. Nor does refusing one prevent a lookup — it
+  moves it to a vault typing into the window, which rote cannot see at all.
+  Pastes accepted and pastes refused are recorded as exactly that, and neither
+  is a count of lookups.
 
   An aided entry earns its keep twice. Typing what the vault shows and being
   told wrong is the one routine signal that the vault item and the verifier hold

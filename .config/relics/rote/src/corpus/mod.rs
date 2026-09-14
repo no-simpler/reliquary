@@ -451,6 +451,7 @@ mod tests {
                 ttfk_ms: Some(900),
                 total_ms: Some(3_000),
                 corrections: 0,
+                paste_accepted: 0,
                 paste_refused: 0,
                 scheduled_interval_days: 7,
                 actual_interval_days: 7,

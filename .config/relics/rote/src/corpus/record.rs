@@ -37,7 +37,7 @@ use crate::machine::MachineId;
 use crate::slug::Slug;
 
 /// The schema this binary writes and understands.
-pub const SCHEMA: u32 = 3;
+pub const SCHEMA: u32 = 4;
 
 fn hex_nibble(byte: u8) -> Option<u8> {
     match byte {
@@ -404,9 +404,9 @@ impl Outcome {
 /// One typed sample.
 ///
 /// Nothing here is derived from the input's content: not its length, not a
-/// prefix, not a character class. `corrections` counts backspaces and
-/// `paste_refused` counts refused pastes, which are facts about the sitting
-/// rather than about the secret.
+/// prefix, not a character class. `corrections` counts backspaces and the two
+/// paste counts partition the pastes the prompt saw, which are facts about the
+/// sitting rather than about the secret.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Captured {
@@ -435,7 +435,13 @@ pub struct Captured {
     pub total_ms: Option<u64>,
     /// Backspaces.
     pub corrections: u32,
-    /// Pastes refused at this prompt.
+    /// Pastes that reached the field. One is taken wherever nothing is being
+    /// measured, which is every prompt but a cold try.
+    pub paste_accepted: u32,
+    /// Pastes that did not, whether the prompt refuses them or the field had no
+    /// room. The two counts together are every paste the prompt saw, and
+    /// neither is a count of lookups: a paste refused here is one steered onto
+    /// a channel that arrives as ordinary typing.
     pub paste_refused: u32,
     /// What the ladder asked for. Authoritative.
     pub scheduled_interval_days: u32,
@@ -540,6 +546,7 @@ mod tests {
                 ttfk_ms: Some(1_200),
                 total_ms: Some(4_100),
                 corrections: 0,
+                paste_accepted: 0,
                 paste_refused: 0,
                 scheduled_interval_days: 30,
                 actual_interval_days: 30,

@@ -197,7 +197,9 @@ pub struct Capture {
     pub total_ms: Option<u64>,
     /// Backspaces.
     pub corrections: u32,
-    /// Pastes refused at this prompt.
+    /// Pastes that reached the field.
+    pub paste_accepted: u32,
+    /// Pastes that did not.
     pub paste_refused: u32,
     /// Where the engram lands after this sample.
     pub rung_after: Rung,
@@ -390,6 +392,10 @@ impl Session<'_> {
     ) -> Result<Next> {
         prompt.ordinal = prompt.ordinal.saturating_add(1);
         let lookup = prompt.missed && !prompt.aided;
+        // A cold try is the one prompt in the tool that measures a memory, so
+        // it is the one prompt that refuses a paste. Once the entry is aided
+        // there is nothing left here to protect.
+        let paste = prompt.aided;
         let status = prompt.status(self.max_attempts);
         self.set(
             index,
@@ -402,7 +408,7 @@ impl Session<'_> {
         }
         self.paint(index, Tone::Calm, status.clone(), lookup)?;
 
-        let entry = match self.read(index, status.as_deref(), lookup)? {
+        let entry = match self.read(index, status.as_deref(), lookup, paste)? {
             // The cold tries are spent: what the field will still take is the
             // lookup or the way out, and a typed answer is refused rather than
             // judged, since a fourth cold try would be a reading nobody asked
@@ -451,6 +457,7 @@ impl Session<'_> {
             ttfk_ms: timings.ttfk_ms,
             total_ms: timings.total_ms,
             corrections: timings.corrections,
+            paste_accepted: timings.paste_accepted,
             paste_refused: timings.paste_refused,
             rung_after,
         })?;
@@ -502,9 +509,10 @@ impl Session<'_> {
     /// Take a secret twice and mint a verifier for an engram this machine is
     /// dormant on. `true` means the sitting was abandoned.
     ///
-    /// Nothing here is judged, so nothing here is recorded as a capture. There
-    /// is also no lookup on offer: offering one would imply that what is typed
-    /// is being checked against something, and it is not.
+    /// Nothing here is judged, so nothing here is recorded as a capture, and a
+    /// paste is taken. There is also no lookup on offer: offering one would
+    /// imply that what is typed is being checked against something, and it is
+    /// not.
     fn attachment(&mut self, index: usize) -> Result<bool> {
         let mut pair = Pair::new(self.max_attempts);
         let mut status: Option<String> = None;
@@ -517,7 +525,9 @@ impl Session<'_> {
             self.set(index, state);
             self.paint(index, Tone::Calm, status.clone(), false)?;
 
-            let entry = match self.read(index, status.as_deref(), false)? {
+            // No lookup, and a paste: there is nothing here to consult a vault
+            // against, and nothing here that a paste could measure away.
+            let entry = match self.read(index, status.as_deref(), false, true)? {
                 Typed::Submitted(entry) => entry,
                 // There is nothing here to concede, so the lookup is not on
                 // offer and a skip simply leaves the engram dormant.
@@ -607,6 +617,7 @@ impl Session<'_> {
             ttfk_ms: None,
             total_ms: None,
             corrections: 0,
+            paste_accepted: 0,
             paste_refused: 0,
             rung_after: prompt.resolved.unwrap_or(drilling.rung),
         })
@@ -651,7 +662,13 @@ impl Session<'_> {
         self.console.paint(&calm)
     }
 
-    fn read(&mut self, index: usize, status: Option<&str>, lookup: bool) -> Result<Typed> {
+    fn read(
+        &mut self,
+        index: usize,
+        status: Option<&str>,
+        lookup: bool,
+        paste: bool,
+    ) -> Result<Typed> {
         let today = self.today;
         let rows = self.rows.clone();
         let style = self.console.style();
@@ -666,7 +683,7 @@ impl Session<'_> {
             frame.lookup = lookup;
             screen::card(&frame, style)
         };
-        read_secret(self.console, lookup, &mut build)
+        read_secret(self.console, lookup, paste, &mut build)
     }
 }
 
@@ -725,9 +742,11 @@ mod tests {
 
     /// A scripted terminal: keys with the elapsed time each arrived at, and a
     /// record of everything painted.
+    ///
+    /// The keys are consumed rather than copied, because one of them carries a
+    /// secret and [`Key`] is deliberately neither `Copy` nor `Clone`.
     struct Fake {
-        keys: Vec<(Key, u64)>,
-        at: usize,
+        keys: std::vec::IntoIter<(Key, u64)>,
         elapsed: u64,
         flashes: usize,
         last: Vec<String>,
@@ -736,8 +755,7 @@ mod tests {
     impl Fake {
         fn new(keys: Vec<(Key, u64)>) -> Self {
             Self {
-                keys,
-                at: 0,
+                keys: keys.into_iter(),
                 elapsed: 0,
                 flashes: 0,
                 last: Vec::new(),
@@ -751,10 +769,9 @@ mod tests {
         }
 
         fn next(&mut self) -> Result<Option<Key>> {
-            let Some((key, at)) = self.keys.get(self.at).copied() else {
+            let Some((key, at)) = self.keys.next() else {
                 return Ok(None);
             };
-            self.at = self.at.saturating_add(1);
             self.elapsed = at;
             Ok(Some(key))
         }
@@ -812,6 +829,10 @@ mod tests {
                 replacing: false,
             })),
         }
+    }
+
+    fn pasting(text: &str, at: u64) -> (Key, u64) {
+        (Key::Paste(crate::secret::Pasted::new(text.to_owned())), at)
     }
 
     fn typing(text: &str, from: u64) -> Vec<(Key, u64)> {
@@ -1080,13 +1101,112 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_paste_is_counted_and_never_reaches_the_buffer() {
+    fn a_cold_try_refuses_a_paste_and_counts_it() {
         let turns = vec![drill_turn("a", Occasion::Review, false)];
-        let mut keys = vec![(Key::Paste, 200)];
+        let mut keys = vec![pasting(RIGHT, 200)];
         keys.extend(typing(RIGHT, 400));
         let ran = run(&turns, keys);
         let capture = ran.written.first().unwrap();
         assert_eq!(capture.paste_refused, 1);
+        assert_eq!(capture.paste_accepted, 0);
+        assert_eq!(
+            capture.outcome,
+            Outcome::Pass,
+            "the pass is the one that was typed"
+        );
+        assert!(ran.flashes > 0, "and the refusal was said");
+    }
+
+    #[test]
+    fn the_aided_entry_after_a_lookup_takes_a_paste() {
+        let turns = vec![drill_turn("a", Occasion::Review, false)];
+        let mut keys = typing("wrong", 300);
+        keys.push((Key::Lookup, 900));
+        keys.push(pasting(RIGHT, 1_000));
+        keys.push((Key::Enter, 1_100));
+        let ran = run(&turns, keys);
+
+        assert_eq!(ran.written.len(), 2);
+        let cold = ran.written.first().unwrap();
+        let aided = ran.written.get(1).unwrap();
+        assert_eq!(cold.paste_accepted, 0);
+        assert!(aided.aided);
+        assert_eq!(aided.paste_accepted, 1);
+        assert_eq!(aided.paste_refused, 0);
+        assert_eq!(
+            aided.outcome,
+            Outcome::Pass,
+            "what was pasted reached the field and the verifier saw it"
+        );
+        assert_eq!(
+            ran.outturn.landings(1),
+            vec![Landing::Lapse],
+            "the cold miss it opened with is still what was measured"
+        );
+    }
+
+    #[test]
+    fn a_sitting_declared_aided_takes_a_paste_from_the_first_key() {
+        let turns = vec![drill_turn("a", Occasion::Review, true)];
+        let ran = run(&turns, vec![pasting(RIGHT, 200), (Key::Enter, 300)]);
+        let capture = ran.written.first().unwrap();
+        assert!(capture.aided, "nothing here was measured");
+        assert_eq!(capture.paste_accepted, 1);
         assert_eq!(capture.outcome, Outcome::Pass);
+        assert_eq!(ran.outturn.landings(1), vec![Landing::Aided]);
+    }
+
+    #[test]
+    fn a_cold_try_with_its_tries_spent_still_refuses_a_paste() {
+        let turns = vec![drill_turn("a", Occasion::Review, false)];
+        let mut keys = Vec::new();
+        for _ in 0..3 {
+            keys.extend(typing("wrong", 300));
+        }
+        keys.push(pasting(RIGHT, 4_000));
+        keys.push((Key::Escape, 5_000));
+        let ran = run(&turns, keys);
+        assert_eq!(
+            ran.written.iter().filter(|c| c.paste_accepted > 0).count(),
+            0,
+            "out of tries is still cold"
+        );
+        assert_eq!(
+            ran.written.last().map(|c| c.outcome),
+            Some(Outcome::Skip),
+            "what was pasted never reached the field, so nothing was judged"
+        );
+    }
+
+    #[test]
+    fn an_attachment_takes_a_paste_because_it_measures_nothing() {
+        let turns = vec![attach_turn("a")];
+        let keys = vec![
+            pasting(RIGHT, 300),
+            (Key::Enter, 400),
+            pasting(RIGHT, 900),
+            (Key::Enter, 1_000),
+        ];
+        let ran = run(&turns, keys);
+        assert_eq!(ran.attached, vec![RIGHT.to_owned()]);
+        assert_eq!(ran.outturn.landings(1), vec![Landing::Attached]);
+        assert!(ran.written.is_empty(), "and it is still no reading at all");
+    }
+
+    #[test]
+    fn a_paste_too_long_for_the_field_enters_none_of_itself() {
+        let turns = vec![drill_turn("a", Occasion::Review, true)];
+        let long = "x".repeat(crate::secret::CAPACITY + 1);
+        let mut keys = vec![pasting(&long, 200)];
+        keys.extend(typing(RIGHT, 400));
+        let ran = run(&turns, keys);
+        let capture = ran.written.first().unwrap();
+        assert_eq!(capture.paste_accepted, 0);
+        assert_eq!(capture.paste_refused, 1);
+        assert_eq!(
+            capture.outcome,
+            Outcome::Pass,
+            "the field held what was typed after it and nothing of the paste"
+        );
     }
 }

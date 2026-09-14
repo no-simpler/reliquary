@@ -42,6 +42,7 @@ KEYS
     ctrl-l      go and look it up, then type it as an aided entry. Offered only
                 after a cold try is already on record
     ctrl-c      abandon the sitting
+    paste       refused on a cold try, accepted once the entry is aided
 
   At an attachment prompt, where a verifier is being made rather than checked:
 
@@ -50,6 +51,7 @@ KEYS
     escape      leave the lineage dormant. Nothing is written
     ctrl-u      start the entry over
     ctrl-c      abandon the sitting
+    paste       accepted, both halves of the pair. Nothing here is measured
 
   There is no lookup at an attachment prompt. Offering one would imply that
   what is typed is being checked against something, and it is not.
@@ -57,7 +59,12 @@ KEYS
   When nothing is due, bare rote asks whether you want to practice anyway. That
   is one keystroke and no return: y practices, any other key leaves it.
 
-  A paste is refused everywhere a secret is typed.";
+  A cold drill try is the one prompt that refuses a paste, and the one prompt
+  that measures a memory. Everywhere else accepts one: the aided entry after
+  ctrl-l, an attachment, and every prompt in enroll, attach and rotate,
+  including the proof of the current secret. Pastes accepted and pastes refused
+  are both recorded against the sample. What that refusal is and is not is in
+  rote guide custody.";
 
 const INTERVALS: &str = "\
 INTERVALS
@@ -93,8 +100,12 @@ RECORDS
 
   A capture is one typed sample. It records the lineage and the engram, the
   sitting, which sample within the drill, the occasion, whether it was aided,
-  the outcome, time to the first keystroke, time to submit, backspaces, refused
-  pastes, the three intervals, and the rung either side.
+  the outcome, time to the first keystroke, time to submit, backspaces, pastes
+  accepted, pastes refused, the three intervals, and the rung either side.
+
+  The two paste counts are every paste the prompt saw, and neither is a count
+  of lookups: a refused paste is one steered onto a channel that arrives as
+  ordinary typing.
 
   Two occasions: review, which the schedule asked for, and practice, which it
   did not. Aided rides beside the occasion as a flag rather than replacing it,

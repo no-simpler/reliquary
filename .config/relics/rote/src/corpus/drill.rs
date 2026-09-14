@@ -212,6 +212,7 @@ mod tests {
                 ttfk_ms: None,
                 total_ms: None,
                 corrections: 0,
+                paste_accepted: 0,
                 paste_refused: 0,
                 scheduled_interval_days: 7,
                 actual_interval_days: 7,

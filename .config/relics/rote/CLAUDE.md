@@ -67,7 +67,7 @@ intake.rs         the double-entry policy — pure, and shared with the sitting
 ladder.rs         the schedule, the occasion, the standing — pure
 machine.rs        the identity, the hostname, the flagship marker
 render/           one row model, three renderers
-secret.rs         the typed value, and the only type that holds one
+secret.rs         the typed value, and the two types that hold one
 sitting/mod.rs    the roster, and the loop that works through it
 sitting/screen.rs the sitting's own layout, as a pure function from frame to card
 slug.rs           a validated lineage name
@@ -116,14 +116,16 @@ authoritative over the other.
 
 Things a future edit must not undo.
 
-- **The typed value lives only in `secret::Secret`.** Its buffer never reallocates,
+- **The typed value lives only in `secret`.** `Secret`'s buffer never reallocates,
   it zeroizes its whole capacity, and it has no `Display` and no `Serialize`. Every
   path to the bytes goes through `Secret::expose`, so auditing the crate is one
   grep. Deliberately **not** `secrecy`: `SecretString` is built through
   `String::into_boxed_str`, which shrinks to fit and so copies exactly the buffer
-  this type exists to avoid copying. A refused paste is zeroized on receipt,
-  because it is usually the secret itself. Two residuals are accepted rather than
-  closed: crossterm's own read buffer holds typed bytes transiently, and the signal
+  this type exists to avoid copying. `Pasted` sits beside it on the same terms —
+  one `expose`, a redacted `Debug`, wiped on drop, and neither `Copy` nor `Clone`
+  — so what a paste carried is wiped whether the prompt takes it or refuses it,
+  and `Key` gives up `Copy` to carry it rather than duplicating a secret in
+  passing. Two residuals are accepted rather than closed: crossterm's own read buffer holds typed bytes transiently, and the signal
   path exits without running destructors — the kernel zeroes pages on reuse, swap
   is encrypted and core dumps are off, and the alternative is `mlock` through
   unsafe code.
@@ -159,8 +161,15 @@ Things a future edit must not undo.
 - **A rotation removes the outgoing verifier.** Keyed by engram, setting the new one
   no longer overwrites the old, and a verifier for a secret that has been rotated
   away is a live oracle for it. `doctor` grades one Broken.
-- **Bracketed paste is enabled so a paste can be refused.** A drill answered from a
-  vault measures nothing.
+- **Bracketed paste is enabled so a cold try can refuse one.** Every other prompt
+  takes a paste, because measurement is the whole of the line and nothing else
+  here measures. The refusal is a commitment device and not a control: DECSET
+  2004 is advisory, a terminal that ignores it delivers a paste as ordinary
+  typing, and a vault typing into the window is invisible either way. So
+  `paste_accepted` and `paste_refused` are counts of pastes and never counts of
+  lookups, and nothing may describe them as the second. A paste too long for the
+  field enters none of itself and counts as refused, so the two partition every
+  paste a prompt saw.
 - **The lookup is only ever offered after a capture is recorded, and never at an
   attachment prompt.** There is no standalone verb for an aided entry and there
   should not be: one would let the vault be consulted before anything is written,

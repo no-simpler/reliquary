@@ -168,6 +168,7 @@ fn work(
                     ttfk_ms: capture.ttfk_ms,
                     total_ms: capture.total_ms,
                     corrections: capture.corrections,
+                    paste_accepted: capture.paste_accepted,
                     paste_refused: capture.paste_refused,
                     scheduled_interval_days: drilling.scheduled_interval_days,
                     actual_interval_days: drilling.actual_interval_days,

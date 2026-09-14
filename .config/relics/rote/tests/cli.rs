@@ -1,8 +1,8 @@
 //! The published binary, through its own command line.
 //!
 //! Everything that can be asserted without a terminal. The card, the placement,
-//! the cursor and the refusal of a paste only exist at a tty; `CLAUDE.md`
-//! records how to reach those.
+//! the cursor and what a prompt does with a paste only exist at a tty;
+//! `CLAUDE.md` records how to reach those.
 
 mod support;
 
@@ -629,7 +629,10 @@ fn a_record_from_a_newer_schema_stops_a_write_rather_than_being_half_read() {
     let mut rote = Rote::new();
     rote.enroll(day(2026, 9, 1), "a", false);
     let chain = std::fs::read_to_string(rote.chain()).unwrap();
-    std::fs::write(rote.chain(), chain.replace("\"v\":3", "\"v\":99")).unwrap();
+    // The schema this binary writes is read off the binary: a literal here goes
+    // stale the next time a field is added, and it goes stale silently.
+    let written = format!("\"v\":{}", rote::corpus::record::SCHEMA);
+    std::fs::write(rote.chain(), chain.replace(&written, "\"v\":99")).unwrap();
 
     rote.cmd(&["enroll", "b", "--stdin"])
         .write_stdin("x\n")
