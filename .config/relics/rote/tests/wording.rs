@@ -13,6 +13,7 @@ use rote::ladder::{Occasion, Rung};
 use rote::sitting::screen::{Frame, Kind, Note, Row, RowState, card};
 use rote::sitting::{Capture, Outturn};
 use rote::slug::Slug;
+use rote::tui::card::{Field, Reveal};
 
 fn drill(slug: Slug, occasion: Occasion, aided: bool, state: RowState) -> Row {
     Row {
@@ -43,11 +44,24 @@ fn name(text: &str) -> Slug {
         .unwrap_or_else(|_| unreachable!("a literal slug"))
 }
 
-fn render(rows: &[Row], active: usize, status: Option<&str>, lookup: bool) -> String {
+/// One frame as a person actually meets it, which means under the field that
+/// prompt actually draws: blind where a memory is being measured, masked
+/// everywhere else.
+fn render(rows: &[Row], active: usize, status: Option<&str>, lookup: bool, cold: bool) -> String {
+    field_render(rows, active, status, lookup, &Field::resting(cold))
+}
+
+fn field_render(
+    rows: &[Row],
+    active: usize,
+    status: Option<&str>,
+    lookup: bool,
+    field: &Field<'_>,
+) -> String {
     let mut frame = Frame::running(date(2026, 9, 13), rows, Some(active));
     frame.status = status.map(str::to_owned);
     frame.lookup = lookup;
-    card(&frame, Style::PLAIN).render().join("\n")
+    card(&frame, field, Style::PLAIN).render().join("\n")
 }
 
 #[test]
@@ -66,7 +80,7 @@ fn a_drill_card_reads_the_way_it_is_meant_to() {
             RowState::Pending,
         ),
     ];
-    insta::assert_snapshot!("drill", render(&rows, 0, None, false));
+    insta::assert_snapshot!("drill", render(&rows, 0, None, false, true));
 }
 
 #[test]
@@ -79,7 +93,7 @@ fn a_refused_drill_says_which_try_this_is_and_offers_the_lookup() {
     )];
     insta::assert_snapshot!(
         "drill-refused",
-        render(&rows, 0, Some("not it · try 2 of 3"), true)
+        render(&rows, 0, Some("not it · try 2 of 3"), true, true)
     );
 }
 
@@ -91,19 +105,19 @@ fn an_aided_drill_says_it_measures_nothing() {
         true,
         RowState::Active { attempt: 2 },
     )];
-    insta::assert_snapshot!("drill-aided", render(&rows, 0, None, false));
+    insta::assert_snapshot!("drill-aided", render(&rows, 0, None, false, false));
 }
 
 #[test]
 fn an_attachment_names_what_it_is_continuing() {
     let rows = vec![attach(name("escrow-p"), RowState::Claiming, false)];
-    insta::assert_snapshot!("attach-claiming", render(&rows, 0, None, false));
+    insta::assert_snapshot!("attach-claiming", render(&rows, 0, None, false, false));
 }
 
 #[test]
 fn the_second_half_of_an_attachment_asks_again() {
     let rows = vec![attach(name("escrow-p"), RowState::Confirming, false)];
-    insta::assert_snapshot!("attach-confirming", render(&rows, 0, None, false));
+    insta::assert_snapshot!("attach-confirming", render(&rows, 0, None, false, false));
 }
 
 #[test]
@@ -111,14 +125,37 @@ fn an_attachment_that_differed_says_so() {
     let rows = vec![attach(name("escrow-p"), RowState::Differed, false)];
     insta::assert_snapshot!(
         "attach-differed",
-        render(&rows, 0, Some("the two entries differ"), false)
+        render(&rows, 0, Some("the two entries differ"), false, false)
+    );
+}
+
+#[test]
+fn a_revealed_field_shows_the_characters_and_says_how_to_put_them_back() {
+    // The one moment this tool puts a secret on a screen. Typed, not pasted, so
+    // the snapshot says what a person sees at the moment they ask to see it.
+    let rows = vec![attach(name("escrow-p"), RowState::Claiming, false)];
+    let shown = "correct horse battery staple";
+    insta::assert_snapshot!(
+        "attach-revealed",
+        field_render(
+            &rows,
+            0,
+            None,
+            false,
+            &Field {
+                reveal: Reveal::Shown,
+                drawn: shown,
+                clipped: (false, false),
+                column: shown.chars().count(),
+            },
+        )
     );
 }
 
 #[test]
 fn an_attachment_that_replaces_one_says_that_instead() {
     let rows = vec![attach(name("escrow-p"), RowState::Claiming, true)];
-    insta::assert_snapshot!("attach-replacing", render(&rows, 0, None, false));
+    insta::assert_snapshot!("attach-replacing", render(&rows, 0, None, false, false));
 }
 
 /// One sample, as the closing card saw it.
@@ -153,7 +190,9 @@ fn closing(rows: &[Row], captures: Vec<Capture>, notes: &[Note]) -> String {
         rows: Vec::new(),
     };
     let frame = Frame::done(date(2026, 9, 13), rows, &outturn, notes);
-    card(&frame, Style::PLAIN).render().join("\n")
+    card(&frame, &Field::blind(), Style::PLAIN)
+        .render()
+        .join("\n")
 }
 
 #[test]

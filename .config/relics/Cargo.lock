@@ -1227,6 +1227,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
+ "unicode-width",
  "zeroize",
 ]
 

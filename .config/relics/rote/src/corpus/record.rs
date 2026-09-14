@@ -404,9 +404,10 @@ impl Outcome {
 /// One typed sample.
 ///
 /// Nothing here is derived from the input's content: not its length, not a
-/// prefix, not a character class. `corrections` counts backspaces and the two
-/// paste counts partition the pastes the prompt saw, which are facts about the
-/// sitting rather than about the secret.
+/// prefix, not a character class. `corrections` counts keystrokes that removed
+/// something, one apiece and whatever each removed, and the two paste counts
+/// partition the pastes the prompt saw — facts about the sitting rather than
+/// about the secret.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Captured {
@@ -433,7 +434,7 @@ pub struct Captured {
     /// Milliseconds from the first keystroke to submission.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub total_ms: Option<u64>,
-    /// Backspaces.
+    /// Keystrokes that removed something, one apiece.
     pub corrections: u32,
     /// Pastes that reached the field. One is taken wherever nothing is being
     /// measured, which is every prompt but a cold try.

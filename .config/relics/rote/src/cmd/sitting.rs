@@ -264,6 +264,7 @@ fn work(
     let notes = closing_notes(turns, before, &after, &held);
     let closing = screen::card(
         &screen::Frame::done(today, &outturn.rows, &outturn, &notes),
+        &crate::tui::card::Field::blind(),
         ctx.style,
     );
     console.paint(&closing)?;

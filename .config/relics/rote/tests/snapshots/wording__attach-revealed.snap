@@ -1,17 +1,17 @@
 ---
 source: rote/tests/wording.rs
-expression: "render(&rows, 0, None, false, false)"
+expression: "field_render(&rows, 0, None, false, &Field\n{\n    reveal: Reveal::Shown, drawn: shown, clipped: (false, false), column:\n    shown.chars().count(),\n},)"
 ---
 ╭─ attach ──────────────────────────────────────────────────── Sun 13 Sep ─╮
 │                                                                          │
-│   ▸ escrow-p  attach · replacing                                         │
+│   ▸ escrow-p  attach · dormant here                                      │
 │                                                                          │
 │   escrow-p@2 · enrolled 2026-09-14 · rung 5 · reviewed 3d ago            │
 │   type it as you know it — nothing here can check it                     │
 │   ╭──────────────────────────────────────────────────────────────────╮   │
-│   │                                                                  │   │
+│   │ correct horse battery staple                                     │   │
 │   ╰──────────────────────────────────────────────────────────────────╯   │
 │                                                                          │
-│                                                               ^R  show   │
+│                                                               ^R  hide   │
 │                                                                          │
 ╰──────────────────────────────────────────────────────────────────────────╯

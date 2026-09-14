@@ -82,19 +82,41 @@ CUSTODY
 
   The secret is kept as an argon2id verifier over a random salt, in no
   recoverable form. rote can say wrong. It can never say what the right answer
-  was, and there is no reveal.
+  was: a verifier answers yes or no and holds nothing to read back.
 
   The stance is good faith throughout. rote guards against accident and
   confusion and not against you: it records what it was told and what it saw,
   and it verifies only what it can. You could make the record say anything you
   liked. You are trusted not to, and at worst to do it by mistake.
 
-  The drill is blind. Submitting nothing concedes: that is a failure of recall
-  and is recorded as one, which is more honest than typing something to get past
-  the prompt. After a miss the lookup is offered, and an entry taken that way is
-  aided: recorded in full, kept out of every figure that claims to measure a
-  memory. The first week is aided almost throughout, and that is the shape of a
-  first week rather than a run of failures.
+  A cold prompt gives back nothing about what was typed. The cold drill try is
+  the one prompt that measures a memory, and everything else follows from that
+  one line: it refuses a paste, it stays blind, it offers no reveal and it moves
+  no caret. A count of characters is partial recognition feedback handed back in
+  the middle of a retrieval, and showing the answer before it is submitted is
+  the whole of one. Neither may reach the prompt that is measuring. Submitting
+  nothing concedes: that is a failure of recall and is recorded as one, which is
+  more honest than typing something to get past the prompt. After a miss the
+  lookup is offered, and an entry taken that way is aided: recorded in full,
+  kept out of every figure that claims to measure a memory. The first week is
+  aided almost throughout, and that is the shape of a first week rather than a
+  run of failures.
+
+  Every other prompt masks what is typed, one glyph a character, and ctrl-r
+  shows the characters themselves until you press it again. NIST SP 800-63B-4
+  asks verifiers to offer exactly that, and for the reason these prompts exist:
+  a secret typed blind into an enrollment is a verifier for something nobody
+  knows, and nothing later can tell you so. A mask leaks a length, which the
+  login screen on this machine leaks too. Word boundaries it does not, and
+  never will: seven word lengths is most of a diceware phrase's search space,
+  which is also why the word-wise keys work only once the characters are
+  already showing. A jump that travels the width of a word discloses the width
+  of a word.
+
+  A reveal is never on by itself and never survives the prompt that opened it,
+  and it goes back on its own when the window loses focus or thirty seconds
+  pass with nothing typed. What it cannot do is decide who else is looking at
+  the screen, or whether the session is being recorded. That part is yours.
 
   A cold try is the one prompt that refuses a paste. The aided entry after
   ctrl-l accepts one, so does an attachment, and so does every prompt in enroll,

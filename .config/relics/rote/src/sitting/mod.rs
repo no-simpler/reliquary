@@ -23,7 +23,11 @@ use crate::intake::{DIFFERED, EMPTY, Pair, Pairing};
 use crate::ladder::{Ladder, Occasion, Rung, Standing};
 use crate::secret::Secret;
 use crate::slug::Slug;
-use crate::tui::{Card, Console, Typed, card::Tone, read_secret};
+use crate::tui::{
+    Card, Console, Typed,
+    card::{Field, Tone},
+    read_secret,
+};
 use crate::verifier::Verifier;
 
 /// One engram's slot in a sitting.
@@ -195,7 +199,7 @@ pub struct Capture {
     pub ttfk_ms: Option<u64>,
     /// Milliseconds from the first keystroke to submission.
     pub total_ms: Option<u64>,
-    /// Backspaces.
+    /// Keystrokes that removed something, one apiece.
     pub corrections: u32,
     /// Pastes that reached the field.
     pub paste_accepted: u32,
@@ -350,6 +354,7 @@ impl Session<'_> {
         // card rather than kept as a second constant that could drift from it.
         let opening = screen::card(
             &screen::Frame::running(self.today, &self.rows, Some(0)),
+            &Field::blind(),
             Style::PLAIN,
         );
         self.console.anchor(opening.height());
@@ -392,10 +397,11 @@ impl Session<'_> {
     ) -> Result<Next> {
         prompt.ordinal = prompt.ordinal.saturating_add(1);
         let lookup = prompt.missed && !prompt.aided;
-        // A cold try is the one prompt in the tool that measures a memory, so
-        // it is the one prompt that refuses a paste. Once the entry is aided
-        // there is nothing left here to protect.
-        let paste = prompt.aided;
+        // A cold try is the one prompt in the tool that measures a memory, and
+        // everything follows from that: it refuses a paste, stays blind, offers
+        // no reveal and moves no caret. Once the entry is aided there is
+        // nothing left here to protect.
+        let cold = !prompt.aided;
         let status = prompt.status(self.max_attempts);
         self.set(
             index,
@@ -407,16 +413,27 @@ impl Session<'_> {
             row.set_aided(prompt.aided);
         }
         let resting = screen::resting(self.rows.get(index));
-        self.paint(index, resting, status.clone(), lookup)?;
+        self.paint(
+            index,
+            resting,
+            status.clone(),
+            lookup,
+            &Field::resting(cold),
+        )?;
 
-        let entry = match self.read(index, status.as_deref(), lookup, paste)? {
+        let entry = match self.read(index, status.as_deref(), lookup, cold)? {
             // The cold tries are spent: what the field will still take is the
             // lookup or the way out, and a typed answer is refused rather than
             // judged, since a fourth cold try would be a reading nobody asked
             // for.
             Typed::Submitted(entry) if prompt.exhausted && !prompt.aided => {
                 let _ = entry.forget();
-                self.flash(index, Some(OUT_OF_TRIES.to_owned()), lookup)?;
+                self.flash(
+                    index,
+                    Some(OUT_OF_TRIES.to_owned()),
+                    lookup,
+                    &Field::resting(cold),
+                )?;
                 prompt.ordinal = prompt.ordinal.saturating_sub(1);
                 return Ok(Next::Again);
             }
@@ -442,32 +459,18 @@ impl Session<'_> {
 
         let outcome = self.judge(index, drilling, &entry.secret, status, lookup)?;
         let timings = entry.forget();
-        let rung_after = if prompt.aided {
-            prompt.resolved.unwrap_or(drilling.rung)
-        } else {
-            *prompt
-                .resolved
-                .get_or_insert_with(|| self.settle(drilling, outcome))
-        };
-        self.keep(Capture {
-            turn: index,
-            occasion: drilling.occasion,
-            aided: prompt.aided,
-            ordinal: prompt.ordinal,
-            outcome,
-            ttfk_ms: timings.ttfk_ms,
-            total_ms: timings.total_ms,
-            corrections: timings.corrections,
-            paste_accepted: timings.paste_accepted,
-            paste_refused: timings.paste_refused,
-            rung_after,
-        })?;
+        self.record(index, drilling, prompt, outcome, timings)?;
 
         if outcome == Outcome::Pass {
             self.set(
                 index,
                 screen::RowState::Passed {
-                    total_ms: timings.total_ms,
+                    // A latency is a claim about recall, so an aided entry
+                    // publishes none — the row would otherwise carry a figure
+                    // that a lookup, a reveal and a conceal all inflate, beside
+                    // rows whose figure means something else entirely. `stats`
+                    // draws the same line at `!drill.aided`.
+                    total_ms: if prompt.aided { None } else { timings.total_ms },
                     retries: prompt.ordinal.saturating_sub(1),
                 },
             );
@@ -491,8 +494,40 @@ impl Session<'_> {
             ..*prompt
         }
         .status(self.max_attempts);
-        self.flash(index, next, true)?;
+        self.flash(index, next, true, &Field::resting(!prompt.aided))?;
         Ok(Next::Again)
+    }
+
+    /// Write one sample the moment it is taken, before the next prompt is
+    /// drawn, so a closed window keeps every reading it had already produced.
+    fn record(
+        &mut self,
+        index: usize,
+        drilling: &Drilling,
+        prompt: &mut Prompt,
+        outcome: Outcome,
+        timings: crate::tui::Timings,
+    ) -> Result<()> {
+        let rung_after = if prompt.aided {
+            prompt.resolved.unwrap_or(drilling.rung)
+        } else {
+            *prompt
+                .resolved
+                .get_or_insert_with(|| self.settle(drilling, outcome))
+        };
+        self.keep(Capture {
+            turn: index,
+            occasion: drilling.occasion,
+            aided: prompt.aided,
+            ordinal: prompt.ordinal,
+            outcome,
+            ttfk_ms: timings.ttfk_ms,
+            total_ms: timings.total_ms,
+            corrections: timings.corrections,
+            paste_accepted: timings.paste_accepted,
+            paste_refused: timings.paste_refused,
+            rung_after,
+        })
     }
 
     /// Where the engram lands after an unaided sample on the first try.
@@ -525,11 +560,17 @@ impl Session<'_> {
             };
             self.set(index, state);
             let resting = screen::resting(self.rows.get(index));
-            self.paint(index, resting, status.clone(), false)?;
+            self.paint(
+                index,
+                resting,
+                status.clone(),
+                false,
+                &Field::resting(false),
+            )?;
 
             // No lookup, and a paste: there is nothing here to consult a vault
             // against, and nothing here that a paste could measure away.
-            let entry = match self.read(index, status.as_deref(), false, true)? {
+            let entry = match self.read(index, status.as_deref(), false, false)? {
                 Typed::Submitted(entry) => entry,
                 // There is nothing here to concede, so the lookup is not on
                 // offer and a skip simply leaves the engram dormant.
@@ -556,16 +597,21 @@ impl Session<'_> {
                 }
                 Pairing::Differed => {
                     status = Some(DIFFERED.to_owned());
-                    self.flash(index, status.clone(), false)?;
+                    self.flash(index, status.clone(), false, &Field::resting(false))?;
                 }
                 Pairing::OutOfRounds => {
                     self.set(index, screen::RowState::Differed);
-                    self.flash(index, Some(DIFFERED.to_owned()), false)?;
+                    self.flash(
+                        index,
+                        Some(DIFFERED.to_owned()),
+                        false,
+                        &Field::resting(false),
+                    )?;
                     return Ok(false);
                 }
                 Pairing::Empty => {
                     status = Some(EMPTY.to_owned());
-                    self.flash(index, status.clone(), false)?;
+                    self.flash(index, status.clone(), false, &Field::resting(false))?;
                 }
             }
         }
@@ -588,7 +634,8 @@ impl Session<'_> {
             return Ok(Outcome::Blank);
         }
         self.set(index, screen::RowState::Checking);
-        let card = self.frame(index, Tone::Calm, status, lookup);
+        // Checking, so the box and its caret are gone and no key does anything.
+        let card = self.frame(index, Tone::Calm, status, lookup, &Field::blind());
         let verify = &self.verify;
         let accepted =
             crate::tui::while_working(self.console, &card, || verify(&drilling.verifier, secret))?;
@@ -640,12 +687,19 @@ impl Session<'_> {
         }
     }
 
-    fn frame(&self, index: usize, tone: Tone, status: Option<String>, lookup: bool) -> Card {
+    fn frame(
+        &self,
+        index: usize,
+        tone: Tone,
+        status: Option<String>,
+        lookup: bool,
+        field: &Field<'_>,
+    ) -> Card {
         let mut frame = screen::Frame::running(self.today, &self.rows, Some(index));
         frame.tone = tone;
         frame.status = status;
         frame.lookup = lookup;
-        screen::card(&frame, self.console.style())
+        screen::card(&frame, field, self.console.style())
     }
 
     fn paint(
@@ -654,8 +708,9 @@ impl Session<'_> {
         tone: Tone,
         status: Option<String>,
         lookup: bool,
+        field: &Field<'_>,
     ) -> Result<()> {
-        let card = self.frame(index, tone, status, lookup);
+        let card = self.frame(index, tone, status, lookup, field);
         self.console.paint(&card)
     }
 
@@ -663,11 +718,17 @@ impl Session<'_> {
     ///
     /// The border comes back; what was said does not go with it. See
     /// `tui::refuse`, which holds the same two lifetimes for the entry loop.
-    fn flash(&mut self, index: usize, status: Option<String>, lookup: bool) -> Result<()> {
-        let alarm = self.frame(index, Tone::Alarm, status.clone(), lookup);
+    fn flash(
+        &mut self,
+        index: usize,
+        status: Option<String>,
+        lookup: bool,
+        field: &Field<'_>,
+    ) -> Result<()> {
+        let alarm = self.frame(index, Tone::Alarm, status.clone(), lookup, field);
         self.console.flash(&alarm)?;
         let resting = screen::resting(self.rows.get(index));
-        let settled = self.frame(index, resting, status, lookup);
+        let settled = self.frame(index, resting, status, lookup, field);
         self.console.paint(&settled)
     }
 
@@ -676,14 +737,14 @@ impl Session<'_> {
         index: usize,
         status: Option<&str>,
         lookup: bool,
-        paste: bool,
+        cold: bool,
     ) -> Result<Typed> {
         let today = self.today;
         let rows = self.rows.clone();
         let style = self.console.style();
         let status = status.map(str::to_owned);
         let resting = screen::resting(rows.get(index));
-        let mut build = |refusal: crate::tui::Refusal, tone: Tone| {
+        let mut build = |refusal: crate::tui::Refusal, tone: Tone, field: &Field<'_>| {
             let mut frame = screen::Frame::running(today, &rows, Some(index));
             frame.tone = tone;
             // What a refusal said outlives the tone it said it in, and a
@@ -693,9 +754,9 @@ impl Session<'_> {
                 .map(str::to_owned)
                 .or_else(|| status.clone());
             frame.lookup = lookup;
-            screen::card(&frame, style)
+            screen::card(&frame, field, style)
         };
-        read_secret(self.console, lookup, paste, resting, &mut build)
+        read_secret(self.console, lookup, cold, resting, &mut build)
     }
 }
 
@@ -782,12 +843,12 @@ mod tests {
             self.elapsed = 0;
         }
 
-        fn next(&mut self) -> Result<Option<Key>> {
+        fn wait(&mut self, _within: Option<std::time::Duration>) -> Result<crate::tui::Wake> {
             let Some((key, at)) = self.keys.next() else {
-                return Ok(None);
+                return Ok(crate::tui::Wake::Ended);
             };
             self.elapsed = at;
-            Ok(Some(key))
+            Ok(crate::tui::Wake::Key(key))
         }
 
         fn elapsed_ms(&self) -> u64 {
@@ -966,6 +1027,42 @@ mod tests {
         let ran = run(&turns, vec![(Key::Enter, 800)]);
         assert_eq!(ran.written.first().map(|c| c.outcome), Some(Outcome::Blank));
         assert_eq!(ran.outturn.landings(1), vec![Landing::Lapse]);
+    }
+
+    #[test]
+    fn an_aided_pass_publishes_no_latency_on_the_row() {
+        // A latency is a claim about recall, and an aided entry measures
+        // transcription. `stats` draws the same line at `!drill.aided`; the row
+        // beside it must not say otherwise, because a reveal and an idle
+        // conceal both sit inside the figure it would have shown.
+        let turns = vec![drill_turn("a", Occasion::Review, false)];
+        let cold = run(&turns, typing(RIGHT, 400));
+        assert!(
+            matches!(
+                cold.outturn.rows.first().map(|row| row.state),
+                Some(screen::RowState::Passed {
+                    total_ms: Some(_),
+                    ..
+                })
+            ),
+            "a cold pass still reports what it cost"
+        );
+
+        let mut keys = typing("wrong", 300);
+        keys.push((Key::Lookup, 900));
+        keys.extend(typing(RIGHT, 1_000));
+        let aided = run(&turns, keys);
+        assert_eq!(
+            aided.outturn.rows.first().map(|row| row.state),
+            Some(screen::RowState::Passed {
+                total_ms: None,
+                retries: 1,
+            })
+        );
+        assert!(
+            aided.written.get(1).unwrap().total_ms.is_some(),
+            "the record still keeps what the record kept"
+        );
     }
 
     #[test]

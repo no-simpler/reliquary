@@ -48,6 +48,10 @@ signal-hook = { version = "0.4.4", default-features = false, features = ["iterat
 gethostname = "1.1.0"
 # Config only, and read rather than written.
 toml = "1.1.4"
+# A revealed field draws characters, and a character is not a column. Counting
+# chars where the box counts columns is how a CJK glyph or a combining mark
+# breaks the border without tripping the assertion that guards it.
+unicode-width.workspace = true
 
 [dev-dependencies]
 # Integration tests are their own crate, so what the binary depends on is not in

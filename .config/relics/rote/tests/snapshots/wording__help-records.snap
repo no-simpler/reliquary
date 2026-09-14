@@ -13,8 +13,12 @@ RECORDS
 
   A capture is one typed sample. It records the lineage and the engram, the
   sitting, which sample within the drill, the occasion, whether it was aided,
-  the outcome, time to the first keystroke, time to submit, backspaces, pastes
+  the outcome, time to the first keystroke, time to submit, corrections, pastes
   accepted, pastes refused, the three intervals, and the rung either side.
+
+  Corrections counts keystrokes that removed something, one apiece, whatever
+  each of them removed. It is a fact about the typing and never about the
+  secret: not its length, not a prefix, not a character class.
 
   The two paste counts are every paste the prompt saw, and neither is a count
   of lookups: a refused paste is one steered onto a channel that arrives as

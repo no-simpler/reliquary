@@ -11,6 +11,7 @@
 //! top so that variation grows downward.
 
 use relic_core::style::{Style, Tint};
+use zeroize::Zeroize as _;
 
 /// Every card is this wide, and no card is any other width.
 ///
@@ -105,6 +106,12 @@ impl Piece {
     pub fn width(&self) -> usize {
         self.plain.chars().count()
     }
+
+    /// Wipe both copies. What a card built over a revealed field owes.
+    fn wipe(&mut self) {
+        self.plain.zeroize();
+        self.styled.zeroize();
+    }
 }
 
 /// Several pieces run together as one line.
@@ -117,31 +124,69 @@ pub fn join(pieces: &[Piece]) -> Piece {
 
 /// How much of a secret being typed is drawn.
 ///
-/// Blind is the safe starting point rather than the final answer. Per-character
-/// masking is defensible — the login screen on this machine exposes a count —
-/// and would be a variant here and a change nowhere else. Word-boundary masking
-/// never is: seven word lengths is most of a diceware phrase's search space.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Blind is the default and the safe one: a field that has not been told
+/// otherwise shows nothing. Per-character masking leaks only a total length,
+/// which the login screen on this machine leaks too. Word-boundary masking is
+/// never defensible: seven word lengths is most of a diceware phrase's search
+/// space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Reveal {
     /// Nothing about the buffer reaches the screen.
+    #[default]
     Blind,
+    /// One glyph per character, and nothing of what they are.
+    Masked,
+    /// The characters themselves. The one moment this tool puts a secret on a
+    /// screen.
+    Shown,
 }
 
-impl Reveal {
-    /// What stands in the field for a buffer this long.
-    ///
-    /// The one place a typed secret becomes something on a screen. The count is
-    /// taken and not used, which is what blind means; it is carried so that
-    /// revealing something is a change to this match and to nothing else.
-    fn shown(self, typed: usize) -> String {
-        match self {
-            Self::Blind => {
-                let _ = typed;
-                String::new()
-            }
+/// What to draw in the entry field.
+///
+/// Already masked, already sanitised and already windowed: the card is handed a
+/// finished string and never sees a buffer. That is what keeps `Secret::expose`
+/// out of the render path and the whole visual design a pure function.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Field<'a> {
+    /// Which of the three this is, which is what decides whether the card has
+    /// to wipe itself.
+    pub reveal: Reveal,
+    /// Exactly what goes between the field's borders, at most [`FIELD`] columns.
+    pub drawn: &'a str,
+    /// Whether the view is cut off on the left and on the right. An unmarked
+    /// field is a guaranteed complete view.
+    pub clipped: (bool, bool),
+    /// Where the caret sits, in columns from the start of the text area.
+    pub column: usize,
+}
+
+impl Field<'_> {
+    /// A field with nothing in it, for every card that is not being typed into.
+    pub fn blind() -> Self {
+        Self::default()
+    }
+
+    /// An empty field under a given rendering, for the first paint of a prompt
+    /// nothing has been typed into yet.
+    pub fn empty(reveal: Reveal) -> Self {
+        Self {
+            reveal,
+            ..Self::default()
         }
     }
+
+    /// The empty field a prompt rests at before anything is typed into it.
+    ///
+    /// A reveal never survives a prompt, so outside the entry loop the only
+    /// question is whether a memory is being measured here.
+    pub fn resting(cold: bool) -> Self {
+        Self::empty(if cold { Reveal::Blind } else { Reveal::Masked })
+    }
 }
+
+/// What stands in for the field's border where the view is cut off.
+const CLIPPED_LEFT: char = '‹';
+const CLIPPED_RIGHT: char = '›';
 
 /// The date, as every card stamps it.
 pub fn stamp(today: jiff::civil::Date) -> String {
@@ -149,7 +194,10 @@ pub fn stamp(today: jiff::civil::Date) -> String {
 }
 
 /// A modal dialog, as a value.
-#[derive(Clone, Debug)]
+///
+/// Deliberately not `Clone`: one built over a revealed field wipes itself on
+/// drop, and a copy that does not would be a copy nothing reaches.
+#[derive(Debug)]
 pub struct Card {
     title: &'static str,
     stamp: String,
@@ -157,6 +205,17 @@ pub struct Card {
     body: Vec<Piece>,
     caret: Option<(usize, usize)>,
     reserved: Option<usize>,
+    sensitive: bool,
+}
+
+impl Drop for Card {
+    fn drop(&mut self) {
+        if self.sensitive {
+            for piece in &mut self.body {
+                piece.wipe();
+            }
+        }
+    }
 }
 
 impl Card {
@@ -169,6 +228,7 @@ impl Card {
             body: Vec::new(),
             caret: None,
             reserved: None,
+            sensitive: false,
         }
     }
 
@@ -200,15 +260,27 @@ impl Card {
     /// labels. Instructions never share the line: a hint beside somewhere a
     /// secret is typed is a hint that will one day be overlapped by what is
     /// typed into it.
-    pub fn entry(&mut self, typed: usize, reveal: Reveal, tone: Tone) -> &mut Self {
-        let shown = reveal.shown(typed);
-        let filled = shown.chars().count().min(FIELD);
+    ///
+    /// Where the view is cut off the border glyph says so, which is what makes
+    /// an unmarked field a promise rather than a guess.
+    pub fn entry(&mut self, field: &Field<'_>, tone: Tone) -> &mut Self {
+        debug_assert!(
+            field.drawn.chars().count() <= FIELD,
+            "a field outgrew its box: {} columns of {FIELD}",
+            field.drawn.chars().count()
+        );
         let edge = tone.tint();
+        let (left, right) = field.clipped;
+        let opening = if left { CLIPPED_LEFT } else { '│' };
+        let closing = if right { CLIPPED_RIGHT } else { '│' };
+        if field.reveal == Reveal::Shown {
+            self.sensitive = true;
+        }
         self.say(format!("╭{}╮", "─".repeat(FIELD + 2)), edge);
         let interior = join(&[
-            Piece::painted("│ ", edge, self.style),
-            Piece::painted(format!("{shown:<FIELD$}"), Tint::Bold, self.style),
-            Piece::painted(" │", edge, self.style),
+            Piece::painted(format!("{opening} "), edge, self.style),
+            Piece::painted(format!("{:<FIELD$}", field.drawn), Tint::Bold, self.style),
+            Piece::painted(format!(" {closing}"), edge, self.style),
         ]);
         self.body.push(interior);
         self.caret = Some((
@@ -216,7 +288,7 @@ impl Card {
                 .len()
                 .saturating_sub(1)
                 .saturating_add(BODY_OFFSET),
-            FIELD_TEXT_COL.saturating_add(filled),
+            FIELD_TEXT_COL.saturating_add(field.column.min(FIELD.saturating_sub(1))),
         ));
         self.say(format!("╰{}╯", "─".repeat(FIELD + 2)), edge);
         self
@@ -231,6 +303,11 @@ impl Card {
     /// the whole difference: every state of one window stays one rectangle in
     /// one place.
     pub fn waiting(&mut self, said: &str) -> &mut Self {
+        // The caret goes with the box. Under masking its column is the length,
+        // so a stale one would park the terminal's cursor on a column that
+        // discloses what was just submitted, on the one card that sits alone
+        // for half a second.
+        self.caret = None;
         self.gap();
         self.say(format!("  {said}"), Tint::Dim);
         self.gap();
@@ -482,7 +559,7 @@ fn clip(text: &str) -> String {
 mod tests {
     use relic_core::style::{Style, Tint};
 
-    use super::{CONTENT, Card, Piece, Reveal, Tone, WIDTH};
+    use super::{CONTENT, Card, FIELD, Field, Piece, Reveal, Tone, WIDTH};
 
     fn card() -> Card {
         Card::new("rote", "Thu 10 Sep", Style::PLAIN)
@@ -543,13 +620,24 @@ mod tests {
         assert!(lines.iter().all(|line| line.chars().count() <= CONTENT));
     }
 
+    fn field(reveal: Reveal, drawn: &str, column: usize) -> Field<'_> {
+        Field {
+            reveal,
+            drawn,
+            clipped: (false, false),
+            column,
+        }
+    }
+
     #[test]
     fn the_field_says_nothing_about_what_was_typed() {
         let mut empty = card();
-        empty.entry(0, Reveal::Blind, Tone::Calm);
+        empty.entry(&Field::blind(), Tone::Calm);
         for typed in [1_usize, 7, 64, 4096] {
             let mut drawn = card();
-            drawn.entry(typed, Reveal::Blind, Tone::Calm);
+            // Blind carries no drawn text and no column, whatever is in the
+            // buffer behind it. Nothing here can vary with what was typed.
+            drawn.entry(&field(Reveal::Blind, "", 0), Tone::Calm);
             assert_eq!(
                 drawn.render(),
                 empty.render(),
@@ -560,20 +648,80 @@ mod tests {
     }
 
     #[test]
+    fn a_masked_field_draws_one_glyph_per_character_and_nothing_of_them() {
+        let mut one = card();
+        one.entry(&field(Reveal::Masked, "••••", 4), Tone::Calm);
+        let mut other = card();
+        other.entry(&field(Reveal::Masked, "••••", 4), Tone::Calm);
+        assert_eq!(one.render(), other.render());
+        let line = one.render().join("\n");
+        assert!(line.contains("••••"), "{line}");
+    }
+
+    #[test]
+    fn a_clipped_view_says_so_on_the_border_it_is_clipped_at() {
+        let full = "x".repeat(FIELD);
+        for (clipped, left, right) in [
+            ((false, false), '│', '│'),
+            ((true, false), '‹', '│'),
+            ((false, true), '│', '›'),
+            ((true, true), '‹', '›'),
+        ] {
+            let mut drawn = card();
+            drawn.entry(
+                &Field {
+                    reveal: Reveal::Shown,
+                    drawn: &full,
+                    clipped,
+                    column: 0,
+                },
+                Tone::Calm,
+            );
+            let lines = drawn.render();
+            let interior: Vec<char> = lines[3].chars().collect();
+            assert_eq!(interior[4], left, "{clipped:?}");
+            assert_eq!(interior[WIDTH - 5], right, "{clipped:?}");
+            for line in &lines {
+                assert_eq!(line.chars().count(), WIDTH, "{line}");
+            }
+        }
+    }
+
+    #[test]
     fn the_cursor_lands_inside_the_field_and_nowhere_else() {
         let mut drawn = card();
         drawn
             .say("a label", Tint::Dim)
-            .entry(0, Reveal::Blind, Tone::Calm);
+            .entry(&Field::blind(), Tone::Calm);
         let (row, column) = drawn.caret().expect("a field takes the cursor");
         let lines = drawn.render();
         let line: Vec<char> = lines[row].chars().collect();
         assert_eq!(line[column], ' ', "the cursor must sit on the text area");
-        assert_eq!(
-            line[column - 2],
-            '│',
-            "two columns left is the field border"
+        assert!(
+            matches!(line[column - 2], '│' | '‹'),
+            "two columns left is the field border, clipped or not"
         );
+    }
+
+    #[test]
+    fn the_cursor_never_lands_on_the_border_however_full_the_field_is() {
+        let full = "x".repeat(FIELD);
+        for column in [0_usize, 1, FIELD - 1, FIELD, FIELD + 20] {
+            let mut drawn = card();
+            drawn.entry(
+                &Field {
+                    reveal: Reveal::Shown,
+                    drawn: &full,
+                    clipped: (false, true),
+                    column,
+                },
+                Tone::Calm,
+            );
+            let (row, at) = drawn.caret().expect("a field takes the cursor");
+            let lines = drawn.render();
+            let line: Vec<char> = lines[row].chars().collect();
+            assert_eq!(line[at], 'x', "{column} put the cursor off the text area");
+        }
     }
 
     #[test]
@@ -581,6 +729,19 @@ mod tests {
         let mut drawn = card();
         drawn.say("nothing to type here", Tint::Dim);
         assert_eq!(drawn.caret(), None);
+    }
+
+    #[test]
+    fn the_box_and_its_caret_go_together_when_something_is_in_flight() {
+        let mut drawn = card();
+        drawn.entry(&field(Reveal::Masked, "•••", 3), Tone::Calm);
+        assert!(drawn.caret().is_some());
+        drawn.waiting("checking");
+        assert_eq!(
+            drawn.caret(),
+            None,
+            "a caret left behind is a caret whose column is the length"
+        );
     }
 
     #[test]
@@ -620,11 +781,11 @@ mod tests {
     #[test]
     fn an_alarmed_field_differs_only_in_colour() {
         let mut calm = card();
-        calm.entry(0, Reveal::Blind, Tone::Calm);
+        calm.entry(&Field::blind(), Tone::Calm);
         let mut alarm = Card::new("rote", "Thu 10 Sep", Style::COLOUR);
-        alarm.entry(0, Reveal::Blind, Tone::Alarm);
+        alarm.entry(&Field::blind(), Tone::Alarm);
         let mut painted_calm = Card::new("rote", "Thu 10 Sep", Style::COLOUR);
-        painted_calm.entry(0, Reveal::Blind, Tone::Calm);
+        painted_calm.entry(&Field::blind(), Tone::Calm);
         assert_eq!(calm.caret(), alarm.caret());
         assert_eq!(
             alarm.render().len(),

@@ -28,8 +28,8 @@ use std::time::Instant;
 use anyhow::{Context as _, Result, anyhow};
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
-    DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers,
+    DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange, Event,
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
 use crossterm::terminal::{
     Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -39,7 +39,7 @@ use relic_core::style::Style;
 use zeroize::Zeroize as _;
 
 use super::card::{self, Card};
-use super::{Input, Key, Screen};
+use super::{Input, Key, Screen, Wake};
 use crate::secret::Pasted;
 
 /// The narrowest terminal a card fits in, with a column either side.
@@ -85,7 +85,11 @@ fn restore() {
         );
     }
     if RAW.swap(false, Ordering::SeqCst) {
-        let _ = execute!(out, DisableBracketedPaste);
+        // Both DECSET modes are global rather than per screen buffer, so
+        // leaving the alternate screen clears neither. Paired with the one flag
+        // that every restoration path already swaps, so the guard, the panic
+        // hook and the signal thread all undo them.
+        let _ = execute!(out, DisableFocusChange, DisableBracketedPaste);
         let _ = disable_raw_mode();
     }
     let _ = out.flush();
@@ -126,8 +130,8 @@ impl RawMode {
         arm_restoration();
         enable_raw_mode().context("putting the terminal into raw mode")?;
         RAW.store(true, Ordering::SeqCst);
-        execute!(std::io::stdout(), EnableBracketedPaste)
-            .context("asking the terminal to bracket pastes")?;
+        execute!(std::io::stdout(), EnableBracketedPaste, EnableFocusChange)
+            .context("asking the terminal to bracket pastes and report focus")?;
         Ok(Self)
     }
 }
@@ -161,6 +165,13 @@ pub struct Terminal {
     /// meant, so it is delivered rather than swallowed. One slot is enough:
     /// only [`Screen::flash`] ever fills it, and it returns the moment it does.
     pending: Option<Event>,
+    /// A focus loss seen while the program was not waiting for one.
+    ///
+    /// Focus is a state rather than a keystroke, so it is held as a flag rather
+    /// than parked in the single-slot queue a key uses. Otherwise an alt-tab
+    /// during a refusal's pulse would either be lost or would evict the
+    /// keystroke that ended it.
+    blurred: bool,
     _raw: RawMode,
 }
 
@@ -194,6 +205,7 @@ impl Terminal {
             last: Vec::new(),
             last_caret: None,
             pending: None,
+            blurred: false,
             _raw: raw,
         })
     }
@@ -256,6 +268,20 @@ impl Terminal {
                 continue;
             }
             return Ok(event);
+        }
+    }
+
+    /// What one event means to a dialog that is waiting, or nothing when it was
+    /// answered here.
+    fn sift(&mut self, event: Event) -> Result<Option<Wake>> {
+        match event {
+            Event::Resize(_, _) => {
+                self.repaint()?;
+                Ok(None)
+            }
+            Event::FocusLost => Ok(Some(Wake::Blur)),
+            Event::FocusGained => Ok(None),
+            Event::Key(_) | Event::Paste(_) | Event::Mouse(_) => Ok(key_of(event).map(Wake::Key)),
         }
     }
 }
@@ -321,10 +347,31 @@ impl Input for Terminal {
         self.armed_at = Instant::now();
     }
 
-    fn next(&mut self) -> Result<Option<Key>> {
+    /// The deadline is absolute. A relative one re-passed to `poll` after every
+    /// resize repaint would let a window being dragged postpone a conceal
+    /// indefinitely.
+    fn wait(&mut self, within: Option<std::time::Duration>) -> Result<Wake> {
+        if self.blurred {
+            self.blurred = false;
+            return Ok(Wake::Blur);
+        }
+        let deadline = within.map(|span| Instant::now() + span);
         loop {
-            if let Some(key) = key_of(self.event()?) {
-                return Ok(Some(key));
+            let event = if let Some(event) = self.pending.take() {
+                event
+            } else {
+                if let Some(at) = deadline {
+                    let left = at.saturating_duration_since(Instant::now());
+                    if left.is_zero()
+                        || !crossterm::event::poll(left).context("waiting at the terminal")?
+                    {
+                        return Ok(Wake::Idle);
+                    }
+                }
+                crossterm::event::read().context("reading the terminal")?
+            };
+            if let Some(wake) = self.sift(event)? {
+                return Ok(wake);
             }
         }
     }
@@ -347,6 +394,12 @@ impl Screen for Terminal {
         let lines = card.render();
         let caret = card.caret();
         let result = self.blit(&lines, caret);
+        // The outgoing frame may be a revealed field's. Wiped unconditionally,
+        // because a rule that applies to one kind of card is a rule somebody
+        // has to remember which kind.
+        for line in &mut self.last {
+            line.zeroize();
+        }
         self.last = lines;
         self.last_caret = caret;
         result
@@ -364,21 +417,30 @@ impl Screen for Terminal {
                 return Ok(());
             }
             let event = crossterm::event::read().context("reading the terminal")?;
-            if matches!(event, Event::Resize(_, _)) {
-                self.repaint()?;
-                continue;
+            match event {
+                Event::Resize(_, _) => self.repaint()?,
+                // Focus is remembered rather than parked, so an alt-tab neither
+                // cuts the pulse short nor evicts the keystroke that would.
+                Event::FocusLost => self.blurred = true,
+                Event::FocusGained => {}
+                // Typing is the reader saying they have moved on, so the pulse
+                // ends with it — and the key goes on to the loop that was
+                // waiting for it, because a flash that eats a keystroke is
+                // worse than a short one.
+                Event::Key(_) | Event::Paste(_) | Event::Mouse(_) => {
+                    self.pending = Some(event);
+                    return Ok(());
+                }
             }
-            // Typing is the reader saying they have moved on, so the pulse ends
-            // with it — and the key goes on to the loop that was waiting for
-            // it, because a flash that eats a keystroke is worse than a short
-            // one.
-            self.pending = Some(event);
-            return Ok(());
         }
     }
 
     fn drain(&mut self) -> Result<()> {
-        self.pending = None;
+        // Wiped rather than dropped with the bytes still in it: a flash parks
+        // whatever ended it, and what ended it may have been a paste.
+        if let Some(Event::Paste(mut text)) = self.pending.take() {
+            text.zeroize();
+        }
         while crossterm::event::poll(std::time::Duration::ZERO)
             .context("waiting at the terminal")?
         {
@@ -439,20 +501,50 @@ pub fn key_of(event: Event) -> Option<Key> {
 /// wildcard is the correct arm here rather than a missed one: anything this does
 /// not name is nothing, which is the property that keeps an escape sequence out
 /// of a secret. Scoped to this function so our own enums stay exhaustive.
+///
+/// The map is readline's, because readline is the muscle memory a terminal
+/// already has. Where readline names one intent twice, both spellings arrive
+/// here; where a terminal encodes one intent twice, both arrive here too. Which
+/// of them a given terminal actually sends — `alt` in particular, which a macOS
+/// terminal may keep for typing symbols — is the terminal's business and not
+/// this table's.
 #[expect(
     clippy::wildcard_enum_match_arm,
     reason = "upstream enum; anything unmapped is deliberately nothing"
 )]
 fn code_of(code: KeyCode, modifiers: KeyModifiers) -> Option<Key> {
     let control = modifiers.contains(KeyModifiers::CONTROL);
+    let alt = modifiers.contains(KeyModifiers::ALT);
+    let word = control || alt;
     match code {
-        KeyCode::Char('c' | 'd') if control => Some(Key::Interrupt),
-        KeyCode::Char('u') if control => Some(Key::Clear),
+        KeyCode::Char('c') if control => Some(Key::Interrupt),
+        KeyCode::Char('d') if control => Some(Key::EndOfInput),
         KeyCode::Char('l') if control => Some(Key::Lookup),
+        KeyCode::Char('r') if control => Some(Key::Reveal),
+        KeyCode::Char('u') if control => Some(Key::KillToStart),
+        KeyCode::Char('k') if control => Some(Key::KillToEnd),
+        KeyCode::Char('w') if control => Some(Key::KillWordLeft),
+        KeyCode::Char('a') if control => Some(Key::LineStart),
+        KeyCode::Char('e') if control => Some(Key::LineEnd),
+        KeyCode::Char('b') if control => Some(Key::Left),
+        KeyCode::Char('f') if control => Some(Key::Right),
+        KeyCode::Char('h') if control => Some(Key::DeleteLeft),
+        KeyCode::Char('t') if control => Some(Key::Transpose),
+        KeyCode::Char('b') if alt => Some(Key::WordLeft),
+        KeyCode::Char('f') if alt => Some(Key::WordRight),
+        KeyCode::Char('d') if alt => Some(Key::KillWordRight),
+        KeyCode::Backspace if word => Some(Key::KillWordLeft),
+        KeyCode::Left if word => Some(Key::WordLeft),
+        KeyCode::Right if word => Some(Key::WordRight),
         KeyCode::Char(character) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
             Some(Key::Char(character))
         }
-        KeyCode::Backspace => Some(Key::Backspace),
+        KeyCode::Backspace => Some(Key::DeleteLeft),
+        KeyCode::Delete => Some(Key::DeleteRight),
+        KeyCode::Left => Some(Key::Left),
+        KeyCode::Right => Some(Key::Right),
+        KeyCode::Home => Some(Key::LineStart),
+        KeyCode::End => Some(Key::LineEnd),
         KeyCode::Enter => Some(Key::Enter),
         KeyCode::Esc => Some(Key::Escape),
         _ => None,
@@ -492,25 +584,64 @@ mod tests {
     }
 
     #[test]
-    fn the_three_commands_are_the_only_modified_keys_that_do_anything() {
+    fn the_readline_set_arrives_under_every_spelling_a_terminal_sends() {
+        let control = KeyModifiers::CONTROL;
+        let alt = KeyModifiers::ALT;
+        let none = KeyModifiers::NONE;
+        for (code, modifiers, key) in [
+            (KeyCode::Char('c'), control, Key::Interrupt),
+            (KeyCode::Char('d'), control, Key::EndOfInput),
+            (KeyCode::Char('u'), control, Key::KillToStart),
+            (KeyCode::Char('k'), control, Key::KillToEnd),
+            (KeyCode::Char('w'), control, Key::KillWordLeft),
+            (KeyCode::Char('l'), control, Key::Lookup),
+            (KeyCode::Char('r'), control, Key::Reveal),
+            (KeyCode::Char('t'), control, Key::Transpose),
+            // One intent, two readline spellings and two key caps.
+            (KeyCode::Char('a'), control, Key::LineStart),
+            (KeyCode::Home, none, Key::LineStart),
+            (KeyCode::Char('e'), control, Key::LineEnd),
+            (KeyCode::End, none, Key::LineEnd),
+            (KeyCode::Char('b'), control, Key::Left),
+            (KeyCode::Left, none, Key::Left),
+            (KeyCode::Char('f'), control, Key::Right),
+            (KeyCode::Right, none, Key::Right),
+            (KeyCode::Char('h'), control, Key::DeleteLeft),
+            (KeyCode::Backspace, none, Key::DeleteLeft),
+            (KeyCode::Delete, none, Key::DeleteRight),
+            // Word-wise, in all three encodings a terminal may send.
+            (KeyCode::Char('b'), alt, Key::WordLeft),
+            (KeyCode::Left, alt, Key::WordLeft),
+            (KeyCode::Left, control, Key::WordLeft),
+            (KeyCode::Char('f'), alt, Key::WordRight),
+            (KeyCode::Right, alt, Key::WordRight),
+            (KeyCode::Right, control, Key::WordRight),
+            (KeyCode::Char('d'), alt, Key::KillWordRight),
+            (KeyCode::Backspace, alt, Key::KillWordLeft),
+            (KeyCode::Backspace, control, Key::KillWordLeft),
+        ] {
+            assert_eq!(key_of(press(code, modifiers)), Some(key), "{code:?}");
+        }
+    }
+
+    #[test]
+    fn an_unmapped_modified_key_is_nothing_rather_than_a_character() {
         assert_eq!(
-            key_of(press(KeyCode::Char('c'), KeyModifiers::CONTROL)),
-            Some(Key::Interrupt)
-        );
-        assert_eq!(
-            key_of(press(KeyCode::Char('d'), KeyModifiers::CONTROL)),
-            Some(Key::Interrupt)
-        );
-        assert_eq!(
-            key_of(press(KeyCode::Char('u'), KeyModifiers::CONTROL)),
-            Some(Key::Clear)
-        );
-        assert_eq!(
-            key_of(press(KeyCode::Char('a'), KeyModifiers::CONTROL)),
+            key_of(press(KeyCode::Char('z'), KeyModifiers::CONTROL)),
             None,
             "an unmapped control key must not become a character"
         );
-        assert_eq!(key_of(press(KeyCode::Char('a'), KeyModifiers::ALT)), None);
+        assert_eq!(key_of(press(KeyCode::Char('z'), KeyModifiers::ALT)), None);
+        // A kill ring and an undo stack are plaintext stores of the thing being
+        // killed, so readline's two yanking keys are deliberately absent.
+        assert_eq!(
+            key_of(press(KeyCode::Char('y'), KeyModifiers::CONTROL)),
+            None
+        );
+        assert_eq!(
+            key_of(press(KeyCode::Char('_'), KeyModifiers::CONTROL)),
+            None
+        );
     }
 
     #[test]
@@ -525,7 +656,7 @@ mod tests {
         );
         assert_eq!(
             key_of(press(KeyCode::Backspace, KeyModifiers::NONE)),
-            Some(Key::Backspace)
+            Some(Key::DeleteLeft)
         );
     }
 
@@ -562,7 +693,8 @@ mod tests {
         assert_eq!(key_of(Event::Resize(80, 24)), None);
         assert_eq!(key_of(Event::FocusGained), None);
         assert_eq!(key_of(press(KeyCode::F(1), KeyModifiers::NONE)), None);
-        assert_eq!(key_of(press(KeyCode::Left, KeyModifiers::NONE)), None);
+        assert_eq!(key_of(press(KeyCode::Up, KeyModifiers::NONE)), None);
+        assert_eq!(key_of(press(KeyCode::Tab, KeyModifiers::NONE)), None);
     }
 
     #[test]

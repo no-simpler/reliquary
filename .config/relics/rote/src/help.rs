@@ -34,37 +34,67 @@ pub fn topic_names() -> String {
 const KEYS: &str = "\
 KEYS
 
-  At a drill prompt:
+  Everywhere a secret is typed:
 
-    enter       submit what is typed, or concede by submitting nothing
-    escape      pass this one over
-    ctrl-u      start the entry over
-    ctrl-l      go and look it up, then type it as an aided entry. Offered only
-                after a cold try is already on record
-    ctrl-c      abandon the sitting
-    paste       refused on a cold try, accepted once the entry is aided
+    enter       submit what is typed
+    escape      pass this prompt over
+    backspace   remove the character before the caret. Also ctrl-h
+    ctrl-u      remove everything before the caret
+    ctrl-c      abandon
+    ctrl-d      abandon, when nothing is typed
 
-  At an attachment prompt, where a verifier is being made rather than checked:
+  A cold drill try is the one prompt that measures a memory, and it gives back
+  nothing about what was typed. The field stays blind — no count, no caret, no
+  reveal — a paste is refused, and the keys above are the only ones that do
+  anything at all. Submitting nothing concedes. ctrl-d abandons there whatever
+  is typed, because there is no caret to delete at. ctrl-l goes and looks it up,
+  then takes the entry as an aided one, and is offered once a cold try is
+  already on record.
 
-    enter       submit this half of the pair. An empty entry is refused rather
-                than conceded, because there is nothing here to concede to
-    escape      leave the lineage dormant. Nothing is written
-    ctrl-u      start the entry over
-    ctrl-c      abandon the sitting
-    paste       accepted, both halves of the pair. Nothing here is measured
+  Every other prompt — the aided entry after ctrl-l, an attachment, and every
+  prompt in enroll, attach and rotate — masks what is typed, one glyph a
+  character, takes a paste, and adds:
 
-  There is no lookup at an attachment prompt. Offering one would imply that
+    ctrl-r          show the characters themselves, or stop showing them
+    left right      move one character. Also ctrl-b and ctrl-f
+    home end        move to either end. Also ctrl-a and ctrl-e
+    delete          remove the character at the caret. Also ctrl-d
+    ctrl-k          remove everything from the caret on
+    ctrl-t          swap the character before the caret with the one at it
+    alt-b alt-f     move one word. Also ctrl-left and ctrl-right
+    ctrl-w          remove back to the start of a word. Also alt-backspace
+    alt-d           remove forward to the end of a word
+
+  That is readline's set, so it is the set your shell already has. Whether a
+  terminal sends alt at all is its own setting; ctrl-left and ctrl-right arrive
+  everywhere.
+
+  A reveal is never on by itself and never survives the prompt that opened it.
+  It goes back on its own when the window loses focus, and after thirty seconds
+  with nothing typed. The card names ctrl-r wherever it works, so a key with no
+  chip beside it does nothing there.
+
+  The word-wise keys work only while the characters are showing. Over a masked
+  field the distance a word jump travels is a word length, and word lengths are
+  most of what a passphrase's strength is made of. There is no yank and no
+  undo: both would keep a copy of what was removed for longer than the entry it
+  came from.
+
+  A view wider than the field says so on the border it is cut off at, so an
+  unmarked field is the whole of what was typed and nothing else ever looks
+  like one.
+
+  At an attachment prompt, where a verifier is being made rather than checked,
+  an empty entry is refused rather than conceded: there is nothing here to
+  concede to. There is no lookup there either — offering one would imply that
   what is typed is being checked against something, and it is not.
 
   When nothing is due, bare rote asks whether you want to practice anyway. That
   is one keystroke and no return: y practices, any other key leaves it.
 
-  A cold drill try is the one prompt that refuses a paste, and the one prompt
-  that measures a memory. Everywhere else accepts one: the aided entry after
-  ctrl-l, an attachment, and every prompt in enroll, attach and rotate,
-  including the proof of the current secret. Pastes accepted and pastes refused
-  are both recorded against the sample. What that refusal is and is not is in
-  rote guide custody.";
+  Pastes accepted and pastes refused are both recorded against the sample, and
+  neither is a count of lookups. What that refusal is and is not is in rote
+  guide custody.";
 
 const INTERVALS: &str = "\
 INTERVALS
@@ -100,8 +130,12 @@ RECORDS
 
   A capture is one typed sample. It records the lineage and the engram, the
   sitting, which sample within the drill, the occasion, whether it was aided,
-  the outcome, time to the first keystroke, time to submit, backspaces, pastes
+  the outcome, time to the first keystroke, time to submit, corrections, pastes
   accepted, pastes refused, the three intervals, and the rung either side.
+
+  Corrections counts keystrokes that removed something, one apiece, whatever
+  each of them removed. It is a fact about the typing and never about the
+  secret: not its length, not a prefix, not a character class.
 
   The two paste counts are every paste the prompt saw, and neither is a count
   of lookups: a refused paste is one steered onto a channel that arrives as

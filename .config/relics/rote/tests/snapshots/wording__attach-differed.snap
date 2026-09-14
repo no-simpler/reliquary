@@ -1,7 +1,6 @@
 ---
 source: rote/tests/wording.rs
-assertion_line: 112
-expression: "render(&rows, 0, Some(\"the two entries differ\"), false)"
+expression: "render(&rows, 0, Some(\"the two entries differ\"), false, false)"
 ---
 ╭─ attach ──────────────────────────────────────────────────── Sun 13 Sep ─╮
 │                                                                          │
@@ -13,6 +12,6 @@ expression: "render(&rows, 0, Some(\"the two entries differ\"), false)"
 │   │                                                                  │   │
 │   ╰──────────────────────────────────────────────────────────────────╯   │
 │                                                                          │
-│   the two entries differ                                                 │
+│   the two entries differ                                      ^R  show   │
 │                                                                          │
 ╰──────────────────────────────────────────────────────────────────────────╯

@@ -1,6 +1,6 @@
 ---
 source: rote/tests/wording.rs
-expression: "render(&rows, 0, None, false)"
+expression: "render(&rows, 0, None, false, false)"
 ---
 ╭─ rote ────────────────────────────────────────────────────── Sun 13 Sep ─╮
 │                                                                          │
@@ -12,6 +12,6 @@ expression: "render(&rows, 0, None, false)"
 │   │                                                                  │   │
 │   ╰──────────────────────────────────────────────────────────────────╯   │
 │                                                                          │
-│                                                                          │
+│                                                               ^R  show   │
 │                                                                          │
 ╰──────────────────────────────────────────────────────────────────────────╯

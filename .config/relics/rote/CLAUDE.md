@@ -72,13 +72,13 @@ intake.rs         the double-entry policy — pure, and shared with the sitting
 ladder.rs         the schedule, the occasion, the standing — pure
 machine.rs        the identity, the hostname, the flagship marker
 render/           one row model, three renderers
-secret.rs         the typed value, and the two types that hold one
+secret.rs         the typed value, its editing by caret, and what holds one
 sitting/mod.rs    the roster, and the loop that works through it
 sitting/screen.rs the sitting's own layout, as a pure function from frame to card
 slug.rs           a validated lineage name
 stats.rs          retention, latency, punctuality, the streak — pure
 store.rs          the three homes, the clock, locking, appending
-tui/mod.rs        the traits, the entry loop, and the shared prompt dialogs
+tui/mod.rs        the traits, the entry loop, the key intents, render_field
 tui/card.rs       the box and the one entry line; colour is relic_core::style
 tui/term.rs       crossterm: raw mode, the alternate screen, placement, restoration
 verifier/mod.rs   argon2id in PHC string format
@@ -133,10 +133,27 @@ Things a future edit must not undo.
   passing. Two residuals are accepted rather than closed: crossterm's own read buffer holds typed bytes transiently, and the signal
   path exits without running destructors — the kernel zeroes pages on reuse, swap
   is encrypted and core dumps are off, and the alternative is `mlock` through
-  unsafe code.
+  unsafe code. **A reveal adds a third, larger one**, accepted with its eyes
+  open: `Field::drawn`, both of `Piece::painted`'s copies, `join`'s pair,
+  `edge`'s `format!`, the `Vec<String>` from `render`, and stdout's `LineWriter`,
+  which keeps the bytes after a flush with only its length reset. `Terminal::paint`
+  wipes the outgoing frame unconditionally and a `Card` built over a shown field
+  wipes its body on drop — which is also why `Card` is deliberately not `Clone` —
+  but the transients above are not reachable. Under masking the caret also goes
+  onto the wire as an absolute `MoveTo` on every paint, which is a per-keystroke
+  length oracle in any recording of the stream.
 - **A full buffer refuses the character and says so.** The dialog and the pipe hold
   one rule: a secret longer than the field is refused, never truncated into a
   verifier for something nobody typed.
+- **`secret` never grows and never derives a word boundary.** Editing is by
+  character index and nothing calls `Vec::insert`, `Vec::remove` or `Vec::drain`,
+  each of which checks `len == capacity` and calls `reserve`. A removal shifts the
+  tail down and `truncate` does not reach what it left above the new length, so
+  `scrub` wipes that range first — its own function precisely because it is the
+  only part of a removal a test in safe Rust can see. Word boundaries are free
+  functions in the entry loop: a word length is the one thing about a passphrase
+  this tool may never disclose, and the module that holds the value is the wrong
+  place to teach how to find one.
 - **Every capture is written the moment it is taken.** The sitting loop hands each
   one to a record callback before the next prompt is drawn, so a closed window or a
   signal keeps every reading it had already produced. The closing card is drawn
@@ -148,10 +165,34 @@ Things a future edit must not undo.
   the future-schema refusal both live there, because every caller opens the store
   in order to write and the refusal must arrive before any command has touched the
   verifier file.
-- **No secret ever reaches argv, the environment, the clipboard, a formatter, a log
-  line, an error, or the screen.** The drill is blind and there is no reveal
-  toggle: it would have been the one feature that puts plaintext on a display, for
-  a benefit a retry already covers.
+- **A cold prompt gives back nothing about what was typed.** The cold drill try
+  is the one prompt that measures a memory, and four behaviours are consequences
+  of that one property rather than four settings: it refuses a paste, it stays
+  blind, it offers no reveal and it moves no caret. A character count is partial
+  recognition feedback delivered mid-retrieval and a reveal is the whole of one,
+  so neither may reach the prompt that is measuring. `read_secret` takes `cold`
+  and derives the rest; nothing else may grow a second switch.
+- **No secret ever reaches argv, the environment, the clipboard, a formatter, a
+  log line or an error.** The screen is the one exception and it is deliberate:
+  every non-cold prompt masks per character and `ctrl-r` shows the characters
+  until it is pressed again, which is what NIST SP 800-63B-4 asks a verifier to
+  offer and what stops an enrollment minting a verifier for a typo nobody can
+  detect. A reveal is never sticky — `revealed` is a local in `read_secret`, so
+  it cannot outlive the prompt — and it concedes to a lost focus and to
+  `CONCEAL` seconds of silence.
+- **The disclosure-closure rule.** Under masking an affordance is offered only
+  if its effect is fully determined by what is already disclosed: the total
+  length and the caret. Word-wise motion fails that test — a jump the width of a
+  word discloses the width of a word — so it waits for the characters to be
+  showing. That is the same disclosure that rules out word-boundary masking,
+  arriving through the side door, and every new key is checked against the rule
+  rather than against the last key that was added.
+- **The key map is readline's**, because readline is the muscle memory a terminal
+  already has. Where readline names one intent twice both spellings arrive, and
+  where a terminal encodes one intent twice both arrive too; `Key` is a set of
+  intents and the loop never learns which spelling came. Two of readline's are
+  refused rather than missing: `ctrl-y` and undo both need a store of prior
+  buffer states, which is a plaintext copy with a lifetime of its own.
 - **`--stdin` refuses when stdin is a terminal.** The precise threat is an echoing
   read: a secret typed into one lands on the screen and in scrollback. No stream
   check can see the command line, so the pipe's discipline — a vault at the other
@@ -192,14 +233,27 @@ Things a future edit must not undo.
 - **Bare `rote` asks for what is due and nothing else, and offers practice on one
   keystroke when nothing is.** Deciding what to add beyond what is due is the
   schedule deciding again; asking costs one key and no return.
-- **One entry loop, one field, one place a secret becomes pixels.**
-  `tui::read_secret` is the only loop that accepts a typed secret, `Card::entry` the
-  only thing that draws one, and `Reveal::shown` the only function that turns a
-  buffer into something on a screen. Revealing anything — per-character masking is
-  defensible — is a change to that one match. The typed count is already passed in
-  and deliberately unused, so that change costs no call site. Word-boundary masking
-  is never defensible: seven word lengths is most of a diceware phrase's search
-  space.
+- **One entry loop, one field, one place a secret becomes glyphs.**
+  `tui::read_secret` is the only loop that accepts a typed secret, `Card::entry`
+  the only thing that draws one, and `tui::render_field` the only function that
+  turns a buffer into something drawable. It masks, sanitises and windows, and
+  hands the card a finished string — so `card.rs` never sees a buffer and
+  `Secret::expose` gains no caller on the render path. **Sanitising is not
+  optional**: every non-cold prompt takes a paste, so the buffer may hold a
+  newline, a tab, an escape, a combining mark or a glyph two columns wide. A
+  newline written in raw mode puts the rest of the card wherever the cursor
+  happened to be, and a wide glyph overruns a box that counts characters while
+  `Piece::width` stays silent. A character is drawn only if it is non-control and
+  one column wide; anything else is one placeholder column, which keeps the count
+  equal to the width.
+- **The field is one row, and a partial view always says so.** The window follows
+  the caret and the offset is chosen so the caret lands in the text area rather
+  than on the border. Where the view is cut off the border glyph becomes a
+  chevron, so an unmarked field is a complete view and nothing else can be
+  mistaken for one. The offset is state and lives beside `revealed` in the loop,
+  because a window recomputed from the caret alone jumps whenever the caret
+  crosses a boundary. A one-row field is also why `ASK_SLOTS` and `screen::SLOTS`
+  are both still eight.
 - **The field is its own delimited area and shares its line with nothing.** A hint
   beside where a secret is typed is a hint that will one day be overlapped by what
   is typed into it — so instructions sit on their own lines above, with one blank
@@ -249,6 +303,10 @@ Things a future edit must not undo.
   contradiction of the row above it. Nothing on a card
   spells out a key that a person already knows — enter submits, escape leaves — so
   the only key named is ctrl-l, and only where it is on offer.
+- **`Card::waiting` takes the caret down with the box.** Under masking the caret
+  column *is* the length, so a caret left behind would park the terminal's cursor
+  on a column that discloses what was just submitted, on the one card that sits
+  alone for half a second.
 - **The caret is the terminal's own cursor**, moved into the field and shown there.
   It blinks the way every other password field on the machine blinks, follows the
   reader's own cursor settings, costs no animation loop, and cannot be overlapped
@@ -356,8 +414,12 @@ have seen. Two defects were found that way and by nothing else: a discarded
 during a rotation, and a resize leaving a broken box until the next keystroke.
 
 **The check that matters most is a grep of the raw stream for the typed secret**,
-including its prefixes — that is what caught the echo. Use tokens that cannot
-collide with the card's own words; `new` and `one` both appear in it. The
+including its prefixes — that is what caught the echo. It is now two checks
+rather than one, because a reveal is a legitimate frame: the token must be
+**absent across a whole run in which `ctrl-r` is never pressed**, and **present
+exactly once after one `ctrl-r`**. A run that never presses it is the regression
+the echo taught; a run that does is the feature. Use tokens that cannot collide
+with the card's own words; `new` and `one` both appear in it. The
 **attachment card is the second thing worth driving that way**, because it is the
 second place a typed secret becomes a verifier.
 

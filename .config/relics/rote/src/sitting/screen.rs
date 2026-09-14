@@ -17,7 +17,7 @@ use super::{Outturn, Task, Turn};
 use crate::corpus::drill::Landing;
 use crate::ladder::Occasion;
 use crate::slug::Slug;
-use crate::tui::card::{CONTENT, Card, Piece, Reveal, Tone, fit, fit_to, join};
+use crate::tui::card::{CONTENT, Card, Field, Piece, Tone, fit, fit_to, join};
 
 /// What points at the engram being asked about.
 const MARKER: &str = "▸ ";
@@ -231,7 +231,7 @@ fn title(frame: &Frame<'_>) -> &'static str {
 }
 
 /// Render one frame.
-pub fn card(frame: &Frame<'_>, style: Style) -> Card {
+pub fn card(frame: &Frame<'_>, field: &Field<'_>, style: Style) -> Card {
     let mut card = Card::new(title(frame), crate::tui::card::stamp(frame.today), style);
     card.reserve(frame.rows.len().saturating_add(SLOTS));
     let names = frame
@@ -269,13 +269,13 @@ pub fn card(frame: &Frame<'_>, style: Style) -> Card {
             // anything, and here it does not.
             card.waiting(crate::tui::WORKING);
         } else {
-            // The sitting is blind, so there is nothing typed for the field to
-            // show. It is asked for anyway, through the one place in the binary
-            // where a typed secret becomes something on a screen.
-            card.entry(0, Reveal::Blind, frame.tone);
+            // What the field shows is the entry loop's to decide and this
+            // card's to draw: blind where a memory is being measured, and one
+            // glyph per character everywhere else.
+            card.entry(field, frame.tone);
         }
         card.gap();
-        card.line(under(frame, style));
+        card.line(under(frame, field, style));
     }
 
     if let Some(outturn) = frame.outturn {
@@ -314,9 +314,29 @@ pub fn card(frame: &Frame<'_>, style: Style) -> Card {
 
 /// The line under the field: how this prompt is going, and the one branch a
 /// person could not guess at.
-fn under(frame: &Frame<'_>, style: Style) -> Piece {
+fn under(frame: &Frame<'_>, field: &Field<'_>, style: Style) -> Piece {
     let left = frame.status.clone().unwrap_or_default();
-    let right = if frame.lookup { "^L  look it up" } else { "" };
+    let lookup = if frame.lookup { "^L  look it up" } else { "" };
+    let reveal = crate::tui::reveal_chip(field.reveal);
+    let right = match (lookup.is_empty(), reveal.is_empty()) {
+        (false, false) => format!("{lookup}   {reveal}"),
+        (false, true) => lookup.to_owned(),
+        (true, false) => reveal.to_owned(),
+        (true, true) => String::new(),
+    };
+    // A refusal is the half that has to be read, so the chip is what gives.
+    // Saturating the gap instead would hand the card an over-long line and
+    // break the box rather than saying anything.
+    let room = left
+        .chars()
+        .count()
+        .saturating_add(right.chars().count())
+        .saturating_add(1);
+    let right = if room <= CONTENT {
+        right
+    } else {
+        String::new()
+    };
     let gap = CONTENT
         .saturating_sub(left.chars().count())
         .saturating_sub(right.chars().count());
@@ -553,7 +573,13 @@ mod tests {
     use crate::corpus::record::Outcome;
     use crate::ladder::{Occasion, Rung};
     use crate::sitting::{Capture, Outturn};
-    use crate::tui::card::{CONTENT, Tone, WIDTH};
+    use crate::tui::card::{CONTENT, Card, Field, Reveal, Tone, WIDTH};
+
+    /// A card over a field nothing has been typed into, which is what every
+    /// assertion about the layout wants.
+    fn card_with(frame: &Frame<'_>, style: Style) -> Card {
+        card(frame, &Field::blind(), style)
+    }
 
     fn drill_row(name: &str, occasion: Occasion, aided: bool, state: RowState) -> Row {
         Row {
@@ -633,21 +659,76 @@ mod tests {
 
     #[test]
     fn every_line_of_every_card_is_exactly_the_card_width() {
+        // The widest line under the field the binary can produce: the longest
+        // refusal beside both chips. `Card::edge` asserts on it, and nothing
+        // else in the suite reaches this line at all.
+        let widest = crate::tui::Refusal::Full
+            .status()
+            .expect("a refusal says something");
+        let full = "x".repeat(crate::tui::card::FIELD);
         for row in rows() {
             let list = vec![row];
             for tone in [Tone::Calm, Tone::Alarm] {
                 for lookup in [false, true] {
-                    let mut frame = Frame::running(date(2026, 9, 13), &list, Some(0));
-                    frame.tone = tone;
-                    frame.lookup = lookup;
-                    frame.status = Some("not it · try 2 of 3".to_owned());
-                    for line in card(&frame, Style::PLAIN).render() {
-                        assert_eq!(line.chars().count(), WIDTH, "{line}");
-                        assert!(!line.contains('\n'), "no line carries a newline");
+                    for status in ["not it · try 2 of 3", widest] {
+                        for field in [
+                            Field::blind(),
+                            Field::empty(Reveal::Masked),
+                            Field {
+                                reveal: Reveal::Shown,
+                                drawn: &full,
+                                clipped: (true, true),
+                                column: 0,
+                            },
+                        ] {
+                            let mut frame = Frame::running(date(2026, 9, 13), &list, Some(0));
+                            frame.tone = tone;
+                            frame.lookup = lookup;
+                            frame.status = Some(status.to_owned());
+                            for line in card(&frame, &field, Style::PLAIN).render() {
+                                assert_eq!(line.chars().count(), WIDTH, "{line}");
+                                assert!(!line.contains('\n'), "no line carries a newline");
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_card_names_the_reveal_exactly_where_it_is_on_offer() {
+        let list = rows();
+        let drawn = |field: &Field<'_>| {
+            let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
+            card(&frame, field, Style::PLAIN).render().join("\n")
+        };
+        assert!(
+            !drawn(&Field::blind()).contains("^R"),
+            "a cold prompt names no reveal"
+        );
+        assert!(drawn(&Field::empty(Reveal::Masked)).contains("^R  show"));
+        assert!(drawn(&Field::empty(Reveal::Shown)).contains("^R  hide"));
+    }
+
+    #[test]
+    fn a_refusal_that_crowds_the_line_drops_the_chip_and_not_itself() {
+        let list = rows();
+        // Nothing the binary says is this long. The mechanism is what is under
+        // test: a line that cannot hold both drops the chip, never the refusal,
+        // and never overruns the box.
+        let mut frame = Frame::running(date(2026, 9, 13), &list, Some(0));
+        frame.lookup = true;
+        frame.status = Some(format!(
+            "{:<width$}",
+            "longer than a secret",
+            width = CONTENT
+        ));
+        let rendered = card(&frame, &Field::empty(Reveal::Masked), Style::PLAIN)
+            .render()
+            .join("\n");
+        assert!(rendered.contains("longer than a secret"), "{rendered}");
+        assert!(!rendered.contains("^R"), "the chip is what gives");
     }
 
     #[test]
@@ -657,7 +738,7 @@ mod tests {
         let mut heights = Vec::new();
         for active in 0..list.len() {
             let frame = Frame::running(date(2026, 9, 13), &list, Some(active));
-            heights.push(card(&frame, Style::PLAIN).height());
+            heights.push(card(&frame, &Field::blind(), Style::PLAIN).height());
         }
         let done = outturn();
         let notes = vec![Note {
@@ -665,7 +746,7 @@ mod tests {
             said: "a note".to_owned(),
         }];
         heights.push(
-            card(
+            card_with(
                 &Frame::done(date(2026, 9, 13), &list, &done, &notes),
                 Style::PLAIN,
             )
@@ -684,7 +765,7 @@ mod tests {
         let mut lines = Vec::new();
         for active in 0..list.len() {
             let frame = Frame::running(date(2026, 9, 13), &list, Some(active));
-            let rendered = card(&frame, Style::PLAIN).render();
+            let rendered = card(&frame, &Field::blind(), Style::PLAIN).render();
             lines.push(field_line(&rendered));
         }
         assert!(lines.iter().all(|line| *line == lines[0]), "{lines:?}");
@@ -721,7 +802,7 @@ mod tests {
             RowState::Checking,
         )];
         let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
-        let drawn = card(&frame, Style::PLAIN);
+        let drawn = card(&frame, &Field::blind(), Style::PLAIN);
         assert!(drawn.caret().is_none(), "no cursor where nothing is typed");
         let rendered = drawn.render();
         assert!(
@@ -736,7 +817,7 @@ mod tests {
             false,
             RowState::Active { attempt: 1 },
         )];
-        let other = card(
+        let other = card_with(
             &Frame::running(date(2026, 9, 13), &typing, Some(0)),
             Style::PLAIN,
         );
@@ -749,7 +830,7 @@ mod tests {
         for row in rows() {
             let list = vec![row];
             let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
-            for line in card(&frame, Style::PLAIN).render() {
+            for line in card(&frame, &Field::blind(), Style::PLAIN).render() {
                 assert!(!line.contains('…'), "{line}");
             }
         }
@@ -771,7 +852,9 @@ mod tests {
     fn an_attachment_says_what_it_is_continuing_and_offers_no_lookup() {
         let list = vec![attach_row("escrow-p", RowState::Claiming)];
         let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
-        let rendered = card(&frame, Style::PLAIN).render().join("\n");
+        let rendered = card(&frame, &Field::blind(), Style::PLAIN)
+            .render()
+            .join("\n");
         assert!(rendered.contains("attach · dormant here"));
         assert!(rendered.contains("enrolled 2026-09-14"));
         assert!(rendered.contains("nothing here can check it"));
@@ -785,7 +868,9 @@ mod tests {
     fn the_second_half_of_a_pair_asks_again_and_nothing_else() {
         let list = vec![attach_row("escrow-p", RowState::Confirming)];
         let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
-        let rendered = card(&frame, Style::PLAIN).render().join("\n");
+        let rendered = card(&frame, &Field::blind(), Style::PLAIN)
+            .render()
+            .join("\n");
         assert!(rendered.contains("again"));
     }
 
@@ -798,7 +883,9 @@ mod tests {
             RowState::Active { attempt: 1 },
         )];
         let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
-        let rendered = card(&frame, Style::PLAIN).render().join("\n");
+        let rendered = card(&frame, &Field::blind(), Style::PLAIN)
+            .render()
+            .join("\n");
         assert!(rendered.contains("from memory"));
         assert!(rendered.contains("review · 30d · at cap"));
 
@@ -809,7 +896,9 @@ mod tests {
             RowState::Active { attempt: 1 },
         )];
         let frame = Frame::running(date(2026, 9, 13), &aided, Some(0));
-        let rendered = card(&frame, Style::PLAIN).render().join("\n");
+        let rendered = card(&frame, &Field::blind(), Style::PLAIN)
+            .render()
+            .join("\n");
         assert!(rendered.contains("measures nothing"));
         assert!(
             rendered.contains("aided") && !rendered.contains("30d"),
@@ -820,7 +909,9 @@ mod tests {
     #[test]
     fn an_empty_roster_says_so_rather_than_drawing_a_blank_box() {
         let frame = Frame::running(date(2026, 9, 13), &[], None);
-        let rendered = card(&frame, Style::PLAIN).render().join("\n");
+        let rendered = card(&frame, &Field::blind(), Style::PLAIN)
+            .render()
+            .join("\n");
         assert!(rendered.contains("nothing to drill"));
     }
 
@@ -839,7 +930,7 @@ mod tests {
             attach_row("b", RowState::Attached),
         ];
         let done = outturn();
-        let rendered = card(
+        let rendered = card_with(
             &Frame::done(date(2026, 9, 13), &list, &done, &[]),
             Style::PLAIN,
         )
@@ -858,7 +949,7 @@ mod tests {
         let list = rows();
         for active in 0..list.len() {
             let frame = Frame::running(date(2026, 9, 13), &list, Some(active));
-            for line in card(&frame, Style::PLAIN).render() {
+            for line in card(&frame, &Field::blind(), Style::PLAIN).render() {
                 assert!(!line.contains("hunter2"), "{line}");
             }
         }
