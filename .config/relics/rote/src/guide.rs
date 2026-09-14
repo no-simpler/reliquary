@@ -27,12 +27,18 @@ pub const USAGE: &str = "  rote help   CLI usage";
 const LADDER: &str = "\
 THE LADDER
 
-  Expanding intervals, 1, 1, 2, 4, 7, 14, 30 days, held at a month. An unaided
-  first pass moves up a rung; a first miss returns to the foot, which keeps a
-  shaky secret at daily intervals without a separate learning mode. The shape is
-  from Bonneau and Schechter, USENIX Security 2014, who held 56-bit secrets at
-  roughly 88% unaided recall on a schedule of this kind. The intervals are
-  configurable; the shape is the default and not a rule.
+  Expanding intervals, 1, 1, 2, 4, 7, 14, 30 days, held at a month. When the
+  schedule asks, an unaided first pass moves up a rung and a first miss returns
+  to the foot, which keeps a shaky secret at daily intervals without a separate
+  learning mode. The shape is from Bonneau and Schechter, USENIX Security 2014,
+  who held 56-bit secrets at roughly 88% unaided recall on a schedule of this
+  kind. The intervals are configurable; the shape is the default and not a rule.
+
+  Only a review moves the rung. A practice is a drill nobody asked for, and it
+  leaves the schedule where it was: it cannot carry an engram up toward the cap,
+  and it cannot knock one back to the foot either. It still stands on the record
+  like any other capture, so a practice that was unaided and passed is what can
+  first make an engram one that has stood alone.
 
   The cap is not a claim about memory. It is how stale the evidence is allowed
   to get: at a month you are never more than a month from finding out whether
