@@ -140,12 +140,12 @@ impl Drop for RawMode {
 
 /// Whether a dialog can run here at all.
 ///
-/// All three streams, not just stdin: a dialog that cannot paint is not a
-/// dialog, and a redirected stream is the shape a piped secret would arrive in.
+/// Both halves of the exchange: a dialog that cannot be typed into is not a
+/// dialog, and neither is one that cannot paint. Nothing is asked of stderr,
+/// which carries no part of it — a run with its errors redirected still has a
+/// terminal to hold a card.
 pub fn is_interactive() -> bool {
-    std::io::stdin().is_terminal()
-        && std::io::stdout().is_terminal()
-        && std::io::stderr().is_terminal()
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
 /// The terminal, held in dialog mode for as long as this value lives.

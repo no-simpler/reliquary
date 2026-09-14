@@ -475,6 +475,50 @@ fn the_json_shapes_are_documents_rather_than_prose() {
     }
 }
 
+// ── the output shape ─────────────────────────────────────────────────────────
+
+#[test]
+fn the_output_shape_changes_what_is_printed_and_never_what_is_done() {
+    // A shape says how an answer is written. The suite runs at agent shape
+    // throughout, so this is the half that is otherwise unwatched: a command
+    // that read the shape to decide whether to act would differ here.
+    let mut rote = Rote::new();
+    let engram = rote.enroll(days_ago(1), "a", false);
+    rote.capture(today(), "a", engram, Drilled::passed());
+    let chain = std::fs::read(rote.chain()).expect("the chain");
+
+    for args in [
+        vec![],
+        vec!["status"],
+        vec!["stats"],
+        vec!["log"],
+        vec!["machines"],
+        vec!["doctor"],
+        vec!["banner"],
+    ] {
+        let codes: Vec<Option<i32>> = ["human", "agent", "json"]
+            .iter()
+            .map(|shape| {
+                rote.cmd(&args)
+                    .env("ROTE_UI", shape)
+                    .assert()
+                    .get_output()
+                    .status
+                    .code()
+            })
+            .collect();
+        assert!(
+            codes.windows(2).all(|pair| pair[0] == pair[1]),
+            "{args:?} exited differently by shape: {codes:?}"
+        );
+        assert_eq!(
+            std::fs::read(rote.chain()).expect("the chain"),
+            chain,
+            "{args:?} wrote to the corpus"
+        );
+    }
+}
+
 // ── sittings without a terminal ──────────────────────────────────────────────
 
 #[test]

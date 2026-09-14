@@ -49,6 +49,8 @@ sentence. Resist the urge to explain when to reach for it; that is the agent's c
 
 ## Agent-aware output
 
+This section binds every tool on the machine that reads the signal, in-house relics included.
+
 A tool agents invoke should detect that and change shape. Claude Code exports **`CLAUDECODE`** into
 every subprocess it spawns, which is the signal — a tool run through the `Bash` tool sees it, and a
 tool run by a person at a terminal does not. Non-TTY stdout is the backstop for agentic callers that
@@ -61,6 +63,15 @@ Agent shape means no colour, no alignment padding, no box drawing, and a stable 
 Alignment is paid for twice — once written, once read — and buys a model nothing. Human shape may
 spend freely on tables and colour. Keep `--json` a separate, explicit opt-in: it is for scripts, and
 it costs more tokens than a terse line format.
+
+**A shape is never a permission.** These signals choose how an answer is written. None of them may
+decide whether an operation runs, or which operations a caller is offered. A caller identity taken
+from the environment is unauthenticated — `env -u CLAUDECODE` erases it and any process can set it —
+so as an access-control input it is the client-side trust OWASP A01 names: it stops nobody, and it
+costs the honest path, which is the one that answers truthfully. Capability is answered by the
+capability itself: a dialog asks whether it has a terminal, a writer asks whether it can take the
+lock. The legitimate category is content negotiation, the same one as `Accept:`, `NO_COLOR`, and
+choosing a pager on isatty.
 
 `docket` is the reference implementation.
 

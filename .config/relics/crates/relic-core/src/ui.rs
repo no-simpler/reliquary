@@ -11,7 +11,13 @@ use std::str::FromStr;
 
 use clap::ValueEnum;
 
-/// The shape output takes.
+/// The shape output takes, and nothing else.
+///
+/// A `Format` selects a representation. It is never an input to whether an
+/// operation runs, or to which operations a caller is offered: a capability is
+/// answered by the capability — a dialog by whether it has a terminal, a writer
+/// by whether it can take the lock — and never by the audience the environment
+/// claims. `~/.config/reliquary/AGENTIC-TOOLING.md` gives the reasoning.
 ///
 /// [`Format::Json`] is a separate, explicit opt-in rather than a richer
 /// [`Format::Agent`]: it is for scripts, and it costs more tokens than a terse
@@ -113,7 +119,9 @@ impl Format {
     ///
     /// `var` is the relic's own `<NAME>_UI` variable. `CLAUDECODE` is exported
     /// into every subprocess Claude Code spawns, which is how an agent shelling
-    /// out is recognised before the terminal check has to guess.
+    /// out is recognised before the terminal check has to guess. It is a hint
+    /// about the reader and never a fact about the caller: any process can set
+    /// it and any caller can drop it.
     #[must_use]
     pub fn from_process(explicit: Option<Self>, var: &str) -> Self {
         let env = std::env::var(var).ok();

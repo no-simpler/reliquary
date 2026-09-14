@@ -6,12 +6,6 @@ The binary documents itself, across two namespaces that never overlap.
 **Do not restate any of that here, in a README, or in a code comment.** This
 relic evolves; a second copy would be wrong within a week.
 
-There is **no skill** at `~/.claude/skills/coop/`, and there should not be. The
-card is drawn only when `relic_core::ui::Format` resolves to `Human`, which
-`CLAUDECODE` alone rules out, so no agent ever sees one. What an agent might
-need — how to add a source — is `coop help tiers`, reachable without a stub
-advertising a tool it cannot use.
-
 ## Prose rules for everything the binary prints
 
 - **No backticks** in `help` and `guide` topic bodies. They are read in a

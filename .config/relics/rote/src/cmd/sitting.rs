@@ -57,7 +57,9 @@ pub fn daily(ctx: &Context, aided: bool) -> Result<u8> {
     }
 
     let waiting = nothing_due(&corpus, today, &ladder);
-    if !interactive(ctx) {
+    // Not a refusal: with nothing due there is nothing to insist on, so a run
+    // that cannot open a dialog says what is waiting and leaves clean.
+    if !term::is_interactive() {
         if !ctx.quiet {
             println!("{waiting}");
         }
@@ -328,11 +330,6 @@ fn closing_notes(
         }
     }
     notes
-}
-
-fn interactive(ctx: &Context) -> bool {
-    use std::io::IsTerminal as _;
-    ctx.format == relic_core::ui::Format::Human && std::io::stdout().is_terminal()
 }
 
 fn nothing_due(corpus: &Corpus, today: Date, ladder: &Ladder) -> String {

@@ -305,10 +305,6 @@ Spaced repetition over the small set of passwords that have to live in a head ra
 vault. Public relic (`~/.config/relics/rote/`, Rust). The only relic a **human** operates daily,
 and the only one through which plaintext secrets pass.
 
-Bare `rote` runs today's session. It **refuses to run wherever the output shape is not human** —
-which `CLAUDECODE` alone triggers — so an agent cannot drill, enrol or rotate, and there is no
-skill advertising it.
-
 Two homes, and the split is the point. The log is in `~/Trove/ark/rote/` — outcomes, timings,
 intervals, no secret material, restic's to keep. The **verifiers are not**: an argon2id hash is an
 offline-attackable confirmation oracle, and it is regenerable by re-enrolment, so it lives at

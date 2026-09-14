@@ -6,11 +6,6 @@ The binary documents itself, across two namespaces that never overlap.
 **Do not restate any of that here, in a README, or in a code comment.** This relic
 evolves; a second copy would be wrong within a week.
 
-There is **no skill** at `~/.claude/skills/rote/`, and there should not be. No agent
-operates `rote`: it refuses to run wherever `relic_core::ui::Format` resolves to
-anything but `Human`, which `CLAUDECODE` alone triggers. A stub whose only effect
-would be to advertise a tool an agent cannot use is noise.
-
 ## What the tool is for
 
 **`rote` keeps a faithful record and proposes a schedule. It does not judge, and it
