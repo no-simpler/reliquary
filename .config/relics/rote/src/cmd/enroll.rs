@@ -22,11 +22,11 @@ use jiff::civil::Date;
 
 use super::{Context, dialog, open_store, write_cache};
 use crate::cli::{AttachArgs, EnrollArgs, RetireArgs, RotateArgs};
-use crate::cmd::dialog::{Checked, Twice};
+use crate::cmd::dialog::{Asking, Checked, Twice};
 use crate::corpus::record::{Attached, EngramId, Enrolled, Event, Retired, Rotated};
 use crate::corpus::{Corpus, Lineage};
 use crate::exit::{CLEAN, INCOMPLETE};
-use crate::intake::{DIFFERED, EMPTY, make_verifier};
+use crate::intake::{EMPTY, make_verifier};
 use crate::secret::Secret;
 use crate::tui::term;
 use crate::verifier::file::Verifiers;
@@ -72,6 +72,7 @@ pub fn enroll(ctx: &Context, args: &EnrollArgs) -> Result<u8> {
             checked: Checked::Yes,
             heading: &heading,
             intention: "the secret this lineage will hold, typed twice",
+            cost: "nothing was enrolled",
         },
         args.stdin,
     )?
@@ -150,6 +151,7 @@ pub fn attach(ctx: &Context, args: &AttachArgs) -> Result<u8> {
             checked: Checked::No,
             heading: &heading,
             intention: "type it as you know it — nothing here can check it",
+            cost: "nothing was attached",
         },
         args.stdin,
     )?
@@ -237,8 +239,13 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
             fed.pop(),
             console.as_mut(),
             today,
-            "rotate",
-            &heading,
+            &Asking {
+                title: "rotate",
+                checked: Checked::Yes,
+                heading: &heading,
+                intention: "prove the current secret before it is replaced",
+                cost: "nothing was replaced",
+            },
             ctx,
         )?
     {
@@ -254,6 +261,7 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
             checked: Checked::Yes,
             heading: &heading,
             intention: "the new secret, typed twice",
+            cost: "nothing was replaced",
         },
         fed.pop(),
     )?
@@ -347,18 +355,6 @@ fn live<'a>(corpus: &'a Corpus, slug: &crate::slug::Slug) -> Result<&'a Lineage>
     Ok(lineage)
 }
 
-/// One prompt's own words, carried together because they travel together.
-struct Asking<'a> {
-    /// The card's title, naming the instrument.
-    title: &'static str,
-    /// Whether anything here can check what is typed.
-    checked: Checked,
-    /// What is being asked about.
-    heading: &'a str,
-    /// What this prompt is for.
-    intention: &'a str,
-}
-
 /// Take one secret, from a pipe once or from a terminal twice.
 fn take_one(
     ctx: &Context,
@@ -384,6 +380,7 @@ fn settle(
         checked,
         heading,
         intention,
+        cost,
     } = *asking;
     if let Some(secret) = fed {
         if secret.is_empty() {
@@ -400,8 +397,8 @@ fn settle(
             dialog::abandoned(console, today, heading)?;
             Ok(None)
         }
-        Twice::Differed => {
-            dialog::refused(console, today, heading, DIFFERED)?;
+        Twice::Refused(reason) => {
+            dialog::refused(console, today, heading, reason, cost)?;
             Ok(None)
         }
     }

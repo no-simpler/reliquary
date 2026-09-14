@@ -817,6 +817,20 @@ pub fn reveal_chip(reveal: Reveal) -> &'static str {
 /// What the field says while a verifier is being minted or checked.
 pub const WORKING: &str = "checking";
 
+/// What the closing card says on the right of its last line.
+pub const DISMISS: &str = "press any key";
+
+/// The narrowest gap that still reads as two things rather than one phrase.
+const APART: usize = 3;
+
+/// How wide an outcome may be before it crowds the keypress beside it.
+///
+/// Published because the caller is the one that knows what it would drop to
+/// fit: a line that cannot hold both keeps the half that has not been said yet.
+pub const OUTCOME_ROOM: usize = card::CONTENT
+    .saturating_sub(DISMISS.len())
+    .saturating_sub(APART);
+
 /// Hold the screen still while something slow happens, and swallow what is
 /// typed at it.
 ///
@@ -902,6 +916,11 @@ pub fn outcome(
     text: &str,
     tint: Tint,
 ) -> Result<()> {
+    debug_assert!(
+        text.chars().count() <= OUTCOME_ROOM,
+        "an outcome crowded the keypress: {} columns of {OUTCOME_ROOM}",
+        text.chars().count()
+    );
     let style = console.style();
     let mut drawn = Card::new("done", card::stamp(today), style);
     drawn.reserve(ASK_SLOTS);
@@ -909,7 +928,7 @@ pub fn outcome(
     // else that changes has been: on the line under the field.
     drawn.say(heading, Tint::Bold);
     drawn.pad_to(ASK_SLOTS.saturating_sub(1));
-    drawn.split(text, "press any key", tint);
+    drawn.split(text, DISMISS, tint);
     console.paint(&drawn)?;
     console.hold()
 }
@@ -1694,6 +1713,18 @@ mod tests {
             super::while_working(&mut console, &card, || Err(anyhow::anyhow!("no")));
         assert!(out.is_err());
         assert_eq!(console.drains, 1);
+    }
+
+    #[test]
+    fn an_outcome_that_would_crowd_the_keypress_has_somewhere_to_give() {
+        // The budget exists so a caller can drop the half that has already been
+        // read rather than let a card run its two halves together.
+        assert!(super::OUTCOME_ROOM + super::DISMISS.len() < super::card::CONTENT);
+        let worst = format!("{} — nothing was attached", crate::intake::EMPTY);
+        assert!(
+            worst.chars().count() > super::OUTCOME_ROOM,
+            "the worst refusal is what the budget is for"
+        );
     }
 
     #[test]

@@ -139,6 +139,15 @@ CUSTODY
   told wrong is the one routine signal that the vault item and the verifier hold
   different secrets, which is otherwise undetectable.
 
+  Every prompt that can refuse you counts, and says the count. A drill try, a
+  proof and a double entry all get the same number of goes and all say which go
+  this is, because a bound nobody can see reads as no bound at all — and a
+  person who cannot see one stops trusting the command rather than the answer.
+  Every refusal spends one, an empty entry included: a refusal that costs
+  nothing is a loop with no end in it, whatever the others cost. When the goes
+  run out the card says so, and says what it cost, which is the one thing the
+  rounds before it never said.
+
   Three verbs take a secret, and the difference between them is the whole point.
 
   enroll opens a lineage with its first engram.

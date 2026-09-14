@@ -121,11 +121,28 @@ fn the_second_half_of_an_attachment_asks_again() {
 }
 
 #[test]
-fn an_attachment_that_differed_says_so() {
+fn an_attachment_that_differed_says_which_try_the_next_one_is() {
+    // Every bounded retry in the binary is worded by the one composer, so a
+    // loop cannot come to look endless by being said differently from its
+    // neighbours.
     let rows = vec![attach(name("escrow-p"), RowState::Differed, false)];
+    let said = rote::intake::tried(rote::intake::DIFFERED, 2, 3);
     insta::assert_snapshot!(
         "attach-differed",
-        render(&rows, 0, Some("the two entries differ"), false, false)
+        render(&rows, 0, Some(&said), false, false)
+    );
+}
+
+#[test]
+fn a_retry_that_ran_out_says_what_it_cost_and_not_just_why() {
+    // The reason has been under the field for every round it took to get here.
+    // On its own it is one more of them; the card that stops has to say that it
+    // stopped.
+    let rows = vec![attach(name("escrow-p"), RowState::Differed, false)];
+    let said = format!("{} — nothing was attached", rote::intake::DIFFERED);
+    insta::assert_snapshot!(
+        "attach-gave-up",
+        render(&rows, 0, Some(&said), false, false)
     );
 }
 

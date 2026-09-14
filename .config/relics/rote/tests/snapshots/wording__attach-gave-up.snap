@@ -12,6 +12,6 @@ expression: "render(&rows, 0, Some(&said), false, false)"
 │   │                                                                  │   │
 │   ╰──────────────────────────────────────────────────────────────────╯   │
 │                                                                          │
-│   the two entries differ · try 2 of 3                         ^R  show   │
+│   the two entries differ — nothing was attached               ^R  show   │
 │                                                                          │
 ╰──────────────────────────────────────────────────────────────────────────╯

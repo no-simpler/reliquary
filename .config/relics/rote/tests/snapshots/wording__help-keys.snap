@@ -59,6 +59,11 @@ KEYS
   concede to. There is no lookup there either — offering one would imply that
   what is typed is being checked against something, and it is not.
 
+  Anywhere a secret is typed twice, the two have as many goes at agreeing as a
+  drill has tries, and the line under the field says which go this is. Every
+  refusal spends one, an empty entry included. When they run out the card says
+  what it cost and nothing is written.
+
   When nothing is due, bare rote asks whether you want to practice anyway. That
   is one keystroke and no return: y practices, any other key leaves it.
 

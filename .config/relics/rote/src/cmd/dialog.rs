@@ -92,14 +92,31 @@ pub fn working<T>(
     tui::while_working(console, &card, work)
 }
 
+/// One prompt's own words, carried together because they travel together.
+pub struct Asking<'a> {
+    /// The card's title, naming the instrument.
+    pub title: &'static str,
+    /// Whether anything here can check what is typed.
+    pub checked: Checked,
+    /// What is being asked about.
+    pub heading: &'a str,
+    /// What this prompt is for.
+    pub intention: &'a str,
+    /// What giving up here costs, said on the card that gives up.
+    ///
+    /// The reason has been on the screen for every round it took to get here.
+    /// Without this the last card is indistinguishable from one more of them.
+    pub cost: &'static str,
+}
+
 /// How a double entry ended.
 pub enum Twice {
     /// Both entries agreed.
     Agreed(Box<Secret>),
     /// The dialog was walked away from.
     Abandoned,
-    /// The rounds ran out with the two entries still apart.
-    Differed,
+    /// The rounds ran out, and this is what spent the last one.
+    Refused(&'static str),
 }
 
 /// Ask for a secret twice until the two agree, for as many rounds as the drill
@@ -118,18 +135,30 @@ pub fn twice(
     ctx: &Context,
 ) -> Result<Twice> {
     let mut pair = Pair::new(ctx.config.max_attempts());
-    let mut status: Option<&str> = None;
+    let mut status: Option<String> = None;
     loop {
         let asking = if pair.holds_one() { "again" } else { intention };
-        let Some(offered) = typed(console, today, title, checked, heading, asking, status)? else {
+        let Some(offered) = typed(
+            console,
+            today,
+            title,
+            checked,
+            heading,
+            asking,
+            status.as_deref(),
+        )?
+        else {
             return Ok(Twice::Abandoned);
         };
+        // Every refusal says which try the next one is. A bound nobody can see
+        // reads as no bound at all, which is what makes a person retype the
+        // same pair until they give up on the command rather than on the pair.
         match pair.offer(offered) {
             Pairing::Again => status = None,
             Pairing::Agreed(secret) => return Ok(Twice::Agreed(secret)),
-            Pairing::Differed => status = Some(DIFFERED),
-            Pairing::OutOfRounds => return Ok(Twice::Differed),
-            Pairing::Empty => status = Some(crate::intake::EMPTY),
+            Pairing::Differed => status = Some(pair.status(DIFFERED)),
+            Pairing::Empty => status = Some(pair.status(crate::intake::EMPTY)),
+            Pairing::OutOfRounds(reason) => return Ok(Twice::Refused(reason)),
         }
     }
 }
@@ -149,10 +178,16 @@ pub fn prove(
     piped: Option<Secret>,
     console: Option<&mut term::Terminal>,
     today: Date,
-    title: &'static str,
-    heading: &str,
+    asking: &Asking<'_>,
     ctx: &Context,
 ) -> Result<Option<u8>> {
+    let Asking {
+        title,
+        heading,
+        intention,
+        cost,
+        ..
+    } = *asking;
     if let Some(offered) = piped {
         return if current.accepts(&offered)? {
             Ok(None)
@@ -165,7 +200,7 @@ pub fn prove(
     };
     let tries = ctx.config.max_attempts();
     for attempt in 1..=tries {
-        let status = (attempt > 1).then(|| format!("{NOT_CURRENT} · try {attempt} of {tries}"));
+        let status = (attempt > 1).then(|| crate::intake::tried(NOT_CURRENT, attempt, tries));
         let Some(offered) = typed(
             console,
             today,
@@ -174,25 +209,20 @@ pub fn prove(
             // the whole point of asking for one.
             Checked::Yes,
             heading,
-            "prove the current secret before it is replaced",
+            intention,
             status.as_deref(),
         )?
         else {
             return abandoned(console, today, heading).map(Some);
         };
-        let held = working(
-            Some(console),
-            today,
-            title,
-            heading,
-            "prove the current secret before it is replaced",
-            || Ok(current.accepts(&offered)?),
-        )?;
+        let held = working(Some(console), today, title, heading, intention, || {
+            Ok(current.accepts(&offered)?)
+        })?;
         if held {
             return Ok(None);
         }
     }
-    refused(console, today, heading, NOT_CURRENT).map(Some)
+    refused(console, today, heading, NOT_CURRENT, cost).map(Some)
 }
 
 /// Close a dialog that was walked away from.
@@ -214,8 +244,27 @@ pub fn abandoned(console: &mut term::Terminal, today: Date, heading: &str) -> Re
 /// # Errors
 ///
 /// When the terminal cannot be written.
-pub fn refused(console: &mut term::Terminal, today: Date, heading: &str, text: &str) -> Result<u8> {
-    tui::outcome(console, today, heading, text, Tint::Red)?;
+pub fn refused(
+    console: &mut term::Terminal,
+    today: Date,
+    heading: &str,
+    reason: &str,
+    cost: &str,
+) -> Result<u8> {
+    // The reason has been on the screen for every round it took to get here, so
+    // on its own it reads as one more of them. What this card is for is the
+    // half that has not been said: the command has stopped, and it wrote
+    // nothing.
+    //
+    // Where the line cannot hold both, that is also which one survives — the
+    // same rule the hint under a field follows, and for the same reason.
+    let both = format!("{reason} — {cost}");
+    let said = if both.chars().count() <= tui::OUTCOME_ROOM {
+        both
+    } else {
+        cost.to_owned()
+    };
+    tui::outcome(console, today, heading, &said, Tint::Red)?;
     Ok(INCOMPLETE)
 }
 

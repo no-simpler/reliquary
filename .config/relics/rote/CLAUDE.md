@@ -282,6 +282,19 @@ Things a future edit must not undo.
   no other way to find the slip, and a command that exits on it makes the person
   retype everything from the start. At an attachment prompt an empty entry is
   **refused rather than conceded**: there is nothing there to concede to.
+- **A bounded retry says which try this is, every refusal spends one, and the
+  card that gives up says what it cost.** Three claims, and the loop is only
+  bounded in practice when all three hold. A bound nobody can see is
+  indistinguishable from no bound, so a person retypes until they give up on the
+  command rather than on the pair; one refusal that costs nothing — an empty
+  entry was the one — makes the loop unbounded however much the others cost; and
+  a last card that repeats the reason is a last card that reads as one more
+  round, because the reason is the half already on the screen. `intake::tried`
+  is the **one composer** for the count, shared by the drill try, the proof and
+  both double entries, so a fourth retry cannot grow its own wording. Where the
+  closing line cannot hold reason and cost together it keeps the cost:
+  `tui::OUTCOME_ROOM` is the budget and the caller does the dropping, the same
+  rule the hint under a field follows.
 - **A lapse is the ladder going back to the foot, and nothing else is one.**
   Practice moves no schedule, so a first-sample failure there is a *miss*, and
   `stats` counts it as one. The card, `stats` and `rote guide ladder` say the same

@@ -595,23 +595,26 @@ impl Session<'_> {
                     self.set(index, screen::RowState::Attached);
                     return Ok(false);
                 }
+                // Every refusal says which try the next one is, the same way a
+                // drill try and a proof do. A bound nobody can see reads as no
+                // bound at all.
                 Pairing::Differed => {
-                    status = Some(DIFFERED.to_owned());
+                    status = Some(pair.status(DIFFERED));
                     self.flash(index, status.clone(), false, &Field::resting(false))?;
                 }
-                Pairing::OutOfRounds => {
+                Pairing::Empty => {
+                    status = Some(pair.status(EMPTY));
+                    self.flash(index, status.clone(), false, &Field::resting(false))?;
+                }
+                Pairing::OutOfRounds(reason) => {
                     self.set(index, screen::RowState::Differed);
                     self.flash(
                         index,
-                        Some(DIFFERED.to_owned()),
+                        Some(format!("{reason} — nothing was attached")),
                         false,
                         &Field::resting(false),
                     )?;
                     return Ok(false);
-                }
-                Pairing::Empty => {
-                    status = Some(EMPTY.to_owned());
-                    self.flash(index, status.clone(), false, &Field::resting(false))?;
                 }
             }
         }
@@ -785,12 +788,8 @@ impl Prompt {
 
     /// What the line under the field says about how this drill is going.
     fn status(self, max_attempts: u8) -> Option<String> {
-        (self.missed && !self.exhausted).then(|| {
-            format!(
-                "not it · try {} of {max_attempts}",
-                self.ordinal.min(max_attempts)
-            )
-        })
+        (self.missed && !self.exhausted)
+            .then(|| crate::intake::tried(crate::intake::NOT_IT, self.ordinal, max_attempts))
     }
 }
 
