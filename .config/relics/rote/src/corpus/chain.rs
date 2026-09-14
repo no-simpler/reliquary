@@ -20,7 +20,7 @@ use camino::Utf8Path;
 use jiff::Timestamp;
 
 use super::record::{Digest, Line, Record, SCHEMA};
-use crate::machine::{ID_LEN, MachineId};
+use crate::machine::MachineId;
 
 /// The extension every chain wears.
 pub const EXTENSION: &str = "jsonl";
@@ -33,9 +33,6 @@ pub fn file_name(machine: &MachineId) -> String {
 /// The machine a filename names, when it names one at all.
 pub fn machine_of(file_name: &str) -> Option<MachineId> {
     let stem = file_name.strip_suffix(&format!(".{EXTENSION}"))?;
-    if stem.len() != ID_LEN {
-        return None;
-    }
     MachineId::try_from(stem.to_owned()).ok()
 }
 

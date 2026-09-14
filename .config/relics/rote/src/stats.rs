@@ -65,23 +65,35 @@ impl Retention {
 }
 
 /// One band of interval.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bucket {
-    /// How the band is spelled.
-    pub label: &'static str,
+    /// How the band is spelled, derived from what it covers.
+    pub label: String,
     /// Pass rate within it.
     pub retention: Retention,
 }
 
 /// The bands, in order. The tail is what irregular invocation populates, and
 /// with the ladder reaching a month the cap itself now lands in it.
-const BANDS: [(&str, u32, u32); 5] = [
-    ("1d", 0, 1),
-    ("2-4d", 2, 4),
-    ("5-8d", 5, 8),
-    ("9-30d", 9, 30),
-    ("31d+", 31, u32::MAX),
-];
+///
+/// Ranges only: a hand-written label beside a range is a second statement of
+/// the same fact, and the two had already parted — the first band covers a gap
+/// of zero days and was labelled `1d`, which reads as a point value. A drill
+/// taken the same day reported as a one-day interval is the one reading that
+/// undercuts the guide's claim about the effective interval being the honest
+/// one. [`band_label`] is now the only place a band is spelled.
+const BANDS: [(u32, u32); 5] = [(0, 1), (2, 4), (5, 8), (9, 30), (31, u32::MAX)];
+
+/// How a band is written, derived from what it covers so the two cannot part.
+fn band_label(low: u32, high: u32) -> String {
+    if high == u32::MAX {
+        format!("{low}d+")
+    } else if low == high {
+        format!("{low}d")
+    } else {
+        format!("{low}-{high}d")
+    }
+}
 
 /// Which way latency is moving.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -229,8 +241,8 @@ impl Stats {
             aided: Retention::default(),
             buckets: BANDS
                 .iter()
-                .map(|(label, _, _)| Bucket {
-                    label,
+                .map(|(low, high)| Bucket {
+                    label: band_label(*low, *high),
                     retention: Retention::default(),
                 })
                 .collect(),
@@ -298,7 +310,7 @@ fn in_window(day: Date, today: Date, window: u32) -> bool {
 fn band_of(buckets: &mut [Bucket], days: u32) -> Option<&mut Bucket> {
     let index = BANDS
         .iter()
-        .position(|(_, lo, hi)| days >= *lo && days <= *hi)?;
+        .position(|(low, high)| days >= *low && days <= *high)?;
     buckets.get_mut(index)
 }
 
@@ -703,9 +715,9 @@ mod tests {
         let one_day = stats
             .buckets
             .iter()
-            .find(|bucket| bucket.label == "1d")
+            .find(|bucket| bucket.label == "0-1d")
             .unwrap();
-        assert_eq!(one_day.retention.total, 2, "both land in the 1d band");
+        assert_eq!(one_day.retention.total, 2, "both land in the first band");
     }
 
     #[test]
@@ -842,5 +854,17 @@ mod tests {
         assert_eq!(median(&mut [4, 1, 2, 3]), Some(2));
         assert!(sparkline(&[]).is_empty());
         assert_eq!(sparkline(&[1, 2, 3]).chars().count(), 3);
+    }
+
+    #[test]
+    fn every_band_is_labelled_with_what_it_actually_covers() {
+        let labels: Vec<String> = super::BANDS
+            .iter()
+            .map(|(low, high)| super::band_label(*low, *high))
+            .collect();
+        assert_eq!(labels, ["0-1d", "2-4d", "5-8d", "9-30d", "31d+"]);
+        // A same-day drill is the case the guide's claim about effective
+        // intervals turns on, so the first band may never read as a point.
+        assert_eq!(super::band_label(0, 1), "0-1d");
     }
 }

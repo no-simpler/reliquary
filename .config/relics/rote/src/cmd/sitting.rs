@@ -34,7 +34,18 @@ pub fn daily(ctx: &Context, aided: bool) -> Result<u8> {
 
     let due = sitting::roster(&corpus, &verifiers, today, &ladder, Mode::Due, aided, &[]);
     if !due.is_empty() {
-        return work(ctx, &mut store, &verifiers, &ladder, today, &due, None);
+        return work(
+            ctx,
+            &mut store,
+            &Opening {
+                before: &corpus,
+                verifiers: &verifiers,
+                ladder: &ladder,
+                today,
+            },
+            &due,
+            None,
+        );
     }
 
     write_cache(ctx, &corpus, &verifiers, today, &ladder)?;
@@ -73,9 +84,12 @@ pub fn daily(ctx: &Context, aided: bool) -> Result<u8> {
     work(
         ctx,
         &mut store,
-        &verifiers,
-        &ladder,
-        today,
+        &Opening {
+            before: &corpus,
+            verifiers: &verifiers,
+            ladder: &ladder,
+            today,
+        },
         &roster,
         Some(console),
     )
@@ -114,19 +128,47 @@ pub fn practice(ctx: &Context, args: &PracticeArgs, aided: bool) -> Result<u8> {
         }
         return Ok(CLEAN);
     }
-    work(ctx, &mut store, &verifiers, &ladder, today, &roster, None)
+    work(
+        ctx,
+        &mut store,
+        &Opening {
+            before: &corpus,
+            verifiers: &verifiers,
+            ladder: &ladder,
+            today,
+        },
+        &roster,
+        None,
+    )
+}
+
+/// What a sitting starts from: the record and the day, as they stood before it.
+struct Opening<'a> {
+    /// The corpus as it was, so the closing card can read an edge rather than a
+    /// state.
+    before: &'a Corpus,
+    /// What this machine holds.
+    verifiers: &'a Verifiers,
+    /// The schedule.
+    ladder: &'a Ladder,
+    /// The drill day.
+    today: Date,
 }
 
 /// Run one roster to the end.
 fn work(
     ctx: &Context,
     store: &mut Store,
-    verifiers: &Verifiers,
-    ladder: &Ladder,
-    today: Date,
+    opening: &Opening<'_>,
     turns: &[Turn],
     open: Option<term::Terminal>,
 ) -> Result<u8> {
+    let Opening {
+        before,
+        verifiers,
+        ladder,
+        today,
+    } = *opening;
     let id = SittingId::mint()?;
     let mut console = match open {
         Some(console) => console,
@@ -217,7 +259,7 @@ fn work(
     let store = store.into_inner();
     let held = held.into_inner();
     let after = Corpus::replay(store.chains().records(), ladder);
-    let notes = closing_notes(turns, &after, &held);
+    let notes = closing_notes(turns, before, &after, &held);
     let closing = screen::card(
         &screen::Frame::done(today, &outturn.rows, &outturn, &notes),
         ctx.style,
@@ -238,25 +280,51 @@ fn work(
 
 /// What belongs under the closing card: a reading of the corpus *after* the
 /// sitting, which the sitting itself cannot know.
-fn closing_notes(turns: &[Turn], after: &Corpus, held: &Verifiers) -> Vec<String> {
+///
+/// Drift is read as an **edge** rather than a state. The standing claim about
+/// whether the vault and the verifier agree is `doctor`'s alone; what belongs
+/// here is the moment it changed, which is the moment a person is looking. An
+/// edge names a moment, so it cannot go stale the way a second copy of a
+/// standing claim does.
+fn closing_notes(
+    turns: &[Turn],
+    before: &Corpus,
+    after: &Corpus,
+    held: &Verifiers,
+) -> Vec<screen::Note> {
     let mut notes = Vec::new();
+    let drifted = |corpus: &Corpus, turn: &Turn| -> bool {
+        corpus
+            .lineage(&turn.slug)
+            .and_then(|lineage| lineage.dossier(&turn.engram))
+            .is_some_and(|dossier| dossier.aided_mismatch)
+    };
     for turn in turns {
         let Some(lineage) = after.lineage(&turn.slug) else {
             continue;
         };
-        let Some(dossier) = lineage.dossier(&turn.engram) else {
+        if lineage.dossier(&turn.engram).is_none() {
             continue;
-        };
+        }
         let label = after.label(&turn.engram);
+        let say = |said: &str| screen::Note {
+            label: label.clone(),
+            said: said.to_owned(),
+        };
         if turn.attaching() && held.holds(&turn.engram) {
-            notes.push(format!(
-                "{label}  attached — rote took your word for it, and checked nothing"
+            notes.push(say(
+                "attached — rote took your word for it, and checked nothing",
             ));
         }
-        if dossier.aided_mismatch {
-            notes.push(format!(
-                "{label}  the vault and the verifier disagree — confirm the item, then rote rotate"
-            ));
+        match (drifted(before, turn), drifted(after, turn)) {
+            (false, true) => notes.push(say(
+                "an aided capture was refused — the vault and the verifier hold \
+                 different secrets. Confirm which one is current, then rote rotate",
+            )),
+            (true, false) => notes.push(say(
+                "the vault and the verifier agree again — an aided capture passed",
+            )),
+            (false, false) | (true, true) => {}
         }
     }
     notes

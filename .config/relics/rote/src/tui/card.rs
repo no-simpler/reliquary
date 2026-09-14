@@ -31,14 +31,27 @@ const CONTENT_COL: usize = 4;
 /// Where text starts inside the entry field: its own border, then a space.
 const FIELD_TEXT_COL: usize = CONTENT_COL + 2;
 
-/// What a field looks like, which is the only thing on a card that changes
-/// colour to say something happened.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What a field looks like.
+///
+/// Two of these are where a prompt *rests*, and the third is a pulse. The
+/// resting tone says what kind of prompt this is; the pulse says what just
+/// happened to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Tone {
-    /// Nothing to report.
+    /// Nothing to report, and something here can check what is typed.
+    #[default]
     Calm,
-    /// Something was refused. Shown for a moment and then dropped: a mark that
-    /// stays makes every later glance re-read it.
+    /// Nothing here can check what is typed, and nothing will.
+    ///
+    /// The attachment prompt, and only it. It is the one place in the binary
+    /// where a wrong answer is accepted in silence and written into the record
+    /// as truth — so it does not wear the same grey as every prompt that does
+    /// check. Yellow rather than red: red is what a refusal costs, and nothing
+    /// here is being refused. Yellow already means *recorded, nothing judged*
+    /// on the closing card's `+`.
+    Unchecked,
+    /// Something was refused. A pulse, never a resting state: a mark that stays
+    /// makes every later glance re-read it.
     Alarm,
 }
 
@@ -46,6 +59,7 @@ impl Tone {
     fn tint(self) -> Tint {
         match self {
             Self::Calm => Tint::Dim,
+            Self::Unchecked => Tint::Yellow,
             Self::Alarm => Tint::Red,
         }
     }
@@ -208,6 +222,21 @@ impl Card {
         self
     }
 
+    /// Take the field away while something is in flight, keeping its lines.
+    ///
+    /// The box and its caret go the instant a secret is submitted, before the
+    /// verifier is entered. Leaving them up reads as a hang and asks a question
+    /// the screen has no answer to — *can I type yet* — where the honest answer
+    /// is no, and is worth saying. The three lines and the caret's absence are
+    /// the whole difference: every state of one window stays one rectangle in
+    /// one place.
+    pub fn waiting(&mut self, said: &str) -> &mut Self {
+        self.gap();
+        self.say(format!("  {said}"), Tint::Dim);
+        self.gap();
+        self
+    }
+
     /// Add a line.
     pub fn line(&mut self, piece: Piece) -> &mut Self {
         self.body.push(piece);
@@ -217,6 +246,38 @@ impl Card {
     /// Add an empty line.
     pub fn gap(&mut self) -> &mut Self {
         self.body.push(Piece::plain(String::new()));
+        self
+    }
+
+    /// Add prose under a lead, wrapped to fit rather than cut.
+    ///
+    /// Cutting takes the tail of a sentence, and the tail is where the point of
+    /// one usually is. Height is the axis a card can spend, so prose spends it.
+    /// Composed lines — a row, a tally's columns, a context line — do not come
+    /// through here: they are laid out in columns, and a wrapped column is not
+    /// a column. [`fit`] is theirs.
+    ///
+    /// The `lead` sits on the first line and sets the hanging indent, so what
+    /// follows reads as one block beneath it. It may be empty.
+    pub fn prose(&mut self, lead: &str, text: &str, lead_tint: Tint, tint: Tint) -> &mut Self {
+        let indent = lead.chars().count().min(CONTENT.saturating_sub(1));
+        let room = CONTENT.saturating_sub(indent).max(1);
+        let lines = wrap(text, room);
+        if lines.is_empty() {
+            if !lead.is_empty() {
+                self.say(lead.to_owned(), lead_tint);
+            }
+            return self;
+        }
+        for (index, line) in lines.into_iter().enumerate() {
+            let head = if index == 0 {
+                Piece::painted(lead.to_owned(), lead_tint, self.style)
+            } else {
+                Piece::plain(" ".repeat(indent))
+            };
+            let piece = join(&[head, Piece::painted(line, tint, self.style)]);
+            self.body.push(piece);
+        }
         self
     }
 
@@ -298,7 +359,19 @@ impl Card {
     /// it has outgrown [`CONTENT`] and loses its colour along with its tail,
     /// which is what makes the defect visible instead of silently breaking the
     /// box the way an over-long line otherwise would.
+    ///
+    /// In debug it is not a net at all but an assertion, which is the whole
+    /// point: the net is reached by wording, and wording is edited far from
+    /// here. Asserting at the one choke point every card passes through means
+    /// any test that renders any card catches an over-long line, with no
+    /// screen-by-screen upkeep and nothing to remember.
     fn edge(&self, piece: &Piece) -> String {
+        debug_assert!(
+            piece.width() <= CONTENT,
+            "a card line outgrew the box: {} columns of {CONTENT} in {:?}",
+            piece.width(),
+            piece.plain
+        );
         let (content, visible) = if piece.width() > CONTENT {
             (clip(&piece.plain), CONTENT)
         } else {
@@ -312,6 +385,90 @@ impl Card {
             self.style.dim("│")
         )
     }
+}
+
+/// Trim a line of separated parts to what the card will hold.
+///
+/// At a separator rather than mid-word, and without an ellipsis: a context line
+/// is a list of facts, and dropping whole facts off the end says less than
+/// showing half of one. Prose wraps instead — see [`Card::prose`].
+#[must_use]
+pub fn fit(text: &str) -> String {
+    fit_to(text, CONTENT)
+}
+
+/// [`fit`], to a column rather than to the whole line.
+#[must_use]
+pub fn fit_to(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        return text.to_owned();
+    }
+    let mut kept = String::new();
+    for part in text.split(" · ") {
+        let next = if kept.is_empty() {
+            part.to_owned()
+        } else {
+            format!("{kept} · {part}")
+        };
+        if next.chars().count() > width {
+            break;
+        }
+        kept = next;
+    }
+    if kept.is_empty() {
+        kept.extend(text.chars().take(width));
+    }
+    kept
+}
+
+/// Break prose at word boundaries into lines that fit.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        for piece in hard_break(word, width) {
+            let space = usize::from(!line.is_empty());
+            let would = line
+                .chars()
+                .count()
+                .saturating_add(space)
+                .saturating_add(piece.chars().count());
+            if !line.is_empty() && would > width {
+                lines.push(std::mem::take(&mut line));
+            }
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(&piece);
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/// A word too long for any line, cut into pieces that fit.
+///
+/// Nothing a slug or a sentence here produces reaches this. It is what stops
+/// one from breaking the box if one ever did.
+fn hard_break(word: &str, width: usize) -> Vec<String> {
+    if word.chars().count() <= width {
+        return vec![word.to_owned()];
+    }
+    let mut out = Vec::new();
+    let mut piece = String::new();
+    for character in word.chars() {
+        if piece.chars().count() >= width {
+            out.push(std::mem::take(&mut piece));
+        }
+        piece.push(character);
+    }
+    if !piece.is_empty() {
+        out.push(piece);
+    }
+    out
 }
 
 /// Cut a line down to [`CONTENT`] columns, ellipsis included.
@@ -359,13 +516,31 @@ mod tests {
 
     #[test]
     fn a_line_that_outgrew_the_card_is_cut_rather_than_breaking_the_box() {
+        // The net itself, called directly: rendering one asserts in debug,
+        // which is the point of having it.
+        let cut = super::clip(&"x".repeat(CONTENT + 20));
+        assert_eq!(cut.chars().count(), CONTENT);
+        assert!(cut.ends_with('…'));
+    }
+
+    #[test]
+    fn prose_too_wide_for_the_box_wraps_under_its_own_label() {
         let mut drawn = card();
-        drawn.say("x".repeat(CONTENT + 20), Tint::Dim);
+        drawn.prose("label  ", "word ".repeat(30).trim(), Tint::Dim, Tint::Dim);
         let lines = drawn.render();
         for line in &lines {
             assert_eq!(line.chars().count(), WIDTH, "{line}");
+            assert!(!line.contains('…'), "{line}");
         }
-        assert!(lines.iter().any(|line| line.contains('…')));
+        assert!(drawn.lines() > 1);
+    }
+
+    #[test]
+    fn a_word_wider_than_the_whole_box_is_broken_rather_than_dropped() {
+        let long = "x".repeat(CONTENT * 2 + 5);
+        let lines = super::wrap(&long, CONTENT);
+        assert_eq!(lines.concat(), long);
+        assert!(lines.iter().all(|line| line.chars().count() <= CONTENT));
     }
 
     #[test]

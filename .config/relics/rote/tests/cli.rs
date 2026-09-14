@@ -699,16 +699,53 @@ fn the_reminder_counts_and_never_names() {
 }
 
 #[test]
-fn the_reminder_reads_only_its_cache() {
+fn the_reminder_never_resolves_the_machine_identity() {
+    // It runs before every shell prompt through coop, so the subprocess that
+    // derives an identity is a cost it may never pay. A seam that cannot parse
+    // proves it: anything reaching for the identity would fail on it.
     let mut rote = Rote::new();
     rote.enroll(day(2020, 1, 1), "a", false);
     rote.cmd(&["status"]).assert().success();
-    // Everything else gone; the reminder still answers from the cache alone.
-    std::fs::remove_dir_all(rote.chains()).unwrap();
     rote.cmd(&["banner"])
+        .env("ROTE_MACHINE", "not-an-identity")
         .assert()
         .success()
         .stdout(predicate::str::contains("due"));
+}
+
+#[test]
+fn a_restored_machine_is_told_every_lineage_is_dormant() {
+    // The corpus comes back and the verifiers do not, which is the one state
+    // the attachment verb exists to serve — and the state that also destroys
+    // the cache the reminder used to depend on.
+    let mut rote = Rote::new();
+    rote.enroll(day(2020, 1, 1), "a", false);
+    rote.cmd(&["status"]).assert().success();
+    std::fs::remove_file(rote.verifiers_path()).unwrap();
+    std::fs::remove_file(rote.cache_path()).unwrap();
+    rote.cmd(&["banner"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dormant"));
+}
+
+#[test]
+fn a_verifier_taken_away_by_hand_is_noticed_without_a_restore() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2020, 1, 1), "a", false);
+    rote.cmd(&["status"]).assert().success();
+    // The cache still asserts the old answer; only the witness says otherwise.
+    std::fs::remove_file(rote.verifiers_path()).unwrap();
+    rote.cmd(&["banner"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dormant"));
+}
+
+#[test]
+fn a_reminder_with_nothing_to_say_says_nothing() {
+    let rote = Rote::new();
+    rote.cmd(&["banner"]).assert().success().stdout("");
 }
 
 // ── the files ────────────────────────────────────────────────────────────────
@@ -784,4 +821,79 @@ fn walk(root: &camino::Utf8Path) -> Vec<String> {
         out.push(path.to_string_lossy().into_owned());
     }
     out
+}
+
+#[test]
+fn drift_is_stated_by_doctor_and_restated_nowhere() {
+    // Drift is a defect with a remedy, and `assay` collects doctor's findings
+    // into `yadm doctor` — so doctor holds the standing claim (asserted next
+    // door) and the descriptive surfaces do not restate it. Two copies of one
+    // state is how they came to give opposite answers about it.
+    let mut rote = Rote::new();
+    let engram = rote.enroll(days_ago(40), "escrow-p", false);
+    rote.capture(
+        days_ago(2),
+        "escrow-p",
+        engram,
+        Drilled::aided(Outcome::Fail),
+    );
+
+    rote.cmd(&["status"])
+        .env("ROTE_UI", "human")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("disagree").not());
+    // A count, and nothing attached to it: the clause used to be present tense
+    // over a ninety-day window, and outlived the state it described.
+    rote.cmd(&["stats"])
+        .env("ROTE_UI", "human")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 refused"))
+        .stdout(predicate::str::contains("disagree").not());
+}
+
+#[test]
+fn a_later_aided_pass_clears_the_drift_and_leaves_the_count_behind() {
+    let mut rote = Rote::new();
+    let engram = rote.enroll(days_ago(40), "escrow-p", false);
+    rote.capture(
+        days_ago(3),
+        "escrow-p",
+        engram,
+        Drilled::aided(Outcome::Fail),
+    );
+    rote.capture(
+        days_ago(1),
+        "escrow-p",
+        engram,
+        Drilled::aided(Outcome::Pass),
+    );
+
+    rote.cmd(&["doctor"])
+        .env("ROTE_UI", "human")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("different secrets").not());
+    // The history is still history. It is a count and says so.
+    rote.cmd(&["stats"])
+        .env("ROTE_UI", "human")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 refused"));
+}
+
+#[test]
+fn the_first_interval_band_says_what_it_covers() {
+    let mut rote = Rote::new();
+    let engram = rote.enroll(days_ago(10), "escrow-p", false);
+    // Two drills on one day: an effective gap of zero, which the first band
+    // covers and used to report as a point value of one day.
+    rote.capture(days_ago(1), "escrow-p", engram, Drilled::passed());
+    rote.capture(days_ago(1), "escrow-p", engram, Drilled::passed());
+    rote.cmd(&["stats"])
+        .env("ROTE_UI", "human")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0-1d"));
 }

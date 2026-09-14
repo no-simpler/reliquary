@@ -39,11 +39,15 @@ pub fn open(stdin: bool, ctx: &Context) -> Result<Option<term::Terminal>> {
 pub fn typed(
     console: &mut term::Terminal,
     today: Date,
+    title: &'static str,
+    checked: Checked,
     heading: &str,
     intention: &str,
     status: Option<&str>,
 ) -> Result<Option<Secret>> {
     let prompt = tui::Ask {
+        title,
+        resting: checked.resting(),
         heading,
         intention,
         status,
@@ -54,6 +58,38 @@ pub fn typed(
         // the reader brought with them.
         tui::Typed::Skipped | tui::Typed::Aborted | tui::Typed::Lookup => Ok(None),
     }
+}
+
+/// Run something slow with the field taken down and the keyboard drained.
+///
+/// The dialogs mint and check verifiers outside `tui`, so this is where they
+/// meet the same policy the sitting gets: the box goes before the wait, and
+/// nothing typed into the wait reaches whatever card comes next. Without a
+/// terminal there is no box and nothing to drain, so the work simply runs.
+///
+/// # Errors
+///
+/// When the terminal cannot be written to, or the work itself fails.
+pub fn working<T>(
+    console: Option<&mut term::Terminal>,
+    today: Date,
+    title: &'static str,
+    heading: &str,
+    intention: &str,
+    work: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let Some(console) = console else {
+        return work();
+    };
+    let prompt = tui::Ask {
+        title,
+        resting: tui::card::Tone::Calm,
+        heading,
+        intention,
+        status: None,
+    };
+    let card = tui::waiting(console, today, &prompt);
+    tui::while_working(console, &card, work)
 }
 
 /// How a double entry ended.
@@ -75,6 +111,8 @@ pub enum Twice {
 pub fn twice(
     console: &mut term::Terminal,
     today: Date,
+    title: &'static str,
+    checked: Checked,
     heading: &str,
     intention: &str,
     ctx: &Context,
@@ -83,7 +121,7 @@ pub fn twice(
     let mut status: Option<&str> = None;
     loop {
         let asking = if pair.holds_one() { "again" } else { intention };
-        let Some(offered) = typed(console, today, heading, asking, status)? else {
+        let Some(offered) = typed(console, today, title, checked, heading, asking, status)? else {
             return Ok(Twice::Abandoned);
         };
         match pair.offer(offered) {
@@ -111,6 +149,7 @@ pub fn prove(
     piped: Option<Secret>,
     console: Option<&mut term::Terminal>,
     today: Date,
+    title: &'static str,
     heading: &str,
     ctx: &Context,
 ) -> Result<Option<u8>> {
@@ -130,6 +169,10 @@ pub fn prove(
         let Some(offered) = typed(
             console,
             today,
+            title,
+            // A proof is checked against the verifier it is proving, which is
+            // the whole point of asking for one.
+            Checked::Yes,
             heading,
             "prove the current secret before it is replaced",
             status.as_deref(),
@@ -137,7 +180,15 @@ pub fn prove(
         else {
             return abandoned(console, today, heading).map(Some);
         };
-        if current.accepts(&offered)? {
+        let held = working(
+            Some(console),
+            today,
+            title,
+            heading,
+            "prove the current secret before it is replaced",
+            || Ok(current.accepts(&offered)?),
+        )?;
+        if held {
             return Ok(None);
         }
     }
@@ -168,6 +219,37 @@ pub fn refused(console: &mut term::Terminal, today: Date, heading: &str, text: &
     Ok(INCOMPLETE)
 }
 
+/// Whether what a dialog wrote was checked against anything.
+///
+/// The same rule the sitting's glyphs hold: green is only ever something that
+/// stood up to a check. An attachment holds nothing to check against, by
+/// design, so closing it in green would claim a verdict nobody rendered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Checked {
+    /// The secret was proved, or freshly minted from two matching entries.
+    Yes,
+    /// Nothing here could check it, and nothing did.
+    No,
+}
+
+impl Checked {
+    /// What a closing card is tinted.
+    fn tint(self) -> Tint {
+        match self {
+            Self::Yes => Tint::Green,
+            Self::No => Tint::Yellow,
+        }
+    }
+
+    /// What the field rests as while it is being typed into.
+    fn resting(self) -> crate::tui::card::Tone {
+        match self {
+            Self::Yes => crate::tui::card::Tone::Calm,
+            Self::No => crate::tui::card::Tone::Unchecked,
+        }
+    }
+}
+
 /// Close a dialog on the outcome it was opened for, or say it on stdout when
 /// there was no dialog at all.
 ///
@@ -180,9 +262,10 @@ pub fn settled(
     today: Date,
     heading: &str,
     said: &str,
+    checked: Checked,
 ) -> Result<u8> {
     match console {
-        Some(console) => tui::outcome(console, today, heading, said, Tint::Green)?,
+        Some(console) => tui::outcome(console, today, heading, said, checked.tint())?,
         None => {
             if !ctx.quiet {
                 println!("{said}");

@@ -22,7 +22,7 @@ use jiff::civil::Date;
 
 use super::{Context, dialog, open_store, write_cache};
 use crate::cli::{AttachArgs, EnrollArgs, RetireArgs, RotateArgs};
-use crate::cmd::dialog::Twice;
+use crate::cmd::dialog::{Checked, Twice};
 use crate::corpus::record::{Attached, EngramId, Enrolled, Event, Retired, Rotated};
 use crate::corpus::{Corpus, Lineage};
 use crate::exit::{CLEAN, INCOMPLETE};
@@ -65,8 +65,14 @@ pub fn enroll(ctx: &Context, args: &EnrollArgs) -> Result<u8> {
         ctx,
         &mut console,
         today,
-        &heading,
-        "the secret this lineage will hold, typed twice",
+        &Asking {
+            title: "enroll",
+            // Typed twice and compared, which is the whole of the check there
+            // can be for a secret nothing else here has ever seen.
+            checked: Checked::Yes,
+            heading: &heading,
+            intention: "the secret this lineage will hold, typed twice",
+        },
         args.stdin,
     )?
     else {
@@ -74,7 +80,14 @@ pub fn enroll(ctx: &Context, args: &EnrollArgs) -> Result<u8> {
     };
 
     let engram = EngramId::mint()?;
-    let verifier = make_verifier(&secret)?;
+    let verifier = dialog::working(
+        console.as_mut(),
+        today,
+        "enroll",
+        &heading,
+        "the secret this lineage will hold, typed twice",
+        || make_verifier(&secret),
+    )?;
     drop(secret);
 
     let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
@@ -94,7 +107,7 @@ pub fn enroll(ctx: &Context, args: &EnrollArgs) -> Result<u8> {
     let after = Corpus::replay(store.chains().records(), &ladder);
     write_cache(ctx, &after, &verifiers, today, &ladder)?;
     let said = format!("{}@1 enrolled · first review tomorrow", args.slug);
-    dialog::settled(ctx, console.as_mut(), today, &heading, &said)
+    dialog::settled(ctx, console.as_mut(), today, &heading, &said, Checked::Yes)
 }
 
 /// `rote attach`.
@@ -121,29 +134,37 @@ pub fn attach(ctx: &Context, args: &AttachArgs) -> Result<u8> {
     // The accident guard: name what is being continued before asking for it, so
     // attaching the wrong lineage or the wrong generation has a moment to be
     // noticed. It is not a check — there is nothing here to check against.
-    let heading = if replacing {
+    let heading = crate::tui::card::fit(&if replacing {
         format!("{label} · replacing the verifier held here")
     } else {
-        format!(
-            "{label} · {}",
-            crate::sitting::describe(&label, dossier, today, &ladder)
-        )
-    };
+        crate::sitting::describe(&label, dossier, today, &ladder)
+    });
 
     let mut console = dialog::open(args.stdin, ctx)?;
     let Some(secret) = take_one(
         ctx,
         &mut console,
         today,
-        &heading,
-        "type it as you know it — nothing here can check it",
+        &Asking {
+            title: "attach",
+            checked: Checked::No,
+            heading: &heading,
+            intention: "type it as you know it — nothing here can check it",
+        },
         args.stdin,
     )?
     else {
         return Ok(INCOMPLETE);
     };
 
-    let verifier = make_verifier(&secret)?;
+    let verifier = dialog::working(
+        console.as_mut(),
+        today,
+        "attach",
+        &heading,
+        "type it as you know it — nothing here can check it",
+        || make_verifier(&secret),
+    )?;
     drop(secret);
     verifiers.set(engram, &args.slug, today, &verifier);
     verifiers.save(&ctx.paths.verifiers())?;
@@ -160,7 +181,7 @@ pub fn attach(ctx: &Context, args: &AttachArgs) -> Result<u8> {
     let after = Corpus::replay(store.chains().records(), &ladder);
     write_cache(ctx, &after, &verifiers, today, &ladder)?;
     let said = format!("{label} attached here · rote took your word for it");
-    dialog::settled(ctx, console.as_mut(), today, &heading, &said)
+    dialog::settled(ctx, console.as_mut(), today, &heading, &said, Checked::No)
 }
 
 /// `rote rotate`.
@@ -211,8 +232,15 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
     let mut console = dialog::open(args.stdin, ctx)?;
 
     if let Some(current) = current
-        && let Some(code) =
-            dialog::prove(&current, fed.pop(), console.as_mut(), today, &heading, ctx)?
+        && let Some(code) = dialog::prove(
+            &current,
+            fed.pop(),
+            console.as_mut(),
+            today,
+            "rotate",
+            &heading,
+            ctx,
+        )?
     {
         return Ok(code);
     }
@@ -221,8 +249,12 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
         ctx,
         &mut console,
         today,
-        &heading,
-        "the new secret, typed twice",
+        &Asking {
+            title: "rotate",
+            checked: Checked::Yes,
+            heading: &heading,
+            intention: "the new secret, typed twice",
+        },
         fed.pop(),
     )?
     else {
@@ -230,7 +262,14 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
     };
 
     let to = EngramId::mint()?;
-    let verifier = make_verifier(&secret)?;
+    let verifier = dialog::working(
+        console.as_mut(),
+        today,
+        "rotate",
+        &heading,
+        "the new secret, typed twice",
+        || make_verifier(&secret),
+    )?;
     drop(secret);
 
     // The rotation owes the secret it retires this: keyed by engram, setting the
@@ -258,7 +297,7 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
         .and_then(|lineage| lineage.ordinal(&to))
         .unwrap_or(1);
     let said = format!("{}@{ordinal} rotated · the ladder starts over", args.slug);
-    dialog::settled(ctx, console.as_mut(), today, &heading, &said)
+    dialog::settled(ctx, console.as_mut(), today, &heading, &said, Checked::Yes)
 }
 
 /// `rote retire`.
@@ -308,17 +347,28 @@ fn live<'a>(corpus: &'a Corpus, slug: &crate::slug::Slug) -> Result<&'a Lineage>
     Ok(lineage)
 }
 
+/// One prompt's own words, carried together because they travel together.
+struct Asking<'a> {
+    /// The card's title, naming the instrument.
+    title: &'static str,
+    /// Whether anything here can check what is typed.
+    checked: Checked,
+    /// What is being asked about.
+    heading: &'a str,
+    /// What this prompt is for.
+    intention: &'a str,
+}
+
 /// Take one secret, from a pipe once or from a terminal twice.
 fn take_one(
     ctx: &Context,
     console: &mut Option<term::Terminal>,
     today: Date,
-    heading: &str,
-    intention: &str,
+    asking: &Asking<'_>,
     stdin: bool,
 ) -> Result<Option<Secret>> {
     let fed = if stdin { dialog::piped(1)?.pop() } else { None };
-    settle(ctx, console, today, heading, intention, fed)
+    settle(ctx, console, today, asking, fed)
 }
 
 /// A secret from the pipe if there is one, else a double entry at the terminal.
@@ -326,10 +376,15 @@ fn settle(
     ctx: &Context,
     console: &mut Option<term::Terminal>,
     today: Date,
-    heading: &str,
-    intention: &str,
+    asking: &Asking<'_>,
     fed: Option<Secret>,
 ) -> Result<Option<Secret>> {
+    let Asking {
+        title,
+        checked,
+        heading,
+        intention,
+    } = *asking;
     if let Some(secret) = fed {
         if secret.is_empty() {
             bail!("{EMPTY}");
@@ -339,7 +394,7 @@ fn settle(
     let Some(console) = console.as_mut() else {
         bail!("--stdin wants the secret on its own line");
     };
-    match dialog::twice(console, today, heading, intention, ctx)? {
+    match dialog::twice(console, today, title, checked, heading, intention, ctx)? {
         Twice::Agreed(secret) => Ok(Some(*secret)),
         Twice::Abandoned => {
             dialog::abandoned(console, today, heading)?;

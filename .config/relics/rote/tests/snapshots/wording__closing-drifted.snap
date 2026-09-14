@@ -1,0 +1,18 @@
+---
+source: rote/tests/wording.rs
+assertion_line: 197
+expression: "closing(rows, captures, &notes)"
+---
+╭─ done ────────────────────────────────────────────────────── Sun 13 Sep ─╮
+│                                                                          │
+│     warmup-p  aided                       ✓  —   x2                      │
+│                                                                          │
+│   recorded  aided                                                        │
+│   warmup-p@1  an aided capture was refused — the vault and the           │
+│               verifier hold different secrets. Confirm which one is      │
+│               current, then rote rotate                                  │
+│                                                                          │
+│                                                                          │
+│   press any key                                                          │
+│                                                                          │
+╰──────────────────────────────────────────────────────────────────────────╯

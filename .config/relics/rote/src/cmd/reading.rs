@@ -122,7 +122,18 @@ pub fn status(ctx: &Context, args: &ScheduleArgs) -> Result<u8> {
     let _ = write_cache(ctx, &corpus, &verifiers, today, &ladder);
 
     let notes = status_notes(ctx, &rows, &verifiers);
-    let heading = format!("drills · {today} · {}", ctx.env.host);
+    let heading = match ctx.machine() {
+        Ok(machine) => format!(
+            "drills · {today} · {}",
+            crate::machine::label(&machine, &ctx.env.host)
+        ),
+        // No identity is its own finding, and doctor is where it is made. A
+        // reading still reads.
+        Err(_) => format!(
+            "drills · {today} · {}",
+            crate::machine::short_host(&ctx.env.host)
+        ),
+    };
     println!("{}", block(ctx, &heading, &table, &notes));
     Ok(CLEAN)
 }
@@ -142,12 +153,6 @@ fn status_notes(ctx: &Context, rows: &[Standing_<'_>], verifiers: &Verifiers) ->
         if matches!(here_state(row, verifiers), Held::Dormant) {
             notes.push(format!(
                 "{}: dormant here — the next sitting will ask you to attach it",
-                row.label()
-            ));
-        }
-        if row.dossier.aided_mismatch {
-            notes.push(format!(
-                "{}: an aided capture was refused — the vault and the verifier disagree",
                 row.label()
             ));
         }
@@ -309,12 +314,18 @@ fn stats_notes(stats: &Stats, ladder: &Ladder, lineage: bool) -> Vec<String> {
             rate(stats.practice)
         ));
         if stats.aided.total > 0 {
+            // A count over the window, and nothing more. Whether the vault and
+            // the verifier disagree *now* is a different question with a
+            // different answer — a refusal followed by a pass clears it — and
+            // it belongs to doctor, which reads the state rather than the
+            // history. Stating it from a historical count is how the two came
+            // to contradict each other.
             let refused = stats.aided.total.saturating_sub(stats.aided.passes);
             notes.push(format!(
                 "{} aided, in no figure above{}",
                 stats.aided.total,
                 if refused > 0 {
-                    format!(" · {refused} refused, so the vault and the verifier disagree")
+                    format!(" · {refused} refused")
                 } else {
                     String::new()
                 }
@@ -634,7 +645,7 @@ pub fn machines(ctx: &Context) -> Result<u8> {
     for (machine, host, count, first, last) in &rows {
         table.push(vec![
             machine.to_string(),
-            host.clone(),
+            crate::machine::short_host(host).to_owned(),
             count.to_string(),
             first.map_or_else(|| "—".to_owned(), |d| d.to_string()),
             last.map_or_else(|| "—".to_owned(), |d| d.to_string()),
@@ -650,15 +661,15 @@ pub fn machines(ctx: &Context) -> Result<u8> {
     let mut notes = Vec::new();
     match &mine {
         Some(machine) => notes.push(format!(
-            "this machine is {machine}, calling itself {}",
-            ctx.env.host
+            "this machine is {}",
+            crate::machine::label(machine, &ctx.env.host)
         )),
         None => notes.push("this machine has no stable identity, so rote cannot write".to_owned()),
     }
     if let (Some(machine), Some(state)) = (&mine, &state)
         && !state.writes_allowed()
     {
-        notes.push(state.refusal(&ctx.paths.marker, machine));
+        notes.push(state.refusal(&ctx.paths.marker, machine, &ctx.env.host));
     }
     println!("{}", block(ctx, "machines", &table, &notes));
     Ok(CLEAN)

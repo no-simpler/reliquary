@@ -78,7 +78,7 @@ pub fn open_context(global: &Global) -> Result<Context> {
         Format::from_process(global.format, "ROTE_UI")
     };
     let clock = Clock::new(
-        jiff::Timestamp::now(),
+        env.now.unwrap_or_else(jiff::Timestamp::now),
         jiff::tz::TimeZone::system(),
         config.rollover_hour(),
     );
@@ -211,6 +211,18 @@ fn write_cache(
     today: Date,
     ladder: &Ladder,
 ) -> Result<()> {
+    project(ctx, corpus, verifiers, today, ladder).save(&ctx.paths.cache())
+}
+
+/// The projection itself, so the reminder can redo it when its own copy has
+/// stopped answering for what is on disk.
+pub(super) fn project(
+    ctx: &Context,
+    corpus: &Corpus,
+    verifiers: &Verifiers,
+    today: Date,
+    ladder: &Ladder,
+) -> Cache {
     let mut due = Vec::new();
     let mut dormant = 0usize;
     for lineage in corpus.active() {
@@ -230,8 +242,9 @@ fn write_cache(
         v: crate::corpus::record::SCHEMA,
         due,
         dormant,
+        witness: crate::store::Witness::of(&ctx.paths),
+        built: Some(today),
     }
-    .save(&ctx.paths.cache())
 }
 
 /// Whether this machine may write, without taking the lock.

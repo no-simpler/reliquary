@@ -17,12 +17,17 @@ use super::{Outturn, Task, Turn};
 use crate::corpus::drill::Landing;
 use crate::ladder::Occasion;
 use crate::slug::Slug;
-use crate::tui::card::{CONTENT, Card, Piece, Reveal, Tone, join};
+use crate::tui::card::{CONTENT, Card, Piece, Reveal, Tone, fit, fit_to, join};
 
 /// What points at the engram being asked about.
 const MARKER: &str = "▸ ";
 
 /// The chip's column, wide enough for the fullest one.
+///
+/// A ceiling rather than a constant. A slug at [`crate::slug::MAX`] and a full
+/// chip together outgrow the box, and the chip is the only column here made of
+/// droppable facts — so it is the one that gives. [`chip_width`] spends what is
+/// left after the columns that cannot.
 const CHIP: usize = 28;
 
 /// The column holding one glyph of standing.
@@ -153,7 +158,19 @@ pub struct Frame<'a> {
     /// The sitting, once it is over.
     pub outturn: Option<&'a Outturn>,
     /// Closing lines, once it is over.
-    pub notes: &'a [String],
+    pub notes: &'a [Note],
+}
+
+/// One closing line: what it is about, and what it says.
+///
+/// Kept apart rather than joined by the caller, because the card wraps the
+/// saying under the label and only the card knows how wide it may be.
+#[derive(Clone, Debug)]
+pub struct Note {
+    /// The engram this is about.
+    pub label: String,
+    /// What is being said about it.
+    pub said: String,
 }
 
 impl<'a> Frame<'a> {
@@ -172,7 +189,7 @@ impl<'a> Frame<'a> {
     }
 
     /// The closing frame.
-    pub fn done(today: Date, rows: &'a [Row], outturn: &'a Outturn, notes: &'a [String]) -> Self {
+    pub fn done(today: Date, rows: &'a [Row], outturn: &'a Outturn, notes: &'a [Note]) -> Self {
         Self {
             today,
             rows,
@@ -186,14 +203,36 @@ impl<'a> Frame<'a> {
     }
 }
 
+/// What a row's prompt rests as when nothing has just been refused.
+///
+/// An attachment is the one prompt in the binary that can check nothing, so it
+/// is the one that does not rest calm. Every other prompt verifies or measures
+/// what was typed.
+#[must_use]
+pub fn resting(row: Option<&Row>) -> Tone {
+    match row.map(|row| &row.kind) {
+        Some(Kind::Attach { .. }) => Tone::Unchecked,
+        Some(Kind::Drill { .. }) | None => Tone::Calm,
+    }
+}
+
+/// What the card is titled, which says which instrument this is.
+fn title(frame: &Frame<'_>) -> &'static str {
+    if frame.outturn.is_some() {
+        return "done";
+    }
+    match frame.active.and_then(|index| frame.rows.get(index)) {
+        // Named on the border, so a reader who arrived here by accident sees
+        // it before reading a word of the prompt — and sees it in a terminal
+        // with no colour at all, where the field's tone says nothing.
+        Some(row) if matches!(row.kind, Kind::Attach { .. }) => "attach",
+        Some(_) | None => "rote",
+    }
+}
+
 /// Render one frame.
 pub fn card(frame: &Frame<'_>, style: Style) -> Card {
-    let title = if frame.outturn.is_some() {
-        "done"
-    } else {
-        "rote"
-    };
-    let mut card = Card::new(title, crate::tui::card::stamp(frame.today), style);
+    let mut card = Card::new(title(frame), crate::tui::card::stamp(frame.today), style);
     card.reserve(frame.rows.len().saturating_add(SLOTS));
     let names = frame
         .rows
@@ -201,12 +240,21 @@ pub fn card(frame: &Frame<'_>, style: Style) -> Card {
         .map(|row| row.slug.as_str().chars().count())
         .max()
         .unwrap_or(0);
+    // One width for every row, taken from the widest of each column, so the
+    // glyphs stay in one place however the chips are trimmed.
+    let chip = chip_width(frame, names, style);
 
     if frame.rows.is_empty() {
         card.say("nothing to drill", Tint::Dim);
     }
     for (index, row) in frame.rows.iter().enumerate() {
-        card.line(row_line(row, names, frame.active == Some(index), style));
+        card.line(row_line(
+            row,
+            names,
+            chip,
+            frame.active == Some(index),
+            style,
+        ));
     }
 
     if let Some(row) = frame.active.and_then(|index| frame.rows.get(index)) {
@@ -214,19 +262,46 @@ pub fn card(frame: &Frame<'_>, style: Style) -> Card {
         // Unconditional, so a drill's blank context line pads rather than
         // moving the field up into it.
         card.say(context(row), Tint::Dim);
-        card.say(intention(row), Tint::Dim);
-        // The sitting is blind, so there is nothing typed for the field to
-        // show. It is asked for anyway, through the one place in the binary
-        // where a typed secret becomes something on a screen.
-        card.entry(0, Reveal::Blind, frame.tone);
+        card.say(intention(row), intention_tint(row));
+        if row.state == RowState::Checking {
+            // Submitted, and the verifier is running. The box goes now rather
+            // than after: what is on the screen has to say whether typing does
+            // anything, and here it does not.
+            card.waiting(crate::tui::WORKING);
+        } else {
+            // The sitting is blind, so there is nothing typed for the field to
+            // show. It is asked for anyway, through the one place in the binary
+            // where a typed secret becomes something on a screen.
+            card.entry(0, Reveal::Blind, frame.tone);
+        }
         card.gap();
         card.line(under(frame, style));
     }
 
     if let Some(outturn) = frame.outturn {
-        card.gap().say(tally(outturn, frame.rows.len()), Tint::Bold);
+        // The tally names its own subject. It buckets each turn by its *first*
+        // capture, so a drill recovered with the vault still reads as the miss
+        // it opened with — true, and unreadable beside a row that says the
+        // sitting got there in the end, unless the two say what they are about.
+        card.gap().prose(
+            RECORDED,
+            &tally(outturn, frame.rows.len()),
+            Tint::Dim,
+            Tint::Bold,
+        );
+        let labels = frame
+            .notes
+            .iter()
+            .map(|note| note.label.chars().count())
+            .max()
+            .unwrap_or(0);
         for note in frame.notes {
-            card.say(note.clone(), Tint::Dim);
+            card.prose(
+                &format!("{:<width$}", note.label, width = labels.saturating_add(2)),
+                &note.said,
+                Tint::Dim,
+                Tint::Dim,
+            );
         }
         let last = frame.rows.len().saturating_add(SLOTS).saturating_sub(1);
         while card.lines() < last {
@@ -252,7 +327,7 @@ fn under(frame: &Frame<'_>, style: Style) -> Piece {
     ])
 }
 
-fn row_line(row: &Row, names: usize, active: bool, style: Style) -> Piece {
+fn row_line(row: &Row, names: usize, chips: usize, active: bool, style: Style) -> Piece {
     let marker = if active { MARKER } else { "  " };
     let (glyph, tint) = icon(row);
     join(&[
@@ -266,13 +341,48 @@ fn row_line(row: &Row, names: usize, active: bool, style: Style) -> Piece {
             Tint::Bold,
             style,
         ),
-        Piece::painted(format!("{:<CHIP$}", chip(row)), Tint::Dim, style),
+        Piece::painted(
+            format!("{:<chips$}", fit_to(&chip(row), chips)),
+            Tint::Dim,
+            style,
+        ),
         Piece::painted(format!("{glyph:<ICON$}"), tint, style),
         detail(row, style),
     ])
 }
 
+/// What the chip column may spend, once the columns that cannot give have.
+///
+/// The marker, the slug, the glyph and the detail are each as wide as their
+/// widest row and none of them is droppable — a trimmed slug names the wrong
+/// lineage and a trimmed latency is a wrong number. The chip is a list of
+/// separated facts, so it is the column that shortens.
+fn chip_width(frame: &Frame<'_>, names: usize, style: Style) -> usize {
+    let details = frame
+        .rows
+        .iter()
+        .map(|row| detail(row, style).width())
+        .max()
+        .unwrap_or(0);
+    let room = CONTENT
+        .saturating_sub(MARKER.chars().count())
+        .saturating_sub(names.saturating_add(2))
+        .saturating_sub(ICON)
+        .saturating_sub(details);
+    CHIP.min(room)
+}
+
 /// The one character that says where a row stands.
+///
+/// One rule over every state, so no screen decides this for itself: **green is
+/// only ever a clean pass — unaided, first try. Yellow is everything that got
+/// there another way. Red is a failure. Dim is nothing measured.**
+///
+/// A green tick on a drill that took three goes, or on one answered with the
+/// vault open, claims a verdict nobody rendered — the same reason an attachment
+/// lands on a yellow `+` and not a tick. The tally below says what went on the
+/// record; the glyph says how the sitting went, and the two now agree about
+/// which of them is which.
 fn icon(row: &Row) -> (&'static str, Tint) {
     match row.state {
         // The marker already says which row is being asked about, and a row
@@ -281,13 +391,20 @@ fn icon(row: &Row) -> (&'static str, Tint) {
             (" ", Tint::Dim)
         }
         RowState::Checking => ("·", Tint::Dim),
-        RowState::Passed { .. } => ("✓", Tint::Green),
-        // Something was added, and nothing was judged. A green tick would claim
-        // a verdict nobody rendered.
+        RowState::Passed { retries, .. } if retries == 0 && !aided(row) => ("✓", Tint::Green),
+        RowState::Passed { .. } => ("✓", Tint::Yellow),
         RowState::Attached => ("+", Tint::Yellow),
         RowState::Failed { .. } => ("✗", Tint::Red),
         RowState::Differed => ("–", Tint::Red),
         RowState::Skipped | RowState::Aborted => ("–", Tint::Dim),
+    }
+}
+
+/// Whether the vault was open for this row.
+fn aided(row: &Row) -> bool {
+    match row.kind {
+        Kind::Drill { aided, .. } => aided,
+        Kind::Attach { .. } => false,
     }
 }
 
@@ -354,28 +471,15 @@ fn context(row: &Row) -> String {
     }
 }
 
-/// Trim a context line to what the card will hold, at a separator rather than
-/// mid-word, so nothing real ever reaches the render choke point's net.
-fn fit(text: &str) -> String {
-    if text.chars().count() <= CONTENT {
-        return text.to_owned();
+/// How loudly the intention is said.
+///
+/// Only where nothing can check what is typed, which is where the sentence
+/// matters most and is least likely to be read.
+fn intention_tint(row: &Row) -> Tint {
+    match resting(Some(row)) {
+        Tone::Unchecked => Tint::Yellow,
+        Tone::Calm | Tone::Alarm => Tint::Dim,
     }
-    let mut kept = String::new();
-    for part in text.split(" · ") {
-        let next = if kept.is_empty() {
-            part.to_owned()
-        } else {
-            format!("{kept} · {part}")
-        };
-        if next.chars().count() > CONTENT {
-            break;
-        }
-        kept = next;
-    }
-    if kept.is_empty() {
-        kept.extend(text.chars().take(CONTENT));
-    }
-    kept
 }
 
 /// What this prompt is asking for, said where and when it applies.
@@ -401,6 +505,9 @@ fn intention(row: &Row) -> &'static str {
         },
     }
 }
+
+/// What the tally is a tally of.
+const RECORDED: &str = "recorded  ";
 
 /// How the sitting went, in one line.
 fn tally(outturn: &Outturn, turns: usize) -> String {
@@ -440,9 +547,9 @@ const ORDER: &[(Landing, &str, &str)] = &[
 #[cfg(test)]
 mod tests {
     use jiff::civil::date;
-    use relic_core::style::Style;
+    use relic_core::style::{Style, Tint};
 
-    use super::{Frame, Kind, Row, RowState, SLOTS, card, fit};
+    use super::{Frame, Kind, Note, Row, RowState, SLOTS, card, fit};
     use crate::corpus::record::Outcome;
     use crate::ladder::{Occasion, Rung};
     use crate::sitting::{Capture, Outturn};
@@ -553,7 +660,10 @@ mod tests {
             heights.push(card(&frame, Style::PLAIN).height());
         }
         let done = outturn();
-        let notes = vec!["a note".to_owned()];
+        let notes = vec![Note {
+            label: "escrow-p@2".to_owned(),
+            said: "a note".to_owned(),
+        }];
         heights.push(
             card(
                 &Frame::done(date(2026, 9, 13), &list, &done, &notes),
@@ -575,12 +685,63 @@ mod tests {
         for active in 0..list.len() {
             let frame = Frame::running(date(2026, 9, 13), &list, Some(active));
             let rendered = card(&frame, Style::PLAIN).render();
-            let found = rendered
-                .iter()
-                .position(|line| line.contains('╭') && !line.contains("rote"));
-            lines.push(found);
+            lines.push(field_line(&rendered));
         }
         assert!(lines.iter().all(|line| *line == lines[0]), "{lines:?}");
+    }
+
+    /// Where the field's own block begins, whichever of its two shapes it wears.
+    ///
+    /// A prompt being typed into draws a box; one waiting on its verifier draws
+    /// the same three lines with the box taken away. Both have to begin on the
+    /// same row or the window moves under the reader, which is the invariant.
+    fn field_line(rendered: &[String]) -> Option<usize> {
+        // The chrome's own top corner is line zero, and the title beside it may
+        // say anything, so it is skipped by position rather than by wording.
+        if let Some(found) = rendered
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find(|(_, line)| line.contains('╭'))
+        {
+            return Some(found.0);
+        }
+        rendered
+            .iter()
+            .position(|line| line.contains(crate::tui::WORKING))
+            .map(|line| line.saturating_sub(1))
+    }
+
+    #[test]
+    fn a_prompt_waiting_on_its_verifier_keeps_the_rectangle_and_drops_the_box() {
+        let list = vec![drill_row(
+            "escrow-p",
+            Occasion::Review,
+            false,
+            RowState::Checking,
+        )];
+        let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
+        let drawn = card(&frame, Style::PLAIN);
+        assert!(drawn.caret().is_none(), "no cursor where nothing is typed");
+        let rendered = drawn.render();
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains(crate::tui::WORKING))
+        );
+
+        let typing = vec![drill_row(
+            "escrow-p",
+            Occasion::Review,
+            false,
+            RowState::Active { attempt: 1 },
+        )];
+        let other = card(
+            &Frame::running(date(2026, 9, 13), &typing, Some(0)),
+            Style::PLAIN,
+        );
+        assert_eq!(drawn.height(), other.height());
+        assert_eq!(field_line(&rendered), field_line(&other.render()));
     }
 
     #[test]
@@ -700,6 +861,51 @@ mod tests {
             for line in card(&frame, Style::PLAIN).render() {
                 assert!(!line.contains("hunter2"), "{line}");
             }
+        }
+    }
+
+    #[test]
+    fn a_green_tick_is_only_ever_an_unaided_first_try_pass() {
+        let clean = RowState::Passed {
+            total_ms: Some(1_000),
+            retries: 0,
+        };
+        let retried = RowState::Passed {
+            total_ms: Some(1_000),
+            retries: 1,
+        };
+        assert_eq!(
+            super::icon(&drill_row("a", Occasion::Review, false, clean)),
+            ("✓", Tint::Green)
+        );
+        for row in [
+            drill_row("a", Occasion::Review, true, clean),
+            drill_row("a", Occasion::Review, false, retried),
+            drill_row("a", Occasion::Review, true, retried),
+        ] {
+            assert_eq!(super::icon(&row), ("✓", Tint::Yellow));
+        }
+    }
+
+    #[test]
+    fn nothing_that_was_not_measured_is_ever_green() {
+        // The whole vocabulary, so a new state cannot quietly claim a verdict:
+        // green is a clean pass and nothing else wears it.
+        let states = [
+            RowState::Pending,
+            RowState::Active { attempt: 1 },
+            RowState::Checking,
+            RowState::Claiming,
+            RowState::Confirming,
+            RowState::Attached,
+            RowState::Failed { attempt: 1 },
+            RowState::Differed,
+            RowState::Skipped,
+            RowState::Aborted,
+        ];
+        for state in states {
+            let (_, tint) = super::icon(&drill_row("a", Occasion::Review, false, state));
+            assert_ne!(tint, Tint::Green, "{state:?}");
         }
     }
 }

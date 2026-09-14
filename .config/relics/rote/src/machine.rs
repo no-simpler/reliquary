@@ -14,16 +14,36 @@
 //!
 //! What is stored is a truncated hash rather than the platform identifier,
 //! because only distinctness is needed and a device serial is not ours to keep.
+//! It is written as a **proquint** — see [`MachineId`] — because the identity
+//! has a second job the hash does not care about: a person accrues machines
+//! over the years and comes to recognise each one by the shape of its id.
 
 use anyhow::{Context as _, Result, anyhow};
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-/// Hex characters in a machine identity. Eight bytes of SHA-256.
-pub const ID_LEN: usize = 16;
+/// Syllables in an identity. Three of sixteen bits: forty-eight bits, which a
+/// person's machines will not collide in across a lifetime of them.
+const QUINTS: usize = 3;
+
+/// Characters in an identity: five to a syllable, hyphenated between.
+const ID_LEN: usize = QUINTS * 6 - 1;
+
+/// The shape an identity is written in, for the one error that has to say it.
+const ID_SHAPE: &str = "three hyphenated syllables, each a consonant, a vowel, \
+                        a consonant, a vowel and a consonant";
 
 /// A stable, opaque identity for one computer.
+///
+/// Written as a **proquint** — pronounceable quintuplets, a plain re-encoding of
+/// the same digest bits. Hex is unreadable in the way that matters here: two
+/// machines are told apart by eye, over and over, and `3b43d1cf` against
+/// `3b34d1cf` is one glance from a mistake. `lusab-babad-gutih` against
+/// `tomad-kifun-rasoz` is not, and it can be said aloud.
+///
+/// Lowercase throughout, so a case-insensitive filesystem can never see two
+/// identities as one chain.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct MachineId(String);
@@ -33,8 +53,12 @@ impl MachineId {
     pub fn of(source: &str) -> Self {
         let digest = Sha256::digest(source.as_bytes());
         let mut text = String::with_capacity(ID_LEN);
-        for byte in digest.iter().take(ID_LEN / 2) {
-            let _ = std::fmt::Write::write_fmt(&mut text, format_args!("{byte:02x}"));
+        let (pairs, _) = digest.as_chunks::<2>();
+        for (index, [high, low]) in pairs.iter().take(QUINTS).enumerate() {
+            if index > 0 {
+                text.push('-');
+            }
+            quint((u16::from(*high) << 8) | u16::from(*low), &mut text);
         }
         Self(text)
     }
@@ -45,17 +69,100 @@ impl MachineId {
     }
 
     /// Whether a string is shaped like an identity, without allocating one.
+    ///
+    /// A shape rather than a length, so a conflict copy of a chain file cannot
+    /// pass for a second machine however it was renamed.
     pub fn looks_like(text: &str) -> bool {
-        text.len() == ID_LEN
-            && text
-                .bytes()
-                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        let mut seen = 0usize;
+        for part in text.split('-') {
+            seen = seen.saturating_add(1);
+            if seen > QUINTS || !is_quint(part) {
+                return false;
+            }
+        }
+        seen == QUINTS
     }
+}
+
+/// One sixteen-bit syllable: consonant, vowel, consonant, vowel, consonant.
+fn quint(value: u16, out: &mut String) {
+    out.push(consonant(value >> 12));
+    out.push(vowel(value >> 10));
+    out.push(consonant(value >> 6));
+    out.push(vowel(value >> 4));
+    out.push(consonant(value));
+}
+
+/// The sixteen consonants, by their four bits. A match rather than a table so
+/// the mapping is total and needs no index.
+fn consonant(bits: u16) -> char {
+    match bits & 0xf {
+        0 => 'b',
+        1 => 'd',
+        2 => 'f',
+        3 => 'g',
+        4 => 'h',
+        5 => 'j',
+        6 => 'k',
+        7 => 'l',
+        8 => 'm',
+        9 => 'n',
+        10 => 'p',
+        11 => 'r',
+        12 => 's',
+        13 => 't',
+        14 => 'v',
+        _ => 'z',
+    }
+}
+
+/// The four vowels, by their two bits.
+fn vowel(bits: u16) -> char {
+    match bits & 0x3 {
+        0 => 'a',
+        1 => 'i',
+        2 => 'o',
+        _ => 'u',
+    }
+}
+
+/// Whether a byte is one of the sixteen.
+fn is_consonant(byte: u8) -> bool {
+    matches!(
+        byte,
+        b'b' | b'd'
+            | b'f'
+            | b'g'
+            | b'h'
+            | b'j'
+            | b'k'
+            | b'l'
+            | b'm'
+            | b'n'
+            | b'p'
+            | b'r'
+            | b's'
+            | b't'
+            | b'v'
+            | b'z'
+    )
+}
+
+/// Whether a byte is one of the four.
+fn is_vowel(byte: u8) -> bool {
+    matches!(byte, b'a' | b'i' | b'o' | b'u')
+}
+
+/// Whether a string is one syllable.
+fn is_quint(part: &str) -> bool {
+    let shape: [fn(u8) -> bool; 5] = [is_consonant, is_vowel, is_consonant, is_vowel, is_consonant];
+    let mut bytes = part.bytes();
+    shape.iter().all(|fits| bytes.next().is_some_and(fits)) && bytes.next().is_none()
 }
 
 /// A string that is not a machine identity.
 #[derive(Debug, thiserror::Error)]
-#[error("a machine identity is {ID_LEN} lowercase hex characters")]
+#[error("a machine identity is {ID_SHAPE}")]
 pub struct BadMachineId;
 
 impl TryFrom<String> for MachineId {
@@ -99,7 +206,7 @@ pub fn resolve(seam: Option<&str>) -> Result<MachineId> {
     let source = platform_identifier().ok_or_else(|| {
         anyhow!(
             "this platform offers no stable machine identifier, so rote cannot \
-             name its chain. Set ROTE_MACHINE to {ID_LEN} hex characters."
+             name its chain. Set ROTE_MACHINE to {ID_SHAPE}."
         )
     })?;
     Ok(MachineId::of(&source))
@@ -158,6 +265,23 @@ pub fn hostname() -> String {
             .into_string()
             .unwrap_or_else(|_| "unknown".to_owned())
     })
+}
+
+/// How a machine is named wherever one is named in prose.
+///
+/// Both halves, because neither is enough on its own: the identity is what is
+/// actually stable and actually keys the chain, and the hostname is what a
+/// person recognises. One function, so every surface says it the same way.
+pub fn label(machine: &MachineId, host: &str) -> String {
+    format!("{machine} ({})", short_host(host))
+}
+
+/// A hostname with the suffix mDNS gives it stripped off.
+///
+/// The suffix says which network answered for the name, which is not a fact
+/// about the machine and changes without it changing.
+pub fn short_host(host: &str) -> &str {
+    host.strip_suffix(".local").unwrap_or(host)
 }
 
 /// Where the marker lives when nothing overrides it.
@@ -230,7 +354,7 @@ impl Flagship {
     }
 
     /// Why not, in the words a person needs to fix it.
-    pub fn refusal(&self, path: &Utf8Path, machine: &MachineId) -> String {
+    pub fn refusal(&self, path: &Utf8Path, machine: &MachineId, host: &str) -> String {
         match self {
             Self::Here => String::new(),
             Self::Absent => format!(
@@ -240,7 +364,8 @@ impl Flagship {
             ),
             Self::Elsewhere { named } => format!(
                 "the flagship marker names another machine, so rote will not write here.\n\
-                 {path} names {named}, and this machine is {machine}."
+                 {path} names {named}, and this machine is {}.",
+                label(machine, host)
             ),
         }
     }
@@ -250,12 +375,32 @@ impl Flagship {
 mod tests {
     use camino::Utf8PathBuf;
 
-    use super::{Flagship, ID_LEN, MachineId, marker_path, parse_ioreg};
+    use super::{Flagship, ID_LEN, MachineId, QUINTS, marker_path, parse_ioreg};
+
+    /// The inverse of `quint`, which only a test needs: the property worth
+    /// asserting is that the encoding loses nothing, and nothing in the binary
+    /// reads an identity back apart.
+    fn unquint(part: &str) -> Option<u16> {
+        const CONSONANTS: &str = "bdfghjklmnprstvz";
+        const VOWELS: &str = "aiou";
+        let mut value = 0u16;
+        for (index, character) in part.chars().enumerate() {
+            let (table, width) = if index % 2 == 0 {
+                (CONSONANTS, 4)
+            } else {
+                (VOWELS, 2)
+            };
+            let position = u16::try_from(table.find(character)?).ok()?;
+            value = (value << width) | position;
+        }
+        Some(value)
+    }
 
     #[test]
     fn an_identity_is_a_truncated_hash_and_never_the_source() {
         let id = MachineId::of("ABCDEF01-2345-6789-ABCD-EF0123456789");
         assert_eq!(id.as_str().len(), ID_LEN);
+        assert_eq!(id.as_str().split('-').count(), QUINTS);
         assert!(MachineId::looks_like(id.as_str()));
         assert!(
             !id.as_str().contains("ABCDEF"),
@@ -314,7 +459,7 @@ mod tests {
         let path = Utf8PathBuf::from("/tmp/flagship");
         let state = Flagship::Absent;
         assert!(!state.writes_allowed());
-        let said = state.refusal(&path, &machine);
+        let said = state.refusal(&path, &machine, "Testbed");
         assert!(said.contains("Reads are fine"));
         assert!(said.contains(machine.as_str()), "it names what to write");
     }
@@ -354,6 +499,49 @@ mod tests {
             }
         );
         assert!(!state.writes_allowed());
-        assert!(state.refusal(&path, &machine).contains(other.as_str()));
+        assert!(
+            state
+                .refusal(&path, &machine, "Testbed")
+                .contains(other.as_str())
+        );
+    }
+
+    proptest::proptest! {
+        /// The encoding is a re-spelling and not a lossy one: every syllable
+        /// carries its sixteen bits back out again.
+        #[test]
+        fn a_syllable_carries_every_bit_it_was_given(value: u16) {
+            let mut text = String::new();
+            super::quint(value, &mut text);
+            proptest::prop_assert_eq!(unquint(&text), Some(value));
+        }
+
+        /// Distinct sources are distinct machines, which is the whole job.
+        #[test]
+        fn two_sources_that_differ_name_two_machines(left: String, right: String) {
+            proptest::prop_assume!(left != right);
+            proptest::prop_assert_ne!(MachineId::of(&left), MachineId::of(&right));
+        }
+    }
+
+    #[test]
+    fn only_the_written_shape_is_an_identity() {
+        for text in [
+            "",
+            "lusab",
+            "lusab-babad",
+            "lusab-babad-gutih-lusab",
+            "lusab babad gutih",
+            "LUSAB-BABAD-GUTIH",
+            "lusab-babad-gutih ",
+            "3b43d1cf18a69c61",
+            // A conflict copy of a chain, which must never read as a machine.
+            "lusab-babad-gutih (1)",
+            // Right length, wrong alphabet: e is not a vowel here.
+            "lesab-babad-gutih",
+        ] {
+            assert!(!MachineId::looks_like(text), "{text}");
+        }
+        assert!(MachineId::looks_like("lusab-babad-gutih"));
     }
 }

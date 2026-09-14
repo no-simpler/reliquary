@@ -206,7 +206,16 @@ mod tests {
         let _ = Lock::acquire(&path, Wait::Until(budget));
         let waited = started.elapsed();
         assert!(waited >= budget, "gave up early: {waited:?}");
-        assert!(waited < budget * 4, "overshot the bound: {waited:?}");
+        // A generous ceiling on purpose. The property worth holding is that a
+        // bounded wait returns rather than blocking forever; how soon after the
+        // bound it returns is the scheduler's business, and asserting on it at
+        // four times the budget is asserting on how loaded the box is. Eighty
+        // milliseconds against a suite that runs one process per test — under
+        // coverage instrumentation, no less — is a flake with a reason.
+        assert!(
+            waited < Duration::from_secs(5),
+            "never came back: {waited:?}"
+        );
     }
 
     #[test]

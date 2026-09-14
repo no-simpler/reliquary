@@ -657,19 +657,33 @@ mod tests {
 
     #[test]
     fn the_probes_run_at_once_rather_than_one_after_another() {
+        // Asserted by overlap rather than by elapsed time. A wall-clock ceiling
+        // over six sleeping probes measures how loaded the box is as much as it
+        // measures concurrency, and it is the kind of bound that goes red on a
+        // busy machine and teaches people to re-run a red suite. Each probe
+        // says when it starts and when it stops; if every one of them had
+        // started before any of them had stopped, they were running together,
+        // and no duration appears in the assertion at all.
         let machine = Machine::new();
         let names = ["a", "b", "c", "d", "e", "f"];
+        let marks = machine.home.join("marks");
         machine.registry(&names.join("\n"));
         for name in names {
-            machine.binary(name, "#!/bin/sh\nsleep 0.4\nexit 2\n");
+            machine.binary(
+                name,
+                &format!(
+                    "#!/bin/sh\necho start >> {marks}\nsleep 0.4\necho end >> {marks}\nexit 2\n"
+                ),
+            );
         }
 
-        let started = std::time::Instant::now();
         let _ = machine.outcome();
+        let seen = fs_err::read_to_string(&marks).expect("the marks");
+        let order: Vec<&str> = seen.lines().collect();
+        assert_eq!(order.len(), names.len() * 2, "{seen}");
         assert!(
-            started.elapsed() < Duration::from_millis(1600),
-            "six 400ms probes took {:?}, which is serial",
-            started.elapsed()
+            order.iter().take(names.len()).all(|mark| *mark == "start"),
+            "a probe finished before another had started, so they ran in turn: {seen}"
         );
     }
 

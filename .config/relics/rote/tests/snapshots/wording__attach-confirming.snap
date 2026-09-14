@@ -1,8 +1,9 @@
 ---
 source: rote/tests/wording.rs
+assertion_line: 106
 expression: "render(&rows, 0, None, false)"
 ---
-╭─ rote ────────────────────────────────────────────────────── Sun 13 Sep ─╮
+╭─ attach ──────────────────────────────────────────────────── Sun 13 Sep ─╮
 │                                                                          │
 │   ▸ escrow-p  attach · dormant here                                      │
 │                                                                          │

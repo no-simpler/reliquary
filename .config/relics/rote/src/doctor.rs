@@ -63,6 +63,8 @@ pub struct Health<'a> {
     pub paths: &'a Paths,
     /// This machine.
     pub machine: &'a MachineId,
+    /// What it calls itself.
+    pub host: &'a str,
     /// Whether it may write.
     pub flagship: &'a Flagship,
     /// The drill day.
@@ -425,7 +427,11 @@ fn machine_findings(health: &Health<'_>) -> Vec<Finding> {
                 .note(summary(
                     "this machine is not the flagship, so rote will not write here",
                 ))
-                .detailed_with(Detail::new(format!("{} is absent", health.paths.marker))),
+                .detailed_with(Detail::new(format!(
+                    "{} is absent\nthis machine is {}",
+                    health.paths.marker,
+                    crate::machine::label(health.machine, health.host)
+                ))),
         ],
         Flagship::Elsewhere { named } => vec![
             machine_station()
@@ -434,7 +440,8 @@ fn machine_findings(health: &Health<'_>) -> Vec<Finding> {
                 ))
                 .detailed_with(Detail::new(format!(
                     "{} names {named}\nthis machine is {}",
-                    health.paths.marker, health.machine
+                    health.paths.marker,
+                    crate::machine::label(health.machine, health.host)
                 ))),
         ],
     }

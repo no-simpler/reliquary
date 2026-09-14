@@ -155,6 +155,8 @@ impl Rote {
             .env("ROTE_FLAGSHIP", self.marker.as_str())
             .env("ROTE_MACHINE", self.machine.to_string())
             .env("ROTE_HOST", "Scratch")
+            // One instant for the harness and the binary both.
+            .env("ROTE_NOW", now().to_string())
             .env("HOME", self.home.as_str())
             // Pin the shape so assertions do not depend on a tty.
             .env("CLAUDECODE", "1")
@@ -545,10 +547,22 @@ pub fn day(year: i16, month: i8, date: i8) -> Date {
     jiff::civil::date(year, month, date)
 }
 
+/// The instant this test process runs at, taken once and never again.
+///
+/// The harness and the binary each used to ask the wall clock what day it was,
+/// which is two answers wherever a run straddles the rollover hour — a real
+/// disagreement for a few minutes every morning, and one nobody would ever
+/// reproduce. Taken once here and handed to the binary through `ROTE_NOW`, it
+/// is one answer by construction.
+pub fn now() -> jiff::Timestamp {
+    static NOW: std::sync::OnceLock<jiff::Timestamp> = std::sync::OnceLock::new();
+    *NOW.get_or_init(jiff::Timestamp::now)
+}
+
 /// The drill day the binary will believe it is, computed the way it does.
 pub fn today() -> Date {
     rote::store::Clock::new(
-        jiff::Timestamp::now(),
+        now(),
         jiff::tz::TimeZone::system(),
         rote::config::DEFAULT_ROLLOVER_HOUR,
     )

@@ -82,15 +82,34 @@ pub trait Screen {
     /// When the terminal cannot be written to.
     fn paint(&mut self, card: &Card) -> Result<()>;
 
-    /// Show a card for a moment, then carry on.
+    /// Pulse a card, and return when it has been seen or interrupted.
     ///
-    /// What a refusal gets instead of a mark that stays on the screen: the eye
-    /// catches the change, and the next glance is not re-reading it.
+    /// What a refusal's *colour* gets instead of a mark that stays on the
+    /// screen: the eye catches the change, and the next glance is not
+    /// re-reading it. What the refusal said is not on this clock — see
+    /// `refuse`.
+    ///
+    /// It is a ceiling and never a wait. Anything typed into it ends it and is
+    /// handed on rather than swallowed, because the program is idle here and
+    /// could have acted on that key.
     ///
     /// # Errors
     ///
     /// When the terminal cannot be written to.
     fn flash(&mut self, card: &Card) -> Result<()>;
+
+    /// Throw away whatever was typed while the program could not act.
+    ///
+    /// The other half of the policy [`Screen::flash`] holds. Where the program
+    /// is idle a keystroke is delivered; where it is busy — minting or checking
+    /// a verifier, which is deliberately slow — it is dropped. Otherwise a key
+    /// struck into the pause arrives at whatever comes next and dismisses it
+    /// before it has been read, or lands in the field for a different secret.
+    ///
+    /// # Errors
+    ///
+    /// When the terminal cannot be read.
+    fn drain(&mut self) -> Result<()>;
 
     /// Hold the finished card until a key is pressed.
     ///
@@ -176,14 +195,6 @@ impl Refusal {
             Self::Full => Some("that is longer than a secret this tool will take"),
         }
     }
-
-    /// What the field looks like while it is being said.
-    pub fn tone(self) -> card::Tone {
-        match self {
-            Self::None => card::Tone::Calm,
-            Self::Paste | Self::Full => card::Tone::Alarm,
-        }
-    }
 }
 
 /// Read one secret, blind.
@@ -203,13 +214,15 @@ pub fn read_secret(
     console: &mut dyn Console,
     lookup: bool,
     paste: bool,
-    card: &mut dyn FnMut(Refusal) -> Card,
+    resting: card::Tone,
+    card: &mut dyn FnMut(Refusal, card::Tone) -> Card,
 ) -> Result<Typed> {
     let mut secret = Secret::new();
     let mut ttfk: Option<u64> = None;
     let mut corrections = 0u32;
     let mut accepted = 0u32;
     let mut refused = 0u32;
+    let mut standing = Refusal::None;
     console.arm();
     loop {
         let Some(key) = console.next()? else {
@@ -220,20 +233,25 @@ pub fn read_secret(
                 if ttfk.is_none() {
                     ttfk = Some(console.elapsed_ms());
                 }
-                if !secret.push(character) {
-                    refuse(console, card, Refusal::Full)?;
+                if secret.push(character) {
+                    moved_on(console, card, &mut standing, resting)?;
+                } else {
+                    standing = Refusal::Full;
+                    refuse(console, card, Refusal::Full, resting)?;
                 }
             }
             Key::Backspace => {
                 if secret.pop() {
                     corrections = corrections.saturating_add(1);
                 }
+                moved_on(console, card, &mut standing, resting)?;
             }
             Key::Clear => {
                 if !secret.is_empty() {
                     secret.clear();
                     corrections = corrections.saturating_add(1);
                 }
+                moved_on(console, card, &mut standing, resting)?;
             }
             Key::Enter => {
                 let elapsed = console.elapsed_ms();
@@ -260,29 +278,61 @@ pub fn read_secret(
             Key::Paste(text) if paste => {
                 if secret.push_str(text.expose()) {
                     accepted = accepted.saturating_add(1);
+                    moved_on(console, card, &mut standing, resting)?;
                 } else {
                     refused = refused.saturating_add(1);
-                    refuse(console, card, Refusal::Full)?;
+                    standing = Refusal::Full;
+                    refuse(console, card, Refusal::Full, resting)?;
                 }
             }
             Key::Paste(_) => {
                 refused = refused.saturating_add(1);
-                refuse(console, card, Refusal::Paste)?;
+                standing = Refusal::Paste;
+                refuse(console, card, Refusal::Paste, resting)?;
             }
         }
     }
 }
 
-/// A flash and back to calm: the shape every refusal takes.
+/// The shape every refusal takes: a pulse, and something that stays said.
+///
+/// The two have different lifetimes on purpose. The red border is a pulse
+/// because nothing red may sit on the screen making every later glance re-read
+/// it. What the refusal *said* stays, because it is the half a person has to
+/// read, and a message timed out from under a reader is a message that was not
+/// delivered. [`moved_on`] takes it down.
 fn refuse(
     console: &mut dyn Console,
-    card: &mut dyn FnMut(Refusal) -> Card,
+    card: &mut dyn FnMut(Refusal, card::Tone) -> Card,
     refusal: Refusal,
+    resting: card::Tone,
 ) -> Result<()> {
-    let drawn = card(refusal);
-    console.flash(&drawn)?;
-    let calm = card(Refusal::None);
-    console.paint(&calm)
+    let alarmed = card(refusal, card::Tone::Alarm);
+    console.flash(&alarmed)?;
+    let settled = card(refusal, resting);
+    console.paint(&settled)
+}
+
+/// Take down what a refusal said, the moment the reader carries on typing.
+///
+/// Starting to type is the signal: it says the message was read, or that it no
+/// longer matters, and either way it is no longer what the reader is doing. No
+/// timer can know that, which is why there is not one.
+///
+/// The repaint is explicit because the field is blind — an ordinary keystroke
+/// changes nothing on the screen, so nothing else would redraw it.
+fn moved_on(
+    console: &mut dyn Console,
+    card: &mut dyn FnMut(Refusal, card::Tone) -> Card,
+    standing: &mut Refusal,
+    resting: card::Tone,
+) -> Result<()> {
+    if *standing == Refusal::None {
+        return Ok(());
+    }
+    *standing = Refusal::None;
+    let settled = card(Refusal::None, resting);
+    console.paint(&settled)
 }
 
 /// Lines a one-secret dialog holds: a heading, air, the intention, the three of
@@ -291,6 +341,13 @@ const ASK_SLOTS: usize = 8;
 
 /// One prompt, as the person in front of it reads it.
 pub struct Ask<'a> {
+    /// What the card is titled, on the border above the heading.
+    ///
+    /// A title carries where colour cannot: it survives a terminal with none,
+    /// and a reader who arrived here by accident reads it before anything else.
+    pub title: &'static str,
+    /// Whether anything here can check what is typed. See [`card::Tone`].
+    pub resting: card::Tone,
     /// What is being asked about.
     pub heading: &'a str,
     /// What this prompt is for, said where it applies.
@@ -315,23 +372,71 @@ pub struct Ask<'a> {
 /// When the terminal cannot be read or written.
 pub fn ask(console: &mut dyn Console, today: jiff::civil::Date, prompt: &Ask<'_>) -> Result<Typed> {
     let style = console.style();
-    let mut build = |refusal: Refusal| {
-        let mut drawn = Card::new("rote", card::stamp(today), style);
+    let intention = if prompt.resting == card::Tone::Unchecked {
+        Tint::Yellow
+    } else {
+        Tint::Dim
+    };
+    let mut build = |refusal: Refusal, tone: card::Tone| {
+        let mut drawn = Card::new(prompt.title, card::stamp(today), style);
         drawn.reserve(ASK_SLOTS);
         drawn.say(prompt.heading, Tint::Bold).gap();
         // Unconditional, so an empty intention pads its line rather than moving
         // the field up into it.
-        drawn.say(prompt.intention, Tint::Dim);
-        drawn.entry(0, card::Reveal::Blind, refusal.tone());
+        drawn.say(prompt.intention, intention);
+        drawn.entry(0, card::Reveal::Blind, tone);
         drawn.gap();
         let under = refusal.status().or(prompt.status).unwrap_or("");
         drawn.say(under, Tint::Dim);
         drawn
     };
-    let opening = build(Refusal::None);
+    let opening = build(Refusal::None, prompt.resting);
     console.anchor(opening.height());
     console.paint(&opening)?;
-    read_secret(console, false, true, &mut build)
+    read_secret(console, false, true, prompt.resting, &mut build)
+}
+
+/// What the field says while a verifier is being minted or checked.
+pub const WORKING: &str = "checking";
+
+/// Hold the screen still while something slow happens, and swallow what is
+/// typed at it.
+///
+/// argon2id at these parameters is half a second by design — a verifier that
+/// is cheap to check is a verifier that is cheap to attack. The work is right;
+/// only its presentation was wrong. Two things are owed to a reader here: the
+/// input box goes *before* the wait rather than after it, and nothing struck
+/// into the wait survives it.
+///
+/// # Errors
+///
+/// When the terminal cannot be written to, or the work itself fails.
+pub fn while_working<T>(
+    console: &mut dyn Console,
+    card: &Card,
+    work: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    console.paint(card)?;
+    let done = work();
+    // Drained whether the work succeeded or not: what follows a failure is a
+    // card to read just as much as what follows a success.
+    console.drain()?;
+    done
+}
+
+/// The card a prompt shows while it is waiting on its own verifier.
+///
+/// Built from the same parts and the same reservation as [`ask`], so the box
+/// does not move between the two.
+pub fn waiting(console: &dyn Console, today: jiff::civil::Date, prompt: &Ask<'_>) -> Card {
+    let mut drawn = Card::new(prompt.title, card::stamp(today), console.style());
+    drawn.reserve(ASK_SLOTS);
+    drawn.say(prompt.heading, Tint::Bold).gap();
+    drawn.say(prompt.intention, Tint::Dim);
+    drawn.waiting(WORKING);
+    drawn.gap();
+    drawn.say("", Tint::Dim);
+    drawn
 }
 
 /// Ask a yes-or-no question and read one keystroke.
@@ -418,6 +523,7 @@ mod tests {
         keys: std::vec::IntoIter<Key>,
         frames: Vec<Vec<String>>,
         flashes: usize,
+        drains: usize,
         anchored: usize,
     }
 
@@ -427,6 +533,7 @@ mod tests {
                 keys: keys.into_iter(),
                 frames: Vec::new(),
                 flashes: 0,
+                drains: 0,
                 anchored: 0,
             }
         }
@@ -463,6 +570,11 @@ mod tests {
             self.paint(card)
         }
 
+        fn drain(&mut self) -> anyhow::Result<()> {
+            self.drains = self.drains.saturating_add(1);
+            Ok(())
+        }
+
         fn hold(&mut self) -> anyhow::Result<()> {
             Ok(())
         }
@@ -480,14 +592,30 @@ mod tests {
 
     /// Read one secret from a scripted terminal under one paste policy.
     fn read(keys: Vec<Key>, allowed: bool) -> (Typed, Vec<Refusal>, usize) {
+        let (typed, drawn, flashes) = read_drawing(keys, allowed);
+        let refusals = drawn.into_iter().map(|(refusal, _)| refusal).collect();
+        (typed, refusals, flashes)
+    }
+
+    /// Every card the loop asked for, with the tone it asked for it in.
+    fn read_drawing(
+        keys: Vec<Key>,
+        allowed: bool,
+    ) -> (Typed, Vec<(Refusal, super::card::Tone)>, usize) {
         let mut console = Fake::new(keys);
-        let mut refusals = Vec::new();
-        let typed = read_secret(&mut console, false, allowed, &mut |refusal| {
-            refusals.push(refusal);
-            Card::new("rote", "x", Style::PLAIN)
-        })
+        let mut drawn = Vec::new();
+        let typed = read_secret(
+            &mut console,
+            false,
+            allowed,
+            super::card::Tone::Calm,
+            &mut |refusal, tone| {
+                drawn.push((refusal, tone));
+                Card::new("rote", "x", Style::PLAIN)
+            },
+        )
         .unwrap();
-        (typed, refusals, console.flashes)
+        (typed, drawn, console.flashes)
     }
 
     fn submitted(typed: Typed) -> super::Entry {
@@ -509,11 +637,9 @@ mod tests {
             "nothing past the capacity"
         );
         assert_eq!(flashes, 3, "each refused character is a flash");
-        assert!(refusals.contains(&Refusal::Full));
-        assert!(
-            refusals.contains(&Refusal::None),
-            "and the card calms down after"
-        );
+        // Nothing here ever lands, so nothing ever says the reader moved on:
+        // what was refused stays said until something does.
+        assert!(refusals.iter().all(|refusal| *refusal == Refusal::Full));
     }
 
     #[test]
@@ -589,6 +715,8 @@ mod tests {
         let prompt = |intention: &'static str| {
             let mut console = Fake::new(typing("x"));
             let ask_for = Ask {
+                title: "rote",
+                resting: super::card::Tone::Calm,
                 heading: "enroll a",
                 intention,
                 status: None,
@@ -597,7 +725,10 @@ mod tests {
             let first = console.frames.first().unwrap().clone();
             first
                 .iter()
-                .position(|line| line.contains('╭') && !line.contains("rote"))
+                .enumerate()
+                .skip(1)
+                .find(|(_, line)| line.contains('╭'))
+                .map(|(index, _)| index)
                 .unwrap()
         };
         assert_eq!(prompt("type it twice"), prompt(""));
@@ -608,6 +739,8 @@ mod tests {
         let long = "x".repeat(CAPACITY + 1);
         let mut console = Fake::new(vec![paste(&long), Key::Char('x'), Key::Enter]);
         let ask_for = Ask {
+            title: "rote",
+            resting: super::card::Tone::Calm,
             heading: "enroll a",
             intention: "again",
             status: Some("the two entries differ"),
@@ -618,14 +751,23 @@ mod tests {
         let flashed = console.frames.get(1).unwrap().join("\n");
         assert!(flashed.contains("longer than a secret"), "{flashed}");
         assert!(!flashed.contains("entries differ"), "{flashed}");
-        let calm = console.frames.get(2).unwrap().join("\n");
-        assert!(calm.contains("the two entries differ"), "{calm}");
+        // The border calms down and the refusal stays said: it is the half a
+        // reader has to read, and no clock can know when they have.
+        let settled = console.frames.get(2).unwrap().join("\n");
+        assert!(settled.contains("longer than a secret"), "{settled}");
+        // Typing says they moved on. Only then does the standing status — which
+        // is a counter and not a refusal — come back.
+        let after = console.frames.get(3).unwrap().join("\n");
+        assert!(after.contains("the two entries differ"), "{after}");
+        assert!(!after.contains("longer than a secret"), "{after}");
     }
 
     #[test]
     fn a_prompt_that_takes_a_secret_twice_takes_a_paste() {
         let mut console = Fake::new(vec![paste("hunter2"), Key::Enter]);
         let ask_for = Ask {
+            title: "rote",
+            resting: super::card::Tone::Calm,
             heading: "enroll a",
             intention: "type it twice",
             status: None,
@@ -634,5 +776,61 @@ mod tests {
         let entry = submitted(typed);
         assert_eq!(entry.secret.expose(), b"hunter2");
         assert_eq!(console.flashes, 0);
+    }
+
+    #[test]
+    fn a_refusal_pulses_the_border_and_leaves_what_it_said_standing() {
+        let (_, drawn, _) = read_drawing(vec![paste("hunter2"), Key::Enter], false);
+        let tones: Vec<super::card::Tone> = drawn
+            .iter()
+            .filter(|(refusal, _)| *refusal == Refusal::Paste)
+            .map(|(_, tone)| *tone)
+            .collect();
+        // Said twice: once in the alarm the eye catches, and again in the calm
+        // the reader is left to read it in.
+        assert_eq!(
+            tones,
+            vec![super::card::Tone::Alarm, super::card::Tone::Calm],
+            "the border comes back and the saying does not go with it"
+        );
+    }
+
+    #[test]
+    fn what_a_refusal_said_is_taken_down_by_the_next_keystroke_and_not_before() {
+        let (_, drawn, _) = read_drawing(
+            vec![paste("hunter2"), Key::Char('a'), Key::Char('b'), Key::Enter],
+            false,
+        );
+        let refusals: Vec<Refusal> = drawn.into_iter().map(|(refusal, _)| refusal).collect();
+        // Refused, said, still said, then the first character takes it down —
+        // and the second changes nothing, because there is nothing left to say.
+        // Refused, said in alarm, said again in calm, and taken down by the
+        // first character that lands. The second draws nothing: there is
+        // nothing left to take down.
+        assert_eq!(
+            refusals,
+            vec![Refusal::Paste, Refusal::Paste, Refusal::None]
+        );
+    }
+
+    #[test]
+    fn nothing_typed_at_a_verifier_survives_it() {
+        let mut console = Fake::new(Vec::new());
+        let card = Card::new("rote", "x", Style::PLAIN);
+        let out: usize = super::while_working(&mut console, &card, || Ok(7)).unwrap();
+        assert_eq!(out, 7);
+        assert_eq!(console.drains, 1);
+    }
+
+    #[test]
+    fn a_verifier_that_fails_drains_the_keyboard_all_the_same() {
+        // What follows a failure is a card to read just as much as what follows
+        // a success, and it is dismissed by the same stray keystroke.
+        let mut console = Fake::new(Vec::new());
+        let card = Card::new("rote", "x", Style::PLAIN);
+        let out: anyhow::Result<usize> =
+            super::while_working(&mut console, &card, || Err(anyhow::anyhow!("no")));
+        assert!(out.is_err());
+        assert_eq!(console.drains, 1);
     }
 }

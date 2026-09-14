@@ -169,7 +169,7 @@ pub fn describe(
     ];
     match dossier.last_review {
         Some(day) if day != dossier.minted => parts.push(format!(
-            "last reviewed {} days ago",
+            "reviewed {}d ago",
             crate::ladder::days_between(day, today)
         )),
         Some(_) | None => parts.push("never reviewed".to_owned()),
@@ -406,7 +406,8 @@ impl Session<'_> {
         if let Some(row) = self.rows.get_mut(index) {
             row.set_aided(prompt.aided);
         }
-        self.paint(index, Tone::Calm, status.clone(), lookup)?;
+        let resting = screen::resting(self.rows.get(index));
+        self.paint(index, resting, status.clone(), lookup)?;
 
         let entry = match self.read(index, status.as_deref(), lookup, paste)? {
             // The cold tries are spent: what the field will still take is the
@@ -523,7 +524,8 @@ impl Session<'_> {
                 screen::RowState::Claiming
             };
             self.set(index, state);
-            self.paint(index, Tone::Calm, status.clone(), false)?;
+            let resting = screen::resting(self.rows.get(index));
+            self.paint(index, resting, status.clone(), false)?;
 
             // No lookup, and a paste: there is nothing here to consult a vault
             // against, and nothing here that a paste could measure away.
@@ -586,8 +588,11 @@ impl Session<'_> {
             return Ok(Outcome::Blank);
         }
         self.set(index, screen::RowState::Checking);
-        self.paint(index, Tone::Calm, status, lookup)?;
-        Ok(if (self.verify)(&drilling.verifier, secret)? {
+        let card = self.frame(index, Tone::Calm, status, lookup);
+        let verify = &self.verify;
+        let accepted =
+            crate::tui::while_working(self.console, &card, || verify(&drilling.verifier, secret))?;
+        Ok(if accepted {
             Outcome::Pass
         } else {
             Outcome::Fail
@@ -654,12 +659,16 @@ impl Session<'_> {
         self.console.paint(&card)
     }
 
-    /// A refusal is a flash and a counter, not a paragraph.
+    /// A refusal is a pulse and a counter, not a paragraph.
+    ///
+    /// The border comes back; what was said does not go with it. See
+    /// `tui::refuse`, which holds the same two lifetimes for the entry loop.
     fn flash(&mut self, index: usize, status: Option<String>, lookup: bool) -> Result<()> {
         let alarm = self.frame(index, Tone::Alarm, status.clone(), lookup);
         self.console.flash(&alarm)?;
-        let calm = self.frame(index, Tone::Calm, status, lookup);
-        self.console.paint(&calm)
+        let resting = screen::resting(self.rows.get(index));
+        let settled = self.frame(index, resting, status, lookup);
+        self.console.paint(&settled)
     }
 
     fn read(
@@ -673,9 +682,12 @@ impl Session<'_> {
         let rows = self.rows.clone();
         let style = self.console.style();
         let status = status.map(str::to_owned);
-        let mut build = |refusal: crate::tui::Refusal| {
+        let resting = screen::resting(rows.get(index));
+        let mut build = |refusal: crate::tui::Refusal, tone: Tone| {
             let mut frame = screen::Frame::running(today, &rows, Some(index));
-            frame.tone = refusal.tone();
+            frame.tone = tone;
+            // What a refusal said outlives the tone it said it in, and a
+            // standing status shows through again once it is taken down.
             frame.status = refusal
                 .status()
                 .map(str::to_owned)
@@ -683,7 +695,7 @@ impl Session<'_> {
             frame.lookup = lookup;
             screen::card(&frame, style)
         };
-        read_secret(self.console, lookup, paste, &mut build)
+        read_secret(self.console, lookup, paste, resting, &mut build)
     }
 }
 
@@ -749,6 +761,7 @@ mod tests {
         keys: std::vec::IntoIter<(Key, u64)>,
         elapsed: u64,
         flashes: usize,
+        drains: usize,
         last: Vec<String>,
     }
 
@@ -758,6 +771,7 @@ mod tests {
                 keys: keys.into_iter(),
                 elapsed: 0,
                 flashes: 0,
+                drains: 0,
                 last: Vec::new(),
             }
         }
@@ -796,6 +810,11 @@ mod tests {
         fn flash(&mut self, card: &Card) -> Result<()> {
             self.flashes = self.flashes.saturating_add(1);
             self.paint(card)
+        }
+
+        fn drain(&mut self) -> Result<()> {
+            self.drains = self.drains.saturating_add(1);
+            Ok(())
         }
 
         fn hold(&mut self) -> Result<()> {
@@ -851,6 +870,7 @@ mod tests {
         written: Vec<Capture>,
         attached: Vec<String>,
         flashes: usize,
+        drains: usize,
     }
 
     fn run(turns: &[Turn], keys: Vec<(Key, u64)>) -> Ran {
@@ -889,6 +909,7 @@ mod tests {
             written: written.into_inner(),
             attached: attached.into_inner(),
             flashes: console.flashes,
+            drains: console.drains,
         }
     }
 
@@ -1207,6 +1228,16 @@ mod tests {
             capture.outcome,
             Outcome::Pass,
             "the field held what was typed after it and nothing of the paste"
+        );
+    }
+
+    #[test]
+    fn the_field_goes_before_the_verifier_runs_and_the_keyboard_is_drained_after() {
+        let turns = vec![drill_turn("escrow-p", Occasion::Review, false)];
+        let ran = run(&turns, typing(RIGHT, 400));
+        assert!(
+            ran.drains > 0,
+            "a key struck at the verifier must not reach the card after it"
         );
     }
 }

@@ -100,6 +100,16 @@ pub struct Env {
     pub machine: Option<String>,
     /// This machine's label, recorded on every line.
     pub host: String,
+    /// `ROTE_NOW`, the instant the process believes it is running at.
+    ///
+    /// A drill day is a local calendar day shifted by the rollover hour, so a
+    /// suite that derives its own fixtures from the wall clock and a binary
+    /// that derives its own disagree about which day it is, for the minutes a
+    /// run happens to straddle four in the morning. The clock is a parameter
+    /// everywhere inside the crate already; this is the parameter at the
+    /// process boundary. It moves no cost and lowers no cost: what it is worth
+    /// forging, `ROTE_MACHINE` already forges more directly.
+    pub now: Option<jiff::Timestamp>,
 }
 
 impl Env {
@@ -118,6 +128,9 @@ impl Env {
             flagship: read("ROTE_FLAGSHIP"),
             machine: std::env::var("ROTE_MACHINE").ok(),
             host: crate::machine::hostname(),
+            now: std::env::var("ROTE_NOW")
+                .ok()
+                .and_then(|text| text.parse().ok()),
         }
     }
 
@@ -264,7 +277,10 @@ impl Store {
     pub fn open(paths: Paths, machine: MachineId, host: String) -> Result<Self> {
         let flagship = Flagship::read(&paths.marker, &machine)?;
         if !flagship.writes_allowed() {
-            return Err(anyhow!("{}", flagship.refusal(&paths.marker, &machine)));
+            return Err(anyhow!(
+                "{}",
+                flagship.refusal(&paths.marker, &machine, &host)
+            ));
         }
         ensure_dir(&paths.chains_dir())?;
         ensure_dir(&paths.state_dir)?;
@@ -357,6 +373,73 @@ pub struct Cache {
     /// be drilled, so they are not counted as due — they are counted here.
     #[serde(default)]
     pub dormant: usize,
+    /// What the corpus and the verifiers looked like when this was derived.
+    ///
+    /// A cache with no witness cannot say whether it is still true, only that
+    /// it exists — and the one state a reminder most has to announce is the
+    /// one that also destroys it. A restored machine brings the corpus back and
+    /// leaves the verifiers and this file behind, so every lineage is dormant
+    /// and nothing says so. See [`Witness`].
+    #[serde(default)]
+    pub witness: Witness,
+    /// The drill day this was derived for.
+    ///
+    /// A day's worth of staleness is the most the witness can miss, because
+    /// what falls due is a function of the date and of nothing on disk.
+    #[serde(default)]
+    pub built: Option<Date>,
+}
+
+/// A cheap reading of what the cache was derived from.
+///
+/// Sizes and modification times, never content: the reminder runs before every
+/// shell prompt, so it may `stat` and may not parse. Chains are append-only, so
+/// a length is a perfect witness of one; a verifier file is small and rewritten
+/// whole, so a length and a time are enough. Anything that moves and is not
+/// caught here is caught the next day by [`Cache::built`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Witness {
+    /// Chain files present.
+    pub chains: usize,
+    /// Bytes across all of them.
+    pub records: u64,
+    /// Bytes of the verifier file, and zero when there is none.
+    pub verifiers: u64,
+    /// When the verifier file was last written, in whole seconds.
+    pub held_at: i64,
+}
+
+impl Witness {
+    /// Read the witness, without reading anything it witnesses.
+    #[must_use]
+    pub fn of(paths: &Paths) -> Self {
+        let mut seen = Self::default();
+        if let Ok(entries) = fs_err::read_dir(paths.chains_dir()) {
+            for entry in entries.flatten() {
+                let Some(name) = entry.file_name().to_str().map(ToOwned::to_owned) else {
+                    continue;
+                };
+                if crate::corpus::chain::machine_of(&name).is_none() {
+                    continue;
+                }
+                seen.chains = seen.chains.saturating_add(1);
+                if let Ok(data) = entry.metadata() {
+                    seen.records = seen.records.saturating_add(data.len());
+                }
+            }
+        }
+        if let Ok(data) = fs_err::metadata(paths.verifiers()) {
+            seen.verifiers = data.len();
+            seen.held_at = data
+                .modified()
+                .ok()
+                .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|since| i64::try_from(since.as_secs()).ok())
+                .unwrap_or_default();
+        }
+        seen
+    }
 }
 
 impl Cache {
@@ -366,6 +449,18 @@ impl Cache {
         let text = fs_err::read_to_string(path).ok()?;
         let cache: Self = serde_json::from_str(&text).ok()?;
         (cache.v == SCHEMA).then_some(cache)
+    }
+
+    /// Whether this still answers for what is on disk.
+    ///
+    /// A reminder must not depend on state destroyed by the event it exists to
+    /// announce. Absence used to read as silence, so a restore — corpus back,
+    /// verifiers and cache gone — left every lineage dormant and nothing saying
+    /// it. The same hole opens on any change `rote` did not make, such as a
+    /// verifier deleted by hand.
+    #[must_use]
+    pub fn still_true(&self, paths: &Paths, today: Date) -> bool {
+        self.built == Some(today) && self.witness == Witness::of(paths)
     }
 
     /// How many lineages are due on a given day.
@@ -395,7 +490,7 @@ mod tests {
 
     use std::os::unix::fs::PermissionsExt as _;
 
-    use super::{Cache, Clock, Env, Paths, Store, ensure_dir};
+    use super::{Cache, Clock, Env, Paths, Store, Witness, ensure_dir};
     use crate::config::Config;
     use crate::corpus::record::{EngramId, Enrolled, Event, SCHEMA};
     use crate::machine::MachineId;
@@ -525,6 +620,7 @@ mod tests {
             v: SCHEMA.saturating_add(1),
             due: vec![date(2026, 9, 13)],
             dormant: 0,
+            ..Cache::default()
         }
         .save(&path)
         .unwrap();
@@ -537,6 +633,7 @@ mod tests {
             v: SCHEMA,
             due: vec![date(2026, 9, 12), date(2026, 9, 13), date(2026, 9, 20)],
             dormant: 2,
+            ..Cache::default()
         };
         assert_eq!(cache.due_by(date(2026, 9, 13)), 2);
         assert_eq!(cache.dormant, 2);
@@ -549,5 +646,41 @@ mod tests {
         ensure_dir(&deep).unwrap();
         let mode = std::fs::metadata(&deep).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[test]
+    fn a_cache_stops_answering_once_what_it_was_derived_from_moves() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let paths = Paths {
+            log_dir: root.join("ark"),
+            state_dir: root.join("state"),
+            marker: root.join("flagship"),
+        };
+        ensure_dir(&paths.chains_dir()).unwrap();
+        ensure_dir(&paths.state_dir).unwrap();
+        let today = date(2026, 9, 13);
+        let mut cache = Cache {
+            v: SCHEMA,
+            due: Vec::new(),
+            dormant: 0,
+            witness: Witness::of(&paths),
+            built: Some(today),
+        };
+        assert!(cache.still_true(&paths, today));
+
+        // Tomorrow is a different question, whatever is on disk.
+        assert!(!cache.still_true(&paths, date(2026, 9, 14)));
+
+        // A verifier taken away by hand is the restore case in miniature: the
+        // cache still asserts yesterday's answer, and must stop.
+        fs_err::write(paths.verifiers(), "held = {}\n").unwrap();
+        assert!(!cache.still_true(&paths, today));
+        cache.witness = Witness::of(&paths);
+        assert!(cache.still_true(&paths, today));
+
+        // And a chain appended to since.
+        fs_err::write(paths.chains_dir().join("lusab-babad-gutih.jsonl"), "{}\n").unwrap();
+        assert!(!cache.still_true(&paths, today));
     }
 }

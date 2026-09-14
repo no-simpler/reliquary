@@ -26,8 +26,18 @@ a live lineage. None of them is a lock, and none should become one.
 
 **The storage rule that follows.** A value may be stored when it is underivable or
 expensive to derive. A judgement may not be stored at all, because it should not
-exist. A derived reading has exactly one home — `stats` when it carries a
+exist. A derived **reading** has exactly one home — `stats` when it carries a
 threshold, the dossier when it does not — and is not also reported by `doctor`.
+
+A **defect** is not a reading, and the rule inverts for one: a state with a
+remedy has exactly one home and it is always `doctor`, because that is the only
+surface `assay` collects into `yadm doctor`. `aided_mismatch` is the worked
+example. `doctor` states it and names the fix; the sitting announces the
+**edge**, in both directions, at the moment it moves — an event names a moment,
+so it cannot go stale the way a second copy of a standing claim does. `stats`
+carries the historical count and attaches no consequence to it, which is how the
+two came to contradict each other: a refusal followed by a pass clears the
+dossier and leaves a ninety-day count still asserting the disagreement.
 
 ## Prose rules for everything the binary prints
 
@@ -205,9 +215,14 @@ Things a future edit must not undo.
   heading and does not move, what changes lives in a reserved column or on the line
   under the field, and the field itself never moves. A cut line is the signal that
   the layout or the wording wants shortening — never the box.
-- **A refusal is a flash and a counter, not a paragraph.** The field border goes red
-  for `FLASH` and comes back; nothing red stays on the screen, and the try count
-  increments in the slot it already occupied. Once the cold tries are spent the
+- **A refusal is a pulse and a counter, not a paragraph — and the two have
+  different lifetimes.** The field border goes red for at most `FLASH` and comes
+  back, because nothing red may sit on the screen making every later glance
+  re-read it. What the refusal *said* stays under the field until the next
+  keystroke, with no ceiling: starting to type is the reader saying they have
+  read it or that it no longer matters, and no timer can know that. A standing
+  status — the try count — is not a refusal and shows through again once the
+  refusal is taken down; it increments in the slot it already occupied. Once the cold tries are spent the
   field stays, saying *out of tries*, with the lookup still on offer: a typed
   answer is flashed and refused rather than judged, escape leaves. The one moment a
   person most needs the vault is after the third miss, and it is also the entry
@@ -228,8 +243,15 @@ Things a future edit must not undo.
   what was measured, and the closing line says so. Hiding that would be the tool
   deciding what a week looks like.
 - **A glyph carries what a glyph can.** One column of standing per row, and words
-  only for what the glyph cannot say. An attachment lands on `+` in yellow and not
-  a green tick: something was added and nothing was judged. Nothing on a card
+  only for what the glyph cannot say. **Green is only ever a clean pass —
+  unaided, first try. Yellow is everything that got there another way. Red is a
+  failure. Dim is nothing measured.** An attachment lands on `+` in yellow and
+  not a green tick: something was added and nothing was judged, and a drill
+  recovered with the vault or on the third go is the same claim. `screen::icon`
+  and `dialog::Checked` are the only two places that decide it, so no screen
+  decides it for itself. The closing tally names its own subject, because it
+  buckets each turn by its *first* capture and would otherwise read as a
+  contradiction of the row above it. Nothing on a card
   spells out a key that a person already knows — enter submits, escape leaves — so
   the only key named is ctrl-l, and only where it is on offer.
 - **The caret is the terminal's own cursor**, moved into the field and shown there.
@@ -246,9 +268,16 @@ Things a future edit must not undo.
 - **Every card is `card::WIDTH` wide.** A box that resizes as content comes and goes
   reads as instability and makes the eye re-find the border. Height is the axis
   that varies, and `Screen::anchor` fixes the top edge so that variation grows
-  downward. A line that outgrows `CONTENT` is cut at the single render choke point
-  rather than breaking the box, and a test asserts real content never reaches that
-  net.
+  downward.
+
+  **Prose wraps; composed lines assert.** A sentence goes through `Card::prose`,
+  which breaks it at word boundaries under a hanging indent — cutting takes the
+  tail, and the tail is where the point of a sentence is. A line laid out in
+  columns — a row, a tally, a context line — goes through `card::fit`, which
+  drops whole separated facts rather than half of one, and the chip is the
+  column that gives because it is the only one made of droppable facts. The clip
+  in `Card::edge` is a `debug_assert!` before it is a net, so *every* test that
+  renders *any* card catches an over-long line with no screen-by-screen upkeep.
 - **Every line is placed with its own `MoveTo`.** Raw mode takes the line discipline
   away, so a newline written while it is held moves down without returning to
   column zero. Nothing writes a newline in raw mode; a test asserts no rendered
@@ -280,13 +309,23 @@ Things a future edit must not undo.
   asserts the first of every binary it collects, on a two-second budget, so nothing
   in that path hashes. A fact that `status` or `stats` already states is not also a
   finding.
-- **`banner` reads only the cache.** It runs before every shell prompt through
-  `coop`, so it never opens the corpus, never touches a verifier, and never
-  resolves the machine identity, which costs a subprocess.
+- **`banner` never resolves the machine identity**, which costs a subprocess. It
+  runs before every shell prompt through `coop`, so the steady state is one
+  `stat` and one small read. It rebuilds the cache when the cache has stopped
+  answering for what is on disk, by the same read-only path `status` and
+  `doctor` take — no flagship gate, no hashing — which is once per change rather
+  than once per prompt. **A reminder must not depend on state destroyed by the
+  event it exists to announce**: the cache lives in the machine-local tree a
+  restore does not bring back, and the state a restore leaves — every lineage
+  dormant — is the one the attachment verb exists for. `Cache::witness` is what
+  makes absence answerable rather than silent.
 - **Every test sets `ROTE_ROOT` and `ROTE_STATE`.** They are seams, along with
-  `ROTE_CONFIG`, `ROTE_UI`, `ROTE_HOST`, `ROTE_FLAGSHIP` and `ROTE_MACHINE`. The
-  last two are seams rather than files precisely so the identity and the marker
-  keep their property of not being copyable. There is deliberately **no seam that
+  `ROTE_CONFIG`, `ROTE_UI`, `ROTE_HOST`, `ROTE_FLAGSHIP`, `ROTE_MACHINE` and
+  `ROTE_NOW`. `ROTE_FLAGSHIP` and `ROTE_MACHINE` are seams rather than files
+  precisely so the identity and the marker keep their property of not being
+  copyable. `ROTE_NOW` is the clock at the process boundary: the harness and the
+  binary each asking the wall clock what the drill day is are two answers for
+  the minutes a run straddles the rollover hour. There is deliberately **no seam that
   lowers the KDF cost**: the suite seeds a corpus instead, and mints one verifier at
   the shipped parameters for the whole run.
 - Publishing and testing carry no per-relic scripts. Do not reintroduce

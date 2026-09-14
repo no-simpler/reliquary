@@ -141,7 +141,7 @@ FILES
   Config keys: root, state, rollover-hour, max-attempts, ladder.
 
   Environment: ROTE_ROOT, ROTE_STATE, ROTE_CONFIG, ROTE_UI, ROTE_HOST,
-  ROTE_FLAGSHIP, ROTE_MACHINE.";
+  ROTE_FLAGSHIP, ROTE_MACHINE, ROTE_NOW.";
 
 const MACHINES: &str = "\
 MACHINES

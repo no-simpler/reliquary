@@ -49,8 +49,8 @@ const MIN_COLS: usize = card::WIDTH + 2;
 /// of air.
 const MIN_ROWS: usize = 7;
 
-/// How long a refusal is shown before the card goes back to calm. Long enough
-/// to be seen, short enough that nobody is waiting on it.
+/// How long the field border stays red. A ceiling, not a wait: the first thing
+/// typed ends it sooner, and what the refusal *said* stays up either way.
 const FLASH: std::time::Duration = std::time::Duration::from_millis(340);
 
 /// Where the top of the dialog sits in the space available to it, as a
@@ -155,6 +155,12 @@ pub struct Terminal {
     anchor: usize,
     last: Vec<String>,
     last_caret: Option<(usize, usize)>,
+    /// What ended a pulse early, waiting to be handed on.
+    ///
+    /// A keystroke that cut a flash short is still a keystroke the reader
+    /// meant, so it is delivered rather than swallowed. One slot is enough:
+    /// only [`Screen::flash`] ever fills it, and it returns the moment it does.
+    pending: Option<Event>,
     _raw: RawMode,
 }
 
@@ -187,6 +193,7 @@ impl Terminal {
             anchor: 0,
             last: Vec::new(),
             last_caret: None,
+            pending: None,
             _raw: raw,
         })
     }
@@ -240,7 +247,10 @@ impl Terminal {
     /// The next event, with a resize answered here rather than handed on.
     fn event(&mut self) -> Result<Event> {
         loop {
-            let event = crossterm::event::read().context("reading the terminal")?;
+            let event = match self.pending.take() {
+                Some(event) => event,
+                None => crossterm::event::read().context("reading the terminal")?,
+            };
             if matches!(event, Event::Resize(_, _)) {
                 self.repaint()?;
                 continue;
@@ -344,7 +354,42 @@ impl Screen for Terminal {
 
     fn flash(&mut self, card: &Card) -> Result<()> {
         self.paint(card)?;
-        std::thread::sleep(FLASH);
+        let deadline = Instant::now() + FLASH;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Ok(());
+            }
+            if !crossterm::event::poll(left).context("waiting at the terminal")? {
+                return Ok(());
+            }
+            let event = crossterm::event::read().context("reading the terminal")?;
+            if matches!(event, Event::Resize(_, _)) {
+                self.repaint()?;
+                continue;
+            }
+            // Typing is the reader saying they have moved on, so the pulse ends
+            // with it — and the key goes on to the loop that was waiting for
+            // it, because a flash that eats a keystroke is worse than a short
+            // one.
+            self.pending = Some(event);
+            return Ok(());
+        }
+    }
+
+    fn drain(&mut self) -> Result<()> {
+        self.pending = None;
+        while crossterm::event::poll(std::time::Duration::ZERO)
+            .context("waiting at the terminal")?
+        {
+            // A paste is wiped rather than dropped with the bytes still in it,
+            // the same way `hold` does.
+            if let Event::Paste(mut text) =
+                crossterm::event::read().context("reading the terminal")?
+            {
+                text.zeroize();
+            }
+        }
         Ok(())
     }
 
