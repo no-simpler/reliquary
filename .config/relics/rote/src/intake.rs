@@ -35,6 +35,27 @@ pub const NOT_CURRENT: &str = "not the current secret";
 /// What it says when a drill try was wrong.
 pub const NOT_IT: &str = "not it";
 
+/// What it says when a drill try was conceded: nothing was offered, so *not
+/// it* would be false.
+pub const CONCEDED: &str = "conceded";
+
+/// What every prompt that takes a secret says it is for. One spelling each,
+/// read by the sitting's card and by the commands alike.
+pub const ENROLL_INTENTION: &str = "the secret this lineage will hold, typed twice";
+
+/// The attachment prompt, which is the one place a wrong answer is accepted in
+/// silence and written into the record as truth.
+pub const ATTACH_INTENTION: &str = "type it as you know it — nothing here can check it";
+
+/// The proof a rotation asks for before it takes anything.
+pub const ROTATE_PROVE_INTENTION: &str = "prove the current secret before it is replaced";
+
+/// The new secret a rotation takes once the proof has passed.
+pub const ROTATE_NEW_INTENTION: &str = "the new secret, typed twice";
+
+/// The second half of a double entry.
+pub const AGAIN: &str = "again";
+
 /// What the line under the field says when a bounded retry has spent a round.
 ///
 /// **One composer for every bounded retry in the binary**, because a loop that
@@ -150,6 +171,23 @@ pub fn make_verifier(secret: &Secret) -> Result<Verifier> {
     Verifier::create(secret, &salt).context("hashing the secret")
 }
 
+/// A verifier re-minted at this binary's parameters, when the one held is
+/// below the floor and the secret has just been proved against it.
+///
+/// The one moment the plaintext is in hand is the one moment a stale verifier
+/// can be brought up to cost without asking for anything. `None` when the
+/// secret was refused, or when the held one already meets the floor.
+///
+/// # Errors
+///
+/// When the held string will not parse, or the fresh one cannot be made.
+pub fn refreshed(held: &Verifier, secret: &Secret) -> Result<Option<Verifier>> {
+    if held.meets_floor()? || !held.accepts(secret)? {
+        return Ok(None);
+    }
+    make_verifier(secret).map(Some)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Pair, Pairing};
@@ -245,5 +283,39 @@ mod tests {
             pair.offer(secret("b")),
             Pairing::OutOfRounds(super::DIFFERED)
         ));
+    }
+
+    /// A verifier below the floor, for the secret `x`.
+    fn weak() -> crate::verifier::Verifier {
+        use argon2::password_hash::{PasswordHasher as _, SaltString};
+        use argon2::{Algorithm, Argon2, Params, Version};
+        let salt = SaltString::encode_b64(&[3u8; crate::verifier::SALT_LEN]).unwrap();
+        let cheap = Params::new(64, 1, 1, Some(crate::verifier::OUTPUT_LEN)).unwrap();
+        let phc = Argon2::new(Algorithm::Argon2id, Version::V0x13, cheap)
+            .hash_password(b"x", &salt)
+            .unwrap()
+            .to_string();
+        crate::verifier::Verifier::parse(&phc).unwrap()
+    }
+
+    #[test]
+    fn a_proved_secret_brings_a_stale_verifier_up_to_cost_and_a_refused_one_does_not() {
+        let held = weak();
+        assert!(!held.meets_floor().unwrap());
+        assert!(
+            super::refreshed(&held, &secret("y")).unwrap().is_none(),
+            "nothing is re-minted for a secret the verifier refused"
+        );
+        // One mint at the shipped cost: the same budget the integration suite
+        // spends once per run.
+        let fresh = super::refreshed(&held, &secret("x"))
+            .unwrap()
+            .expect("a stale verifier is re-minted for a proved secret");
+        assert!(fresh.meets_floor().unwrap());
+        assert!(fresh.accepts(&secret("x")).unwrap());
+        assert!(
+            super::refreshed(&fresh, &secret("x")).unwrap().is_none(),
+            "one at the floor is left alone"
+        );
     }
 }

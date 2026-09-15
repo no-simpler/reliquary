@@ -27,6 +27,13 @@ use crate::secret::Secret;
 /// Memory cost, in KiB. The floor, and what this binary writes.
 pub const M_COST_KIB: u32 = 262_144;
 
+/// The most memory a stored verifier may ask for, in KiB.
+///
+/// A verifier is checked at the cost it carries, so a corrupted or hand-edited
+/// entry claiming gigabytes would be an allocation failure with no message.
+/// Above this it is unreadable instead, and never allocated.
+pub const M_COST_CEILING_KIB: u32 = 4 * M_COST_KIB;
+
 /// Time cost. Chosen by measurement so one verification is not cheaper in wall
 /// time than the artifact whose memory cost it matches.
 pub const T_COST: u32 = 4;
@@ -53,6 +60,11 @@ pub enum Error {
     /// The stored string is not a PHC string this binary can read.
     #[error("the stored verifier is not a readable PHC string")]
     Stored(#[source] argon2::password_hash::Error),
+    /// The stored string asks for more memory than this binary will allocate.
+    #[error(
+        "the stored verifier asks for {0} KiB of memory, above the {M_COST_CEILING_KIB} this binary allocates"
+    )]
+    Excessive(u32),
     /// Assembling the PHC string failed.
     #[error("could not render the verifier as a PHC string")]
     Render(#[source] argon2::password_hash::Error),
@@ -67,13 +79,19 @@ pub enum Error {
 pub struct Verifier(String);
 
 impl Verifier {
-    /// Take a stored string at face value, checking only that it parses.
+    /// Take a stored string at face value, checking that it parses and that
+    /// its cost is one this binary would allocate.
     ///
     /// # Errors
     ///
-    /// When the string is not a PHC string.
+    /// When the string is not a PHC string, or asks for memory above
+    /// [`M_COST_CEILING_KIB`].
     pub fn parse(text: &str) -> Result<Self, Error> {
-        PasswordHash::new(text).map_err(Error::Stored)?;
+        let stored = PasswordHash::new(text).map_err(Error::Stored)?;
+        let m_cost = Params::try_from(&stored).map_err(Error::Stored)?.m_cost();
+        if m_cost > M_COST_CEILING_KIB {
+            return Err(Error::Excessive(m_cost));
+        }
         Ok(Self(text.to_owned()))
     }
 
@@ -258,6 +276,25 @@ mod tests {
     fn a_string_that_is_not_a_phc_string_is_refused() {
         assert!(Verifier::parse("not a verifier").is_err());
         assert!(Verifier::parse("").is_err());
+    }
+
+    #[test]
+    fn a_verifier_asking_for_more_memory_than_the_ceiling_is_unreadable_rather_than_allocated() {
+        let salt = [4u8; SALT_LEN];
+        let over = reference_phc("x", &salt).replace(
+            "m=64",
+            &format!("m={}", super::M_COST_CEILING_KIB.saturating_add(1)),
+        );
+        assert!(matches!(
+            Verifier::parse(&over),
+            Err(super::Error::Excessive(_))
+        ));
+        let at =
+            reference_phc("x", &salt).replace("m=64", &format!("m={}", super::M_COST_CEILING_KIB));
+        assert!(
+            Verifier::parse(&at).is_ok(),
+            "the ceiling itself is allowed"
+        );
     }
 
     /// The real cost, kept out of the fast loop. `relic test` must stay fast and

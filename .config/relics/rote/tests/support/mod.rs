@@ -367,6 +367,9 @@ pub enum Step {
     },
     Attach,
     Rotate,
+    /// A second enrolment over a lineage that is already live, which one
+    /// machine never writes and two machines can.
+    Enroll,
 }
 
 pub fn steps() -> impl Strategy<Value = Vec<(u8, u8, Step)>> {
@@ -375,6 +378,7 @@ pub fn steps() -> impl Strategy<Value = Vec<(u8, u8, Step)>> {
             .prop_map(|(pass, aided, review)| Step::Drill { pass, aided, review }),
         2 => Just(Step::Attach),
         1 => Just(Step::Rotate),
+        1 => Just(Step::Enroll),
     ];
     // (machine 0..2, lineage 0..2, step)
     proptest::collection::vec((0u8..2, 0u8..2, step), 0..24)
@@ -461,6 +465,18 @@ impl World {
             let slug = Self::name(*lineage).parse().expect("a slug");
             match step {
                 Step::Attach => world.push(&machine, Event::Attach(Attached { slug, engram })),
+                Step::Enroll => {
+                    let again = EngramId::mint().expect("an engram");
+                    world.current.insert(*lineage, again);
+                    world.push(
+                        &machine,
+                        Event::Enroll(Enrolled {
+                            slug,
+                            engram: again,
+                            critical: *lineage == 0,
+                        }),
+                    );
+                }
                 Step::Rotate => {
                     let to = EngramId::mint().expect("an engram");
                     world.current.insert(*lineage, to);
@@ -549,11 +565,11 @@ pub fn day(year: i16, month: i8, date: i8) -> Date {
 
 /// The instant this test process runs at, taken once and never again.
 ///
-/// The harness and the binary each used to ask the wall clock what day it was,
-/// which is two answers wherever a run straddles the rollover hour — a real
-/// disagreement for a few minutes every morning, and one nobody would ever
-/// reproduce. Taken once here and handed to the binary through `ROTE_NOW`, it
-/// is one answer by construction.
+/// The harness and the binary each asking the wall clock what day it is are
+/// two answers wherever a run straddles the rollover hour — a real disagreement
+/// for a few minutes every morning, and one nobody would ever reproduce. Taken
+/// once here and handed to the binary through `ROTE_NOW`, it is one answer by
+/// construction.
 pub fn now() -> jiff::Timestamp {
     static NOW: std::sync::OnceLock<jiff::Timestamp> = std::sync::OnceLock::new();
     *NOW.get_or_init(jiff::Timestamp::now)

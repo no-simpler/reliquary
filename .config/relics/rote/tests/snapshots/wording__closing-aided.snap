@@ -1,11 +1,11 @@
 ---
 source: rote/tests/wording.rs
-assertion_line: 177
-expression: "closing(rows, captures, &[])"
+assertion_line: 233
+expression: "closing(&rows, captures, &[])"
 ---
 ╭─ done ────────────────────────────────────────────────────── Sun 13 Sep ─╮
 │                                                                          │
-│     warmup-p  aided                       ✓  —   x2                      │
+│     warmup-p  aided                       ✓  x2                          │
 │                                                                          │
 │   recorded  lapsed                                                       │
 │                                                                          │

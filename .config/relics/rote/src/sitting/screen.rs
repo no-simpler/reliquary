@@ -275,7 +275,8 @@ pub fn card(frame: &Frame<'_>, field: &Field<'_>, style: Style) -> Card {
             card.entry(field, frame.tone);
         }
         card.gap();
-        card.line(under(frame, field, style));
+        let (left, right) = under(frame, field);
+        card.split(&left, &right, Tint::Dim);
     }
 
     if let Some(outturn) = frame.outturn {
@@ -312,9 +313,10 @@ pub fn card(frame: &Frame<'_>, field: &Field<'_>, style: Style) -> Card {
     card
 }
 
-/// The line under the field: how this prompt is going, and the one branch a
-/// person could not guess at.
-fn under(frame: &Frame<'_>, field: &Field<'_>, style: Style) -> Piece {
+/// The line under the field: how this prompt is going on the left, and on the
+/// right the keys a person could not guess at. `Card::split` draws it, and
+/// drops the chips where the status crowds them.
+fn under(frame: &Frame<'_>, field: &Field<'_>) -> (String, String) {
     let left = frame.status.clone().unwrap_or_default();
     let lookup = if frame.lookup { "^L  look it up" } else { "" };
     let reveal = crate::tui::reveal_chip(field.reveal);
@@ -324,27 +326,7 @@ fn under(frame: &Frame<'_>, field: &Field<'_>, style: Style) -> Piece {
         (true, false) => reveal.to_owned(),
         (true, true) => String::new(),
     };
-    // A refusal is the half that has to be read, so the chip is what gives.
-    // Saturating the gap instead would hand the card an over-long line and
-    // break the box rather than saying anything.
-    let room = left
-        .chars()
-        .count()
-        .saturating_add(right.chars().count())
-        .saturating_add(1);
-    let right = if room <= CONTENT {
-        right
-    } else {
-        String::new()
-    };
-    let gap = CONTENT
-        .saturating_sub(left.chars().count())
-        .saturating_sub(right.chars().count());
-    join(&[
-        Piece::painted(left, Tint::Dim, style),
-        Piece::plain(" ".repeat(gap)),
-        Piece::painted(right, Tint::Dim, style),
-    ])
+    (left, right)
 }
 
 fn row_line(row: &Row, names: usize, chips: usize, active: bool, style: Style) -> Piece {
@@ -432,12 +414,17 @@ fn aided(row: &Row) -> bool {
 fn detail(row: &Row, style: Style) -> Piece {
     match row.state {
         RowState::Passed { total_ms, retries } => {
-            let mut text = crate::render::seconds(total_ms);
-            if retries > 0 {
-                use std::fmt::Write as _;
-                let _ = write!(text, "   x{}", retries.saturating_add(1));
+            // A latency that was not measured is left out rather than dashed:
+            // a dash is a table's empty cell, and on a card beside a try count
+            // it reads as one more fact.
+            let mut parts = Vec::new();
+            if total_ms.is_some() {
+                parts.push(crate::render::seconds(total_ms));
             }
-            Piece::painted(text, Tint::Dim, style)
+            if retries > 0 {
+                parts.push(format!("x{}", retries.saturating_add(1)));
+            }
+            Piece::painted(parts.join("   "), Tint::Dim, style)
         }
         RowState::Failed { attempt } if attempt > 1 => {
             Piece::painted(format!("x{attempt}"), Tint::Dim, style)
@@ -511,7 +498,7 @@ fn intention(row: &Row) -> &'static str {
         Kind::Drill { aided: true, .. } => "looked up, so this one measures nothing",
         Kind::Drill { aided: false, .. } => "from memory — submit nothing to concede",
         Kind::Attach { .. } => match row.state {
-            RowState::Confirming => "again",
+            RowState::Confirming => crate::intake::AGAIN,
             RowState::Pending
             | RowState::Active { .. }
             | RowState::Checking
@@ -521,7 +508,7 @@ fn intention(row: &Row) -> &'static str {
             | RowState::Aborted
             | RowState::Claiming
             | RowState::Attached
-            | RowState::Differed => "type it as you know it — nothing here can check it",
+            | RowState::Differed => crate::intake::ATTACH_INTENTION,
         },
     }
 }

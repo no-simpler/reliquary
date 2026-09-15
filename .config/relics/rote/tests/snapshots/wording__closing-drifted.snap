@@ -1,11 +1,11 @@
 ---
 source: rote/tests/wording.rs
-assertion_line: 197
-expression: "closing(rows, captures, &notes)"
+assertion_line: 253
+expression: "closing(&rows, captures, &notes)"
 ---
 ╭─ done ────────────────────────────────────────────────────── Sun 13 Sep ─╮
 │                                                                          │
-│     warmup-p  aided                       ✓  —   x2                      │
+│     warmup-p  aided                       ✓  x2                          │
 │                                                                          │
 │   recorded  aided                                                        │
 │   warmup-p@1  an aided capture was refused — the vault and the           │

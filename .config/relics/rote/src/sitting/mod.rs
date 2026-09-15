@@ -19,7 +19,7 @@ use relic_core::style::Style;
 
 use crate::corpus::drill::Landing;
 use crate::corpus::record::{EngramId, Outcome};
-use crate::intake::{DIFFERED, EMPTY, Pair, Pairing};
+use crate::intake::{CONCEDED, DIFFERED, EMPTY, NOT_IT, Pair, Pairing, tried};
 use crate::ladder::{Ladder, Occasion, Rung, Standing};
 use crate::secret::Secret;
 use crate::slug::Slug;
@@ -128,8 +128,10 @@ pub fn roster(
                 slug: lineage.slug.clone(),
                 engram: dossier.engram,
                 task: Task::Attach(Box::new(Attaching {
-                    dossier: describe(&lineage.label(ordinal), dossier, today, ladder),
-                    replacing: false,
+                    dossier: describe(&lineage.label(ordinal), dossier, today),
+                    // Held but unreadable is still held: what is minted here
+                    // replaces it, and the row says so.
+                    replacing: verifiers.holds(&dossier.engram),
                 })),
             });
             continue;
@@ -160,12 +162,7 @@ pub fn roster(
 }
 
 /// One line naming what an attachment would continue.
-pub fn describe(
-    label: &str,
-    dossier: &crate::corpus::Dossier,
-    today: Date,
-    ladder: &Ladder,
-) -> String {
+pub fn describe(label: &str, dossier: &crate::corpus::Dossier, today: Date) -> String {
     let mut parts = vec![
         label.to_owned(),
         format!("enrolled {}", dossier.minted),
@@ -178,7 +175,6 @@ pub fn describe(
         )),
         Some(_) | None => parts.push("never reviewed".to_owned()),
     }
-    let _ = ladder;
     parts.join(" · ")
 }
 
@@ -271,8 +267,10 @@ pub type Record<'a> = dyn FnMut(&Capture) -> Result<()> + 'a;
 pub type Attach<'a> = dyn FnMut(usize, &Secret) -> Result<()> + 'a;
 
 /// How a secret is judged. Passed in rather than reached for, so the loop can be
-/// driven in a test without paying 256 MiB and half a second per key.
-pub type Verify<'a> = dyn Fn(&Verifier, &Secret) -> Result<bool> + 'a;
+/// driven in a test without paying 256 MiB and half a second per key. Told
+/// which turn it is judging, because a secret proved against a verifier below
+/// the cost floor is the one moment that verifier can be re-minted.
+pub type Verify<'a> = dyn Fn(usize, &Verifier, &Secret) -> Result<bool> + 'a;
 
 /// Where a sitting reads from and writes to.
 ///
@@ -378,7 +376,7 @@ impl Session<'_> {
     /// Ask about one engram until it is answered, passed over, or walked away
     /// from. `true` means the sitting was abandoned.
     fn drill(&mut self, index: usize, drilling: &Drilling) -> Result<bool> {
-        let mut prompt = Prompt::new(drilling.aided, drilling.rung);
+        let mut prompt = Prompt::new(drilling.aided);
         loop {
             match self.one_sample(index, drilling, &mut prompt)? {
                 Next::Again => {}
@@ -488,6 +486,11 @@ impl Session<'_> {
             return Ok(Next::Done);
         }
         prompt.missed = true;
+        prompt.reason = if outcome == Outcome::Blank {
+            CONCEDED
+        } else {
+            NOT_IT
+        };
         prompt.exhausted = prompt.ordinal >= self.max_attempts;
         let next = Prompt {
             ordinal: prompt.ordinal.saturating_add(1),
@@ -637,11 +640,13 @@ impl Session<'_> {
             return Ok(Outcome::Blank);
         }
         self.set(index, screen::RowState::Checking);
-        // Checking, so the box and its caret are gone and no key does anything.
+        // Checking: the box and its caret are taken down and no key does
+        // anything.
         let card = self.frame(index, Tone::Calm, status, lookup, &Field::blind());
         let verify = &self.verify;
-        let accepted =
-            crate::tui::while_working(self.console, &card, || verify(&drilling.verifier, secret))?;
+        let accepted = crate::tui::while_working(self.console, &card, || {
+            verify(index, &drilling.verifier, secret)
+        })?;
         Ok(if accepted {
             Outcome::Pass
         } else {
@@ -770,26 +775,40 @@ struct Prompt {
     aided: bool,
     missed: bool,
     exhausted: bool,
+    /// Why the last cold try was refused: a wrong answer, or none at all.
+    reason: &'static str,
     /// Where the first sample put the engram. Later samples in the same drill
     /// carry it rather than deciding again.
     resolved: Option<Rung>,
 }
 
 impl Prompt {
-    fn new(aided: bool, _rung: Rung) -> Self {
+    fn new(aided: bool) -> Self {
         Self {
             ordinal: 0,
             aided,
             missed: false,
             exhausted: false,
+            reason: NOT_IT,
             resolved: None,
         }
     }
 
     /// What the line under the field says about how this drill is going.
+    ///
+    /// A standing status, so it is drawn on every card the prompt rests at
+    /// and not only in the pulse that first said it. An aided entry is not
+    /// bounded and carries no count; once the cold tries are spent the field
+    /// says so for as long as it stays.
     fn status(self, max_attempts: u8) -> Option<String> {
-        (self.missed && !self.exhausted)
-            .then(|| crate::intake::tried(crate::intake::NOT_IT, self.ordinal, max_attempts))
+        if self.aided {
+            return None;
+        }
+        if self.exhausted {
+            return Some(OUT_OF_TRIES.to_owned());
+        }
+        self.missed
+            .then(|| tried(self.reason, self.ordinal, max_attempts))
     }
 }
 
@@ -931,12 +950,15 @@ mod tests {
         attached: Vec<String>,
         flashes: usize,
         drains: usize,
+        /// The card as it last stood, joined into one string.
+        last: String,
     }
 
     fn run(turns: &[Turn], keys: Vec<(Key, u64)>) -> Ran {
         let mut console = Fake::new(keys);
         let ladder = Ladder::default();
-        let verify = |_: &Verifier, secret: &Secret| Ok(secret.expose() == RIGHT.as_bytes());
+        let verify =
+            |_: usize, _: &Verifier, secret: &Secret| Ok(secret.expose() == RIGHT.as_bytes());
         let written = std::cell::RefCell::new(Vec::new());
         let attached = std::cell::RefCell::new(Vec::new());
         let outturn = {
@@ -970,6 +992,7 @@ mod tests {
             attached: attached.into_inner(),
             flashes: console.flashes,
             drains: console.drains,
+            last: console.last.join("\n"),
         }
     }
 
@@ -1135,6 +1158,75 @@ mod tests {
             3,
             "three tries, and the fourth is not a reading anybody asked for"
         );
+    }
+
+    #[test]
+    fn once_the_cold_tries_are_spent_the_field_says_so_and_keeps_the_lookup_on_offer() {
+        let turns = vec![drill_turn("a", Occasion::Review, false)];
+        let mut keys = Vec::new();
+        for _ in 0..3 {
+            keys.extend(typing("wrong", 300));
+        }
+        keys.push((Key::Escape, 9_000));
+        let ran = run(&turns, keys);
+        // The card the prompt rests at after the third miss, not a pulse.
+        assert!(ran.last.contains(super::OUT_OF_TRIES), "{}", ran.last);
+        assert!(ran.last.contains("^L"), "{}", ran.last);
+        assert!(!ran.last.contains("try 4"), "{}", ran.last);
+    }
+
+    #[test]
+    fn a_blank_is_a_concession_and_the_next_try_says_so() {
+        let turns = vec![drill_turn("a", Occasion::Review, false)];
+        let ran = run(&turns, vec![(Key::Enter, 800), (Key::Escape, 1_200)]);
+        assert!(
+            ran.last.contains("conceded · try 2 of 3"),
+            "nothing was offered, so it was not *not it*: {}",
+            ran.last
+        );
+    }
+
+    #[test]
+    fn an_aided_entry_carries_no_try_count() {
+        let turns = vec![drill_turn("a", Occasion::Review, false)];
+        let mut keys = typing("wrong", 300);
+        keys.push((Key::Lookup, 900));
+        keys.push((Key::Escape, 1_000));
+        let ran = run(&turns, keys);
+        assert!(!ran.last.contains("try 2"), "{}", ran.last);
+        assert!(ran.last.contains("measures nothing"), "{}", ran.last);
+    }
+
+    #[test]
+    fn the_verifier_is_told_which_turn_it_is_judging() {
+        let turns = vec![
+            drill_turn("a", Occasion::Review, false),
+            drill_turn("b", Occasion::Review, false),
+        ];
+        let mut keys = typing(RIGHT, 300);
+        keys.extend(typing(RIGHT, 900));
+        let mut console = Fake::new(keys);
+        let seen = std::cell::RefCell::new(Vec::new());
+        let verify = |index: usize, _: &Verifier, _: &Secret| {
+            seen.borrow_mut().push(index);
+            Ok(true)
+        };
+        let mut record = |_: &Capture| -> Result<()> { Ok(()) };
+        let mut attach = |_: usize, _: &Secret| -> Result<()> { Ok(()) };
+        super::run(
+            &turns,
+            3,
+            &Ladder::default(),
+            date(2026, 9, 13),
+            super::Wiring {
+                console: &mut console,
+                verify: &verify,
+                record: &mut record,
+                attach: &mut attach,
+            },
+        )
+        .unwrap();
+        assert_eq!(seen.into_inner(), vec![0, 1]);
     }
 
     #[test]

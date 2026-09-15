@@ -98,6 +98,20 @@ fn a_refused_drill_says_which_try_this_is_and_offers_the_lookup() {
 }
 
 #[test]
+fn a_drill_whose_tries_are_spent_says_so_and_still_offers_the_lookup() {
+    let rows = vec![drill(
+        name("escrow-p"),
+        Occasion::Review,
+        false,
+        RowState::Failed { attempt: 3 },
+    )];
+    insta::assert_snapshot!(
+        "drill-spent",
+        render(&rows, 0, Some("out of tries"), true, true)
+    );
+}
+
+#[test]
 fn an_aided_drill_says_it_measures_nothing() {
     let rows = vec![drill(
         name("escrow-p"),

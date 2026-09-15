@@ -94,6 +94,13 @@ impl Landing {
     /// Taken apart from the record type so the sitting can read a landing off a
     /// sample it has not written yet, and both get the same answer.
     pub fn from_parts(aided: bool, outcome: Outcome, serves_schedule: bool) -> Option<Self> {
+        // A prompt walked away from measured nothing whether or not the vault
+        // was open: nothing typed is nothing aided.
+        match outcome {
+            Outcome::Abort => return None,
+            Outcome::Skip => return Some(Self::Skipped),
+            Outcome::Pass | Outcome::Fail | Outcome::Blank => {}
+        }
         if aided {
             return Some(Self::Aided);
         }
@@ -106,8 +113,7 @@ impl Landing {
                     Self::Miss
                 }
             }
-            Outcome::Skip => Self::Skipped,
-            Outcome::Abort => return None,
+            Outcome::Skip | Outcome::Abort => return None,
         })
     }
 
@@ -346,6 +352,12 @@ mod tests {
             Some(Landing::Skipped)
         );
         assert_eq!(Landing::from_parts(false, Outcome::Abort, true), None);
+        // An open vault does not turn a prompt walked away from into a reading.
+        assert_eq!(
+            Landing::from_parts(true, Outcome::Skip, true),
+            Some(Landing::Skipped)
+        );
+        assert_eq!(Landing::from_parts(true, Outcome::Abort, true), None);
     }
 
     #[test]

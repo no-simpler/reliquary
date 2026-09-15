@@ -1,0 +1,18 @@
+---
+source: rote/tests/wording.rs
+assertion_line: 108
+expression: "render(&rows, 0, Some(\"out of tries\"), true, true)"
+---
+╭─ rote ────────────────────────────────────────────────────── Sun 13 Sep ─╮
+│                                                                          │
+│   ▸ escrow-p  review · 30d · at cap       ✗  x3                          │
+│                                                                          │
+│                                                                          │
+│   from memory — submit nothing to concede                                │
+│   ╭──────────────────────────────────────────────────────────────────╮   │
+│   │                                                                  │   │
+│   ╰──────────────────────────────────────────────────────────────────╯   │
+│                                                                          │
+│   out of tries                                          ^L  look it up   │
+│                                                                          │
+╰──────────────────────────────────────────────────────────────────────────╯

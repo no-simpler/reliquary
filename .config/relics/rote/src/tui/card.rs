@@ -373,8 +373,17 @@ impl Card {
     /// Add a line with something at each end.
     ///
     /// Two reserved areas on one line, so what is said on the left can change
-    /// without moving what sits on the right.
+    /// without moving what sits on the right. The left is what has to be read
+    /// and the right is a chip, so where the line cannot hold both the chip is
+    /// what gives: saturating the gap instead would hand the box an over-long
+    /// line and break it rather than say anything.
     pub fn split(&mut self, left: &str, right: &str, tint: Tint) -> &mut Self {
+        let wanted = left
+            .chars()
+            .count()
+            .saturating_add(right.chars().count())
+            .saturating_add(1);
+        let right = if wanted <= CONTENT { right } else { "" };
         let gap = CONTENT
             .saturating_sub(left.chars().count())
             .saturating_sub(right.chars().count());
@@ -800,5 +809,19 @@ mod tests {
         let mut drawn = card();
         drawn.say("one", Tint::Dim).say("two", Tint::Dim);
         assert_eq!(drawn.height(), drawn.render().len());
+    }
+
+    #[test]
+    fn a_split_line_that_cannot_hold_both_halves_keeps_the_left_and_drops_the_chip() {
+        let mut fits = card();
+        fits.split("said", "chip", Tint::Dim);
+        let line = fits.render().get(2).cloned().unwrap();
+        assert!(line.contains("said") && line.contains("chip"));
+
+        let mut crowded = card();
+        crowded.split(&"x".repeat(CONTENT - 2), "chip", Tint::Dim);
+        let line = crowded.render().get(2).cloned().unwrap();
+        assert!(!line.contains("chip"), "{line}");
+        assert_eq!(line.chars().count(), WIDTH);
     }
 }

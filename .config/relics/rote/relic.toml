@@ -7,4 +7,4 @@ description = "Spaced-repetition drill for the passwords you must hold in your h
 runtime = "rust"
 min-runtime-version = "1.89" # floor, never a pin — the workspace's rust-version
 brew-deps = []               # rustup owns the toolchain
-external-deps = []           # shells out to nothing; the drill must not depend on a lookup
+external-deps = ["ioreg (macOS): the machine identity, read once and never in the drill"]

@@ -48,6 +48,11 @@ signal-hook = { version = "0.4.4", default-features = false, features = ["iterat
 gethostname = "1.1.0"
 # Config only, and read rather than written.
 toml = "1.1.4"
+# A core dump would hold everything the zeroizing buffers exist to wipe, so
+# the process turns them off for itself rather than trusting the platform's
+# default, which is off on macOS and not on Linux. The same call ssh-agent
+# makes. Safe API, so the workspace's ban on unsafe code stands.
+rlimit = "0.10.2"
 # A revealed field draws characters, and a character is not a column. Counting
 # chars where the box counts columns is how a CJK glyph or a combining mark
 # breaks the border without tripping the assertion that guards it.

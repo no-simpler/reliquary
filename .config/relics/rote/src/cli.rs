@@ -156,6 +156,10 @@ pub struct PracticeArgs {
     /// Which lineages. All of them when none is named.
     #[arg(value_name = "LINEAGE")]
     pub lineages: Vec<Slug>,
+
+    /// Declare this sitting aided: the answer was looked up first.
+    #[arg(long)]
+    pub aided: bool,
 }
 
 /// Arguments for enrolment.
@@ -170,8 +174,8 @@ pub struct EnrollArgs {
     #[arg(long)]
     pub critical: bool,
 
-    /// Read the secret from a pipe instead of a terminal. Refused when any
-    /// standard stream is a terminal, so it cannot become a shell-history habit.
+    /// Read the secret from a pipe instead of a terminal. Refused when stdin
+    /// is a terminal, so it cannot become a shell-history habit.
     #[arg(long)]
     pub stdin: bool,
 }
@@ -289,7 +293,21 @@ mod tests {
     }
 
     #[test]
-    fn the_horizon_is_gone_and_so_is_the_verb_that_set_one() {
+    fn an_unknown_verb_is_refused() {
         assert!(Cli::try_parse_from(["rote", "probe", "a"]).is_err());
+    }
+
+    #[test]
+    fn a_sitting_is_declared_aided_on_either_side_of_the_verb_and_nowhere_else() {
+        assert!(Cli::parse_from(["rote", "--aided"]).aided);
+        assert!(Cli::parse_from(["rote", "--aided", "practice", "a"]).aided);
+        match Cli::parse_from(["rote", "practice", "--aided", "a"]).command {
+            Some(super::Command::Practice(args)) => assert!(args.aided),
+            _ => panic!("practice"),
+        }
+        assert!(
+            Cli::try_parse_from(["rote", "status", "--aided"]).is_err(),
+            "a reading is never aided"
+        );
     }
 }

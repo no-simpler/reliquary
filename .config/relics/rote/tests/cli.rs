@@ -70,11 +70,9 @@ fn completions_are_generated_for_a_real_shell() {
 }
 
 #[test]
-fn the_retired_verbs_are_gone() {
+fn an_unknown_verb_is_refused() {
     let rote = Rote::new();
-    for verb in ["add", "rekey", "probe"] {
-        rote.cmd(&[verb, "a"]).assert().failure();
-    }
+    rote.cmd(&["nonsense", "a"]).assert().failure();
 }
 
 // ── the flagship gate ────────────────────────────────────────────────────────
@@ -761,7 +759,7 @@ fn the_reminder_never_resolves_the_machine_identity() {
 fn a_restored_machine_is_told_every_lineage_is_dormant() {
     // The corpus comes back and the verifiers do not, which is the one state
     // the attachment verb exists to serve — and the state that also destroys
-    // the cache the reminder used to depend on.
+    // the reminder's cache, so the reminder cannot depend on it.
     let mut rote = Rote::new();
     rote.enroll(day(2020, 1, 1), "a", false);
     rote.cmd(&["status"]).assert().success();
@@ -844,9 +842,9 @@ fn a_config_ladder_changes_the_schedule_it_proposes() {
 }
 
 #[test]
-fn a_config_that_still_names_the_filler_policy_says_so() {
+fn a_config_with_a_key_this_binary_does_not_read_is_refused_loudly() {
     let rote = Rote::new();
-    rote.configure("filler = \"all\"\n");
+    rote.configure("policy = \"all\"\n");
     rote.cmd(&["status"]).assert().failure();
 }
 
@@ -887,8 +885,8 @@ fn drift_is_stated_by_doctor_and_restated_nowhere() {
         .assert()
         .success()
         .stdout(predicate::str::contains("disagree").not());
-    // A count, and nothing attached to it: the clause used to be present tense
-    // over a ninety-day window, and outlived the state it described.
+    // A count, and nothing attached to it: a present-tense clause over a
+    // ninety-day window outlives the state it describes.
     rote.cmd(&["stats"])
         .env("ROTE_UI", "human")
         .assert()
@@ -932,7 +930,7 @@ fn the_first_interval_band_says_what_it_covers() {
     let mut rote = Rote::new();
     let engram = rote.enroll(days_ago(10), "escrow-p", false);
     // Two drills on one day: an effective gap of zero, which the first band
-    // covers and used to report as a point value of one day.
+    // covers and must not report as a point value of one day.
     rote.capture(days_ago(1), "escrow-p", engram, Drilled::passed());
     rote.capture(days_ago(1), "escrow-p", engram, Drilled::passed());
     rote.cmd(&["stats"])

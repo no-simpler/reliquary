@@ -15,13 +15,13 @@ use crate::stats::{Retention, Stats, Trend};
 use crate::verifier::file::Verifiers;
 
 /// One row of the schedule.
-struct Standing_<'a> {
+struct ScheduleRow<'a> {
     lineage: &'a Lineage,
     dossier: &'a Dossier,
     ordinal: usize,
 }
 
-impl Standing_<'_> {
+impl ScheduleRow<'_> {
     fn label(&self) -> String {
         self.lineage.label(self.ordinal)
     }
@@ -43,7 +43,7 @@ pub fn status(ctx: &Context, args: &ScheduleArgs) -> Result<u8> {
     let verifiers = Verifiers::load(&ctx.paths.verifiers())?;
     let today = ctx.today();
 
-    let mut rows: Vec<Standing_<'_>> = Vec::new();
+    let mut rows: Vec<ScheduleRow<'_>> = Vec::new();
     for lineage in corpus.lineages() {
         if lineage.retired && !args.all {
             continue;
@@ -52,7 +52,7 @@ pub fn status(ctx: &Context, args: &ScheduleArgs) -> Result<u8> {
             if !dossier.is_current() && !args.history {
                 continue;
             }
-            rows.push(Standing_ {
+            rows.push(ScheduleRow {
                 lineage,
                 dossier,
                 ordinal: index.saturating_add(1),
@@ -138,7 +138,7 @@ pub fn status(ctx: &Context, args: &ScheduleArgs) -> Result<u8> {
     Ok(CLEAN)
 }
 
-fn status_notes(ctx: &Context, rows: &[Standing_<'_>], verifiers: &Verifiers) -> Vec<String> {
+fn status_notes(ctx: &Context, rows: &[ScheduleRow<'_>], verifiers: &Verifiers) -> Vec<String> {
     let mut notes = Vec::new();
     if let Ok(machine) = ctx.machine()
         && let Ok(state) = flagship(ctx, &machine)
@@ -172,7 +172,7 @@ enum Held {
     Unreadable,
 }
 
-fn here_state(row: &Standing_<'_>, verifiers: &Verifiers) -> Held {
+fn here_state(row: &ScheduleRow<'_>, verifiers: &Verifiers) -> Held {
     match verifiers.get(&row.dossier.engram) {
         Ok(Some(_)) => Held::Attached,
         Ok(None) => Held::Dormant,
@@ -182,7 +182,7 @@ fn here_state(row: &Standing_<'_>, verifiers: &Verifiers) -> Held {
 
 /// Whether this machine holds a verifier for an engram. Named for where it is
 /// true: attachment is machine-local, and the corpus does not know it.
-fn here(row: &Standing_<'_>, verifiers: &Verifiers) -> &'static str {
+fn here(row: &ScheduleRow<'_>, verifiers: &Verifiers) -> &'static str {
     match here_state(row, verifiers) {
         Held::Attached => "attached",
         Held::Dormant => "dormant",
@@ -197,7 +197,7 @@ fn standing_word(standing: Standing) -> &'static str {
     }
 }
 
-fn next_word(row: &Standing_<'_>, today: Date, ladder: &Ladder) -> String {
+fn next_word(row: &ScheduleRow<'_>, today: Date, ladder: &Ladder) -> String {
     if !row.current() {
         return "superseded".to_owned();
     }
@@ -273,7 +273,7 @@ fn stats_table(stats: &Stats, lineage: bool) -> Table {
             "AIDED",
             "RETENTION",
             "STREAK",
-            "TTFK",
+            "RECALL",
             "TYPING",
             "RECENT",
             "TREND",

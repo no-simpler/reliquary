@@ -196,6 +196,20 @@ impl Lineage {
         self.engrams.iter().any(|d| d.engram == *engram)
     }
 
+    /// Make an engram the current one.
+    ///
+    /// Every engram still standing is superseded first, so a lineage holds at
+    /// most one current engram by construction — whatever a merge of two
+    /// chains hands replay, an enrolment over a live lineage or a rotation
+    /// naming a predecessor this one never saw included.
+    fn make_current(&mut self, engram: EngramId, day: Date, at: Timestamp, proved: Option<bool>) {
+        for dossier in &mut self.engrams {
+            dossier.superseded.get_or_insert(day);
+        }
+        self.retired = false;
+        self.engrams.push(Dossier::minted(engram, day, at, proved));
+    }
+
     /// Every rotation this lineage has been through.
     pub fn cutovers(&self) -> Vec<Cutover> {
         let mut out = Vec::new();
@@ -295,29 +309,17 @@ impl Corpus {
                     return;
                 }
                 lineage.critical = event.critical;
-                lineage.retired = false;
-                lineage
-                    .engrams
-                    .push(Dossier::minted(event.engram, record.day, record.at, None));
+                lineage.make_current(event.engram, record.day, record.at, None);
                 self.by_engram.insert(event.engram, event.slug.clone());
             }
             Event::Rotate(event) => {
                 let Some(lineage) = self.lineages.get_mut(&event.slug) else {
                     return;
                 };
-                if let Some(outgoing) = lineage.dossier_mut(&event.from) {
-                    outgoing.superseded.get_or_insert(record.day);
-                }
                 if lineage.holds(&event.to) {
                     return;
                 }
-                lineage.retired = false;
-                lineage.engrams.push(Dossier::minted(
-                    event.to,
-                    record.day,
-                    record.at,
-                    Some(event.proved),
-                ));
+                lineage.make_current(event.to, record.day, record.at, Some(event.proved));
                 self.by_engram.insert(event.to, event.slug.clone());
             }
             Event::Attach(event) => {
@@ -921,5 +923,43 @@ mod tests {
         let one = enrolled(date(2026, 9, 1), "a", engram, false);
         let corpus = replay(&[one.clone(), one]);
         assert_eq!(corpus.lineage(&slug("a")).unwrap().engrams.len(), 1);
+    }
+
+    #[test]
+    fn a_lineage_holds_one_current_engram_whatever_a_merge_hands_replay() {
+        let first = EngramId::mint().unwrap();
+        let second = EngramId::mint().unwrap();
+        let third = EngramId::mint().unwrap();
+        let corpus = replay(&[
+            enrolled(date(2026, 9, 1), "a", first, false),
+            // A second machine enrolling over a live lineage.
+            enrolled(date(2026, 9, 5), "a", second, true),
+            // And rotating from a predecessor this replay never saw.
+            line(
+                date(2026, 9, 9),
+                Event::Rotate(Rotated {
+                    slug: slug("a"),
+                    from: EngramId::mint().unwrap(),
+                    to: third,
+                    proved: false,
+                }),
+            ),
+        ]);
+        let lineage = corpus.lineage(&slug("a")).unwrap();
+        assert_eq!(lineage.engrams.len(), 3);
+        assert_eq!(lineage.engrams.iter().filter(|d| d.is_current()).count(), 1);
+        assert_eq!(lineage.current().map(|d| d.engram), Some(third));
+        assert_eq!(
+            lineage.dossier(&first).unwrap().superseded,
+            Some(date(2026, 9, 5))
+        );
+        assert_eq!(
+            lineage.dossier(&second).unwrap().superseded,
+            Some(date(2026, 9, 9))
+        );
+        assert!(
+            lineage.critical,
+            "the latest enrolment says what the name is"
+        );
     }
 }

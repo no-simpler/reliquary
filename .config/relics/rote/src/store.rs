@@ -22,7 +22,7 @@
 //! corruption: it is what a bare-metal restore looks like, and it is correct.
 //! The history survives; the oracle does not, and `attach` is how it comes back.
 
-use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+use std::os::unix::fs::DirBuilderExt as _;
 
 use anyhow::{Context as _, Result, anyhow};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -247,11 +247,6 @@ pub fn ensure_dir(path: &Utf8Path) -> Result<()> {
     }
 }
 
-fn tighten(path: &Utf8Path) -> Result<()> {
-    fs_err::set_permissions(path, std::fs::Permissions::from_mode(FILE_MODE))
-        .with_context(|| format!("tightening {path}"))
-}
-
 /// A locked handle on this machine's chain, for the commands that write.
 pub struct Store {
     paths: Paths,
@@ -339,19 +334,19 @@ impl Store {
         };
         let raw = render(&record)?;
         let path = self.paths.chain(&self.machine);
-        let existed = path.exists();
         {
+            use fs_err::os::unix::fs::OpenOptionsExt as _;
             use std::io::Write as _;
+            // The mode is set at creation, so a chain is private from its
+            // first byte rather than from a moment after it.
             let mut file = fs_err::OpenOptions::new()
                 .create(true)
                 .append(true)
+                .mode(FILE_MODE)
                 .open(&path)?;
             writeln!(file, "{raw}")?;
             file.flush()?;
             file.into_parts().0.sync_all()?;
-        }
-        if !existed {
-            tighten(&path)?;
         }
         self.chains.accept(&self.machine.clone(), &raw, &record);
         Ok(())
@@ -454,10 +449,10 @@ impl Cache {
     /// Whether this still answers for what is on disk.
     ///
     /// A reminder must not depend on state destroyed by the event it exists to
-    /// announce. Absence used to read as silence, so a restore — corpus back,
-    /// verifiers and cache gone — left every lineage dormant and nothing saying
-    /// it. The same hole opens on any change `rote` did not make, such as a
-    /// verifier deleted by hand.
+    /// announce. A restore brings the corpus back and leaves the verifiers and
+    /// this file behind, so every lineage is dormant and only a cache that
+    /// knows it is stale can say so. The same holds for any change `rote` did
+    /// not make, such as a verifier deleted by hand.
     #[must_use]
     pub fn still_true(&self, paths: &Paths, today: Date) -> bool {
         self.built == Some(today) && self.witness == Witness::of(paths)

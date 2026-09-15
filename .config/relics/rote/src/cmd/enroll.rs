@@ -26,7 +26,10 @@ use crate::cmd::dialog::{Asking, Checked, Twice};
 use crate::corpus::record::{Attached, EngramId, Enrolled, Event, Retired, Rotated};
 use crate::corpus::{Corpus, Lineage};
 use crate::exit::{CLEAN, INCOMPLETE};
-use crate::intake::{EMPTY, make_verifier};
+use crate::intake::{
+    ATTACH_INTENTION, EMPTY, ENROLL_INTENTION, ROTATE_NEW_INTENTION, ROTATE_PROVE_INTENTION,
+    make_verifier,
+};
 use crate::secret::Secret;
 use crate::tui::term;
 use crate::verifier::file::Verifiers;
@@ -60,35 +63,22 @@ pub fn enroll(ctx: &Context, args: &EnrollArgs) -> Result<u8> {
 
     let today = ctx.today();
     let heading = args.slug.to_string();
+    let asking = Asking {
+        title: "enroll",
+        // Typed twice and compared, which is the whole of the check there can
+        // be for a secret nothing else here has ever seen.
+        checked: Checked::Yes,
+        heading: &heading,
+        intention: ENROLL_INTENTION,
+        cost: "nothing was enrolled",
+    };
     let mut console = dialog::open(args.stdin, ctx)?;
-    let Some(secret) = take_one(
-        ctx,
-        &mut console,
-        today,
-        &Asking {
-            title: "enroll",
-            // Typed twice and compared, which is the whole of the check there
-            // can be for a secret nothing else here has ever seen.
-            checked: Checked::Yes,
-            heading: &heading,
-            intention: "the secret this lineage will hold, typed twice",
-            cost: "nothing was enrolled",
-        },
-        args.stdin,
-    )?
-    else {
+    let Some(secret) = take_one(ctx, &mut console, today, &asking, args.stdin)? else {
         return Ok(INCOMPLETE);
     };
 
     let engram = EngramId::mint()?;
-    let verifier = dialog::working(
-        console.as_mut(),
-        today,
-        "enroll",
-        &heading,
-        "the secret this lineage will hold, typed twice",
-        || make_verifier(&secret),
-    )?;
+    let verifier = dialog::working(console.as_mut(), today, &asking, || make_verifier(&secret))?;
     drop(secret);
 
     let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
@@ -138,35 +128,22 @@ pub fn attach(ctx: &Context, args: &AttachArgs) -> Result<u8> {
     let heading = crate::tui::card::fit(&if replacing {
         format!("{label} · replacing the verifier held here")
     } else {
-        crate::sitting::describe(&label, dossier, today, &ladder)
+        crate::sitting::describe(&label, dossier, today)
     });
+    let asking = Asking {
+        title: "attach",
+        checked: Checked::No,
+        heading: &heading,
+        intention: ATTACH_INTENTION,
+        cost: "nothing was attached",
+    };
 
     let mut console = dialog::open(args.stdin, ctx)?;
-    let Some(secret) = take_one(
-        ctx,
-        &mut console,
-        today,
-        &Asking {
-            title: "attach",
-            checked: Checked::No,
-            heading: &heading,
-            intention: "type it as you know it — nothing here can check it",
-            cost: "nothing was attached",
-        },
-        args.stdin,
-    )?
-    else {
+    let Some(secret) = take_one(ctx, &mut console, today, &asking, args.stdin)? else {
         return Ok(INCOMPLETE);
     };
 
-    let verifier = dialog::working(
-        console.as_mut(),
-        today,
-        "attach",
-        &heading,
-        "type it as you know it — nothing here can check it",
-        || make_verifier(&secret),
-    )?;
+    let verifier = dialog::working(console.as_mut(), today, &asking, || make_verifier(&secret))?;
     drop(secret);
     verifiers.set(engram, &args.slug, today, &verifier);
     verifiers.save(&ctx.paths.verifiers())?;
@@ -243,7 +220,7 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
                 title: "rotate",
                 checked: Checked::Yes,
                 heading: &heading,
-                intention: "prove the current secret before it is replaced",
+                intention: ROTATE_PROVE_INTENTION,
                 cost: "nothing was replaced",
             },
             ctx,
@@ -252,37 +229,24 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
         return Ok(code);
     }
 
-    let Some(secret) = settle(
-        ctx,
-        &mut console,
-        today,
-        &Asking {
-            title: "rotate",
-            checked: Checked::Yes,
-            heading: &heading,
-            intention: "the new secret, typed twice",
-            cost: "nothing was replaced",
-        },
-        fed.pop(),
-    )?
-    else {
+    let asking = Asking {
+        title: "rotate",
+        checked: Checked::Yes,
+        heading: &heading,
+        intention: ROTATE_NEW_INTENTION,
+        cost: "nothing was replaced",
+    };
+    let Some(secret) = settle(ctx, &mut console, today, &asking, fed.pop())? else {
         return Ok(INCOMPLETE);
     };
 
     let to = EngramId::mint()?;
-    let verifier = dialog::working(
-        console.as_mut(),
-        today,
-        "rotate",
-        &heading,
-        "the new secret, typed twice",
-        || make_verifier(&secret),
-    )?;
+    let verifier = dialog::working(console.as_mut(), today, &asking, || make_verifier(&secret))?;
     drop(secret);
 
     // The rotation owes the secret it retires this: keyed by engram, setting the
-    // new one no longer overwrites the old, and a verifier for a secret that has
-    // been rotated away is a live oracle for it.
+    // new one leaves the old in place, and a verifier for a secret that has been
+    // rotated away is a live oracle for it.
     verifiers.remove(&from);
     verifiers.set(to, &args.slug, today, &verifier);
     verifiers.save(&ctx.paths.verifiers())?;

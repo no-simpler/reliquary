@@ -2,8 +2,8 @@
 //!
 //! **Bare `rote` asks for what is due and nothing else.** One lineage due out of
 //! ten means one turn. If nothing is due it says so and offers practice on one
-//! keystroke, rather than deciding on your behalf what to add — which is what
-//! the filler policy used to do, and what it was removed for.
+//! keystroke, rather than deciding on your behalf what to add: deciding what to
+//! add beyond what is due is the schedule deciding again.
 
 use anyhow::Result;
 use jiff::civil::Date;
@@ -13,12 +13,16 @@ use crate::cli::PracticeArgs;
 use crate::corpus::Corpus;
 use crate::corpus::record::{Captured, Event, SittingId};
 use crate::exit::{CLEAN, INCOMPLETE, LAPSE};
-use crate::intake::make_verifier;
+use crate::intake::{make_verifier, refreshed};
 use crate::ladder::{Ladder, Standing};
 use crate::sitting::{self, Mode, Turn, screen};
 use crate::store::Store;
 use crate::tui::{Screen as _, term};
 use crate::verifier::file::Verifiers;
+
+/// What bare `rote` and `rote practice` say when there is no lineage to ask
+/// about.
+const NOTHING_TO_DRILL: &str = "nothing to drill · rote enroll <name> to start one";
 
 /// Bare `rote`.
 ///
@@ -51,15 +55,16 @@ pub fn daily(ctx: &Context, aided: bool) -> Result<u8> {
     write_cache(ctx, &corpus, &verifiers, today, &ladder)?;
     if corpus.active().is_empty() {
         if !ctx.quiet {
-            println!("nothing to drill · rote enroll <name> to start one");
+            println!("{NOTHING_TO_DRILL}");
         }
         return Ok(CLEAN);
     }
 
     let waiting = nothing_due(&corpus, today, &ladder);
     // Not a refusal: with nothing due there is nothing to insist on, so a run
-    // that cannot open a dialog says what is waiting and leaves clean.
-    if !term::is_interactive() {
+    // that cannot open a dialog — no terminal, or one too small to hold a
+    // card — says what is waiting and leaves clean.
+    if !term::is_interactive() || !term::roomy() {
         if !ctx.quiet {
             println!("{waiting}");
         }
@@ -126,7 +131,7 @@ pub fn practice(ctx: &Context, args: &PracticeArgs, aided: bool) -> Result<u8> {
     );
     if roster.is_empty() {
         if !ctx.quiet {
-            println!("nothing to drill · rote enroll <name> to start one");
+            println!("{NOTHING_TO_DRILL}");
         }
         return Ok(CLEAN);
     }
@@ -166,10 +171,10 @@ fn work(
     open: Option<term::Terminal>,
 ) -> Result<u8> {
     let Opening {
-        before,
         verifiers,
         ladder,
         today,
+        ..
     } = *opening;
     let id = SittingId::mint()?;
     let mut console = match open {
@@ -177,16 +182,41 @@ fn work(
         None => term::Terminal::enter(ctx.style)?,
     };
 
-    let verify = |verifier: &crate::verifier::Verifier, secret: &crate::secret::Secret| {
-        Ok(verifier.accepts(secret)?)
-    };
-
-    // Two closures write to the same chain, so the handle is shared rather than
-    // borrowed twice. The cell is local to the sitting and never escapes it.
+    // Three closures reach the same chain and the same verifier file, so each
+    // handle is shared rather than borrowed twice. The cells are local to the
+    // sitting and never escape it.
     let store = std::cell::RefCell::new(store);
     let held = std::cell::RefCell::new(verifiers.clone());
-    let now = ctx.clock.now();
     let paths = ctx.paths.clone();
+
+    // Every record carries the instant it was written, not the instant the
+    // sitting opened: the clock is read once, at the process boundary, and
+    // each write adds what the monotonic clock has counted since.
+    let opened = std::time::Instant::now();
+    let now = ctx.clock.now();
+    let at = move || {
+        jiff::SignedDuration::try_from(opened.elapsed())
+            .ok()
+            .and_then(|elapsed| now.checked_add(elapsed).ok())
+            .unwrap_or(now)
+    };
+
+    // A secret proved against a verifier below the cost floor is re-minted at
+    // the floor while it is in hand, which is the one moment that costs
+    // nothing to ask for.
+    let verify =
+        |index: usize, verifier: &crate::verifier::Verifier, secret: &crate::secret::Secret| {
+            let accepted = verifier.accepts(secret)?;
+            if accepted
+                && let Some(turn) = turns.get(index)
+                && let Some(fresh) = refreshed(verifier, secret)?
+            {
+                let mut held = held.borrow_mut();
+                held.set(turn.engram, &turn.slug, today, &fresh);
+                held.save(&paths.verifiers())?;
+            }
+            Ok(accepted)
+        };
 
     let outturn = {
         // Each capture goes to the corpus the moment it is taken, so a sitting
@@ -199,27 +229,9 @@ fn work(
                 return Ok(());
             };
             store.borrow_mut().append(
-                now,
+                at(),
                 today,
-                Event::Capture(Captured {
-                    slug: turn.slug.clone(),
-                    engram: turn.engram,
-                    sitting: id,
-                    ordinal: capture.ordinal,
-                    occasion: capture.occasion,
-                    aided: capture.aided,
-                    outcome: capture.outcome,
-                    ttfk_ms: capture.ttfk_ms,
-                    total_ms: capture.total_ms,
-                    corrections: capture.corrections,
-                    paste_accepted: capture.paste_accepted,
-                    paste_refused: capture.paste_refused,
-                    scheduled_interval_days: drilling.scheduled_interval_days,
-                    actual_interval_days: drilling.actual_interval_days,
-                    effective_interval_days: drilling.effective_interval_days,
-                    rung_before: drilling.rung.get(),
-                    rung_after: capture.rung_after.get(),
-                }),
+                Event::Capture(captured(turn, drilling, id, capture)),
             )
         };
 
@@ -235,7 +247,7 @@ fn work(
             held.set(turn.engram, &turn.slug, today, &verifier);
             held.save(&paths.verifiers())?;
             store.borrow_mut().append(
-                now,
+                at(),
                 today,
                 Event::Attach(crate::corpus::record::Attached {
                     slug: turn.slug.clone(),
@@ -260,10 +272,59 @@ fn work(
 
     let store = store.into_inner();
     let held = held.into_inner();
+    close(ctx, opening, turns, &outturn, store, &held, console)
+}
+
+/// One typed sample as the record spells it: what the sitting saw, and what the
+/// roster knew about the engram when it planned the drill.
+fn captured(
+    turn: &Turn,
+    drilling: &sitting::Drilling,
+    id: SittingId,
+    capture: &sitting::Capture,
+) -> Captured {
+    Captured {
+        slug: turn.slug.clone(),
+        engram: turn.engram,
+        sitting: id,
+        ordinal: capture.ordinal,
+        occasion: capture.occasion,
+        aided: capture.aided,
+        outcome: capture.outcome,
+        ttfk_ms: capture.ttfk_ms,
+        total_ms: capture.total_ms,
+        corrections: capture.corrections,
+        paste_accepted: capture.paste_accepted,
+        paste_refused: capture.paste_refused,
+        scheduled_interval_days: drilling.scheduled_interval_days,
+        actual_interval_days: drilling.actual_interval_days,
+        effective_interval_days: drilling.effective_interval_days,
+        rung_before: drilling.rung.get(),
+        rung_after: capture.rung_after.get(),
+    }
+}
+
+/// The closing card, drawn from the corpus after the last write, held until it
+/// has been read; then the reminder, and the exit status.
+fn close(
+    ctx: &Context,
+    opening: &Opening<'_>,
+    turns: &[Turn],
+    outturn: &sitting::Outturn,
+    store: &Store,
+    held: &Verifiers,
+    mut console: term::Terminal,
+) -> Result<u8> {
+    let Opening {
+        before,
+        ladder,
+        today,
+        ..
+    } = *opening;
     let after = Corpus::replay(store.chains().records(), ladder);
-    let notes = closing_notes(turns, before, &after, &held);
+    let notes = closing_notes(turns, before, &after, held);
     let closing = screen::card(
-        &screen::Frame::done(today, &outturn.rows, &outturn, &notes),
+        &screen::Frame::done(today, &outturn.rows, outturn, &notes),
         &crate::tui::card::Field::blind(),
         ctx.style,
     );
@@ -271,7 +332,7 @@ fn work(
     console.hold()?;
     drop(console);
 
-    write_cache(ctx, &after, &held, today, ladder)?;
+    write_cache(ctx, &after, held, today, ladder)?;
     Ok(if outturn.aborted {
         INCOMPLETE
     } else if outturn.missed() > 0 {

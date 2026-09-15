@@ -6,8 +6,8 @@
 //! judging today's engram against yesterday's phrase, the textbook silent
 //! disarm. Keyed by engram, `doctor` can see it and name it.
 //!
-//! A rotation must therefore **remove** the outgoing entry. Replacing by name
-//! used to do that as a side effect; keying by engram does not, so it is now a
+//! A rotation must therefore **remove** the outgoing entry: keying by engram
+//! means setting the new one leaves the old in place, so the removal is a
 //! deliberate step with a test on it.
 
 use std::collections::BTreeMap;

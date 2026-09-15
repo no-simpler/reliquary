@@ -152,6 +152,20 @@ pub fn is_interactive() -> bool {
     std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
+/// Whether the terminal is large enough to hold a card.
+///
+/// Asked before a dialog opens, because a dialog that cannot draw its field
+/// would still be reading keystrokes into a secret nobody can see, with no
+/// caret and no way to reveal it.
+pub fn roomy() -> bool {
+    let (cols, rows) = size();
+    fits(cols, rows)
+}
+
+fn fits(cols: usize, rows: usize) -> bool {
+    cols >= MIN_COLS && rows >= MIN_ROWS
+}
+
 /// The terminal, held in dialog mode for as long as this value lives.
 pub struct Terminal {
     armed_at: Instant,
@@ -185,6 +199,12 @@ impl Terminal {
         if !is_interactive() {
             return Err(anyhow!(
                 "this has to be typed at a terminal, so there is nothing to run here"
+            ));
+        }
+        if !roomy() {
+            let (cols, rows) = size();
+            return Err(anyhow!(
+                "rote needs a terminal of {MIN_COLS} x {MIN_ROWS}, and this one is {cols} x {rows}"
             ));
         }
         claim()?;
@@ -288,6 +308,15 @@ impl Terminal {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
+        // The last frame may be a revealed field's, and a parked event may be
+        // a paste. Every other path wipes them; this is the path an error
+        // takes.
+        for line in &mut self.last {
+            line.zeroize();
+        }
+        if let Some(Event::Paste(mut text)) = self.pending.take() {
+            text.zeroize();
+        }
         restore();
         release();
     }
@@ -555,8 +584,17 @@ fn code_of(code: KeyCode, modifiers: KeyModifiers) -> Option<Key> {
 mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
-    use super::{Key, claim, key_of, place, release};
+    use super::{Key, MIN_COLS, MIN_ROWS, claim, fits, key_of, place, release};
     use crate::secret::Pasted;
+
+    #[test]
+    fn a_terminal_fits_at_the_minimum_and_not_a_column_or_a_row_under_it() {
+        assert!(fits(MIN_COLS, MIN_ROWS));
+        assert!(fits(MIN_COLS + 40, MIN_ROWS + 30));
+        assert!(!fits(MIN_COLS - 1, MIN_ROWS));
+        assert!(!fits(MIN_COLS, MIN_ROWS - 1));
+        assert!(!fits(0, 0));
+    }
 
     fn press(code: KeyCode, modifiers: KeyModifiers) -> Event {
         Event::Key(KeyEvent {

@@ -157,7 +157,9 @@ fn verifier_findings(health: &Health<'_>) -> Vec<Finding> {
                     "a verifier is weaker than the artifact it verifies, which makes it the cheaper attack path",
                 ))
                 .detailed_with(Detail::new(weak.join("\n")))
-                .fixed_by(FixHint::lossy("rote rotate the lineage named below")),
+                .fixed_by(FixHint::lossy(
+                    "rote attach the lineage named below, or pass one drill on it",
+                )),
         );
     }
     if !unreadable.is_empty() {

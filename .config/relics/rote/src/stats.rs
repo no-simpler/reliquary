@@ -74,14 +74,13 @@ pub struct Bucket {
 }
 
 /// The bands, in order. The tail is what irregular invocation populates, and
-/// with the ladder reaching a month the cap itself now lands in it.
+/// with the ladder reaching a month the cap itself lands in it.
 ///
-/// Ranges only: a hand-written label beside a range is a second statement of
-/// the same fact, and the two had already parted — the first band covers a gap
-/// of zero days and was labelled `1d`, which reads as a point value. A drill
-/// taken the same day reported as a one-day interval is the one reading that
-/// undercuts the guide's claim about the effective interval being the honest
-/// one. [`band_label`] is now the only place a band is spelled.
+/// Ranges only, and [`band_label`] is the only place a band is spelled: a
+/// hand-written label beside a range is a second statement of the same fact,
+/// and the first band covers a gap of zero days — a drill taken the same day
+/// reported as a one-day interval is the one reading that undercuts the
+/// guide's claim about the effective interval being the honest one.
 const BANDS: [(u32, u32); 5] = [(0, 1), (2, 4), (5, 8), (9, 30), (31, u32::MAX)];
 
 /// How a band is written, derived from what it covers so the two cannot part.
@@ -189,10 +188,15 @@ pub struct Punctuality {
     pub median_lateness: Option<u64>,
 }
 
-/// One drill, with the gap the merged corpus says preceded it.
+/// One drill, with the intervals the merged corpus says preceded it.
 struct Measured<'a> {
     drill: &'a Drill<'a>,
+    /// Days since the engram was last in front of a person by any route. The
+    /// effective interval.
     gap: u32,
+    /// Days since the schedule was last served, or since the mint. The actual
+    /// interval, and what punctuality is measured against.
+    since_anchor: u32,
 }
 
 /// The whole reading.
@@ -272,8 +276,8 @@ impl Stats {
             match item.drill.occasion {
                 Occasion::Review => {
                     stats.retention.record(passed);
-                    let late = first
-                        .actual_interval_days
+                    let late = item
+                        .since_anchor
                         .saturating_sub(first.scheduled_interval_days);
                     lateness.push(u64::from(late));
                     stats.punctuality.total = stats.punctuality.total.saturating_add(1);
@@ -315,22 +319,36 @@ fn band_of(buckets: &mut [Bucket], days: u32) -> Option<&mut Bucket> {
 }
 
 /// Walk the merged corpus once, pairing each drill with the gap since that
-/// engram was last in front of a person by any route.
+/// engram was last in front of a person by any route, and with the days since
+/// the schedule was last served.
+///
+/// Every date here only ever moves forward, the same rule the projection
+/// holds: a second machine in another zone can hand the merge a day that
+/// precedes its predecessor's.
 fn with_gaps<'a>(records: &[&'a Record], all: &'a [Drill<'a>]) -> Vec<Measured<'a>> {
+    type Key = (crate::corpus::record::SittingId, EngramId);
     let mut exposed: BTreeMap<EngramId, Date> = BTreeMap::new();
-    let mut gaps: BTreeMap<(crate::corpus::record::SittingId, EngramId), u32> = BTreeMap::new();
-    let mut open: BTreeSet<(crate::corpus::record::SittingId, EngramId)> = BTreeSet::new();
+    let mut anchor: BTreeMap<EngramId, Date> = BTreeMap::new();
+    let mut intervals: BTreeMap<Key, (u32, u32)> = BTreeMap::new();
+    let mut open: BTreeSet<Key> = BTreeSet::new();
+    let forward = |slot: &mut BTreeMap<EngramId, Date>, engram: EngramId, day: Date| {
+        slot.entry(engram)
+            .and_modify(|held| *held = (*held).max(day))
+            .or_insert(day);
+    };
 
     for record in records {
         match &record.event {
             Event::Enroll(event) => {
-                exposed.insert(event.engram, record.day);
+                forward(&mut exposed, event.engram, record.day);
+                forward(&mut anchor, event.engram, record.day);
             }
             Event::Rotate(event) => {
-                exposed.insert(event.to, record.day);
+                forward(&mut exposed, event.to, record.day);
+                forward(&mut anchor, event.to, record.day);
             }
             Event::Attach(event) => {
-                exposed.insert(event.engram, record.day);
+                forward(&mut exposed, event.engram, record.day);
             }
             Event::Retire(_) => {}
             Event::Capture(event) => {
@@ -339,23 +357,31 @@ fn with_gaps<'a>(records: &[&'a Record], all: &'a [Drill<'a>]) -> Vec<Measured<'
                 }
                 let key = (event.sitting, event.engram);
                 if open.insert(key) {
-                    let since = exposed
-                        .get(&event.engram)
-                        .map_or(0, |last| ladder::days_between(*last, record.day));
-                    gaps.insert(key, since);
+                    let since = |slot: &BTreeMap<EngramId, Date>| {
+                        slot.get(&event.engram)
+                            .map_or(0, |last| ladder::days_between(*last, record.day))
+                    };
+                    intervals.insert(key, (since(&exposed), since(&anchor)));
                 }
-                exposed.insert(event.engram, record.day);
+                forward(&mut exposed, event.engram, record.day);
+                if event.occasion.serves_the_schedule() {
+                    forward(&mut anchor, event.engram, record.day);
+                }
             }
         }
     }
 
     all.iter()
-        .map(|drill| Measured {
-            drill,
-            gap: gaps
+        .map(|drill| {
+            let (gap, since_anchor) = intervals
                 .get(&(drill.sitting, drill.engram))
                 .copied()
-                .unwrap_or(0),
+                .unwrap_or((0, 0));
+            Measured {
+                drill,
+                gap,
+                since_anchor,
+            }
         })
         .collect()
 }
@@ -467,14 +493,17 @@ fn per_engram(
 /// counted back from the most recent drill.
 ///
 /// A pass below the cap is not evidence in either direction and is stepped over;
-/// a failure ends the run. Computed here rather than carried in the projection,
-/// because a threshold belongs where the thresholds are — and because a counter
-/// maintained across a merge would count one real interval twice.
+/// a failure ends the run. The occasion is not consulted: a cold pass a month
+/// after the last exposure is the evidence the cutover gate wants whether or
+/// not the calendar asked for it, and a cold miss is a miss. Computed here
+/// rather than carried in the projection, because a threshold belongs where the
+/// thresholds are — and because a counter maintained across a merge would count
+/// one real interval twice.
 fn streak(mine: &[&Measured<'_>], ladder: &Ladder) -> u32 {
     let cap = ladder.cap_days();
     let mut count = 0u32;
     for item in mine.iter().rev() {
-        if item.drill.aided || item.drill.occasion != Occasion::Review {
+        if item.drill.aided {
             continue;
         }
         let Some(first) = item.drill.first() else {
@@ -523,8 +552,8 @@ fn per_lineage(
                 if item.drill.occasion == Occasion::Review
                     && let Some(passed) = scored(first.outcome)
                 {
-                    let late = first
-                        .actual_interval_days
+                    let late = item
+                        .since_anchor
                         .saturating_sub(first.scheduled_interval_days);
                     lateness.push(u64::from(late));
                     punctuality.total = punctuality.total.saturating_add(1);
@@ -553,14 +582,19 @@ fn per_lineage(
 /// Compare the last window of timings against the one before it.
 ///
 /// Fewer than [`TREND_FLOOR`] readings either side is [`Trend::Unknown`] rather
-/// than "steady": not knowing is not the same as knowing nothing changed.
+/// than "steady": not knowing is not the same as knowing nothing changed. The
+/// earlier side is the window before the last, not everything before it: a
+/// year of history would otherwise swamp a change that started last month.
 fn trend(ttfk: &[u64]) -> Trend {
     let count = ttfk.len();
     if count < TREND_FLOOR.saturating_mul(2) {
         return Trend::Unknown;
     }
     let split = count.saturating_sub(TREND_WINDOW.min(count / 2));
-    let (before, after) = ttfk.split_at(split.max(1));
+    let (earlier, after) = ttfk.split_at(split.max(1));
+    let before = earlier
+        .get(earlier.len().saturating_sub(TREND_WINDOW)..)
+        .unwrap_or(earlier);
     if before.len() < TREND_FLOOR || after.len() < TREND_FLOOR {
         return Trend::Unknown;
     }
@@ -845,6 +879,87 @@ mod tests {
         build.drill(date(2026, 9, 2), Occasion::Review, false, Outcome::Pass);
         let stats = build.gather(date(2026, 9, 2));
         assert_eq!(stats.engrams.first().unwrap().trend, Trend::Unknown);
+    }
+
+    #[test]
+    fn a_trend_compares_the_last_window_against_the_one_before_it_and_not_all_of_history() {
+        // Ten fast readings, then ten slow, then ten fast again. Against the
+        // window before it the last ten are faster; against all of history
+        // they would read as steady, which would hide the recovery.
+        let mut series = vec![1_000u64; 10];
+        series.extend(vec![2_000u64; 10]);
+        series.extend(vec![1_000u64; 10]);
+        assert_eq!(super::trend(&series), Trend::Falling(50));
+        let mut rising = vec![1_000u64; 20];
+        rising.extend(vec![1_500u64; 10]);
+        assert_eq!(super::trend(&rising), Trend::Rising(50));
+    }
+
+    #[test]
+    fn punctuality_is_measured_across_the_corpus_and_not_taken_from_the_record() {
+        // Every seeded record claims a thirty-day actual interval. The merged
+        // corpus says the review came a day after the mint, at a scheduled
+        // thirty, so it was not late at all.
+        let mut build = Build::new(date(2026, 9, 1));
+        build.drill(date(2026, 9, 2), Occasion::Review, false, Outcome::Pass);
+        let stats = build.gather(date(2026, 9, 2));
+        assert_eq!(stats.punctuality.total, 1);
+        assert_eq!(stats.punctuality.on_time, 1);
+        assert_eq!(stats.punctuality.median_lateness, Some(0));
+
+        // Forty days after the last review, against a scheduled thirty: ten
+        // late, whatever the witness says.
+        build.drill(date(2026, 10, 12), Occasion::Review, false, Outcome::Pass);
+        let stats = build.gather(date(2026, 10, 12));
+        assert_eq!(stats.punctuality.on_time, 1);
+        assert_eq!(stats.punctuality.total, 2);
+        assert_eq!(stats.punctuality.median_lateness, Some(0));
+        let rolled = stats.lineages.first().unwrap();
+        assert_eq!(rolled.punctuality.total, 2);
+        assert_eq!(rolled.punctuality.on_time, 1);
+    }
+
+    #[test]
+    fn practice_does_not_serve_the_schedule_and_so_does_not_move_the_actual_interval() {
+        let mut build = Build::new(date(2026, 8, 1));
+        build.drill(date(2026, 8, 31), Occasion::Review, false, Outcome::Pass);
+        build.drill(date(2026, 9, 15), Occasion::Practice, false, Outcome::Pass);
+        // Thirty-one days after the review, sixteen after the practice.
+        build.drill(date(2026, 10, 1), Occasion::Review, false, Outcome::Pass);
+        let stats = build.gather(date(2026, 10, 1));
+        assert_eq!(
+            stats.punctuality.median_lateness,
+            Some(0),
+            "the review landed a day past its schedule, which is on time"
+        );
+    }
+
+    #[test]
+    fn a_practice_pass_a_month_cold_counts_toward_the_streak_and_a_practice_miss_ends_it() {
+        let mut build = Build::new(date(2026, 6, 1));
+        build.drill(date(2026, 7, 1), Occasion::Review, false, Outcome::Pass);
+        build.drill(date(2026, 8, 1), Occasion::Practice, false, Outcome::Pass);
+        assert_eq!(
+            build
+                .gather(date(2026, 8, 1))
+                .engrams
+                .first()
+                .unwrap()
+                .streak,
+            2,
+            "a cold pass at the cap is evidence whoever asked for it"
+        );
+        build.drill(date(2026, 8, 2), Occasion::Practice, false, Outcome::Fail);
+        assert_eq!(
+            build
+                .gather(date(2026, 8, 2))
+                .engrams
+                .first()
+                .unwrap()
+                .streak,
+            0,
+            "and a cold miss is a miss"
+        );
     }
 
     #[test]

@@ -42,6 +42,8 @@ pub struct Context {
     pub style: Style,
     /// Whether to print only what was asked for.
     pub quiet: bool,
+    /// This machine's identity, once something has asked for it.
+    identity: std::cell::OnceCell<MachineId>,
 }
 
 impl Context {
@@ -52,14 +54,19 @@ impl Context {
 
     /// This machine's identity.
     ///
-    /// Resolved on demand rather than at startup: it costs a subprocess, and
-    /// the reminder — which runs before every shell prompt — never needs it.
+    /// Resolved on demand rather than at startup, and once per process: it
+    /// costs a subprocess, and the reminder — which runs before every shell
+    /// prompt — never needs it.
     ///
     /// # Errors
     ///
     /// When the platform offers no stable identifier.
     pub fn machine(&self) -> Result<MachineId> {
-        crate::machine::resolve(self.env.machine.as_deref())
+        if let Some(machine) = self.identity.get() {
+            return Ok(machine.clone());
+        }
+        let machine = crate::machine::resolve(self.env.machine.as_deref())?;
+        Ok(self.identity.get_or_init(|| machine).clone())
     }
 }
 
@@ -90,6 +97,7 @@ pub fn open_context(global: &Global) -> Result<Context> {
         format,
         style: global.color.style(format),
         quiet: global.quiet,
+        identity: std::cell::OnceCell::new(),
     })
 }
 
@@ -151,7 +159,7 @@ pub fn run(cli: &Cli) -> Result<u8> {
     let ctx = open_context(&cli.global)?;
     match &cli.command {
         None => sitting::daily(&ctx, cli.aided),
-        Some(Command::Practice(args)) => sitting::practice(&ctx, args, cli.aided),
+        Some(Command::Practice(args)) => sitting::practice(&ctx, args, cli.aided || args.aided),
         Some(Command::Status(args)) => reading::status(&ctx, args),
         Some(Command::Stats(args)) => reading::stats(&ctx, args),
         Some(Command::Log(args)) => reading::log(&ctx, args),

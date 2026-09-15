@@ -68,7 +68,7 @@ corpus/chain.rs   one file per machine, the filename grammar, the merge
 corpus/drill.rs   the derived grouping over captures, and where one landed
 doctor.rs         findings in relic_core's vocabulary, and their human shape
 exit.rs           the four exit codes
-intake.rs         the double-entry policy — pure, and shared with the sitting
+intake.rs         the double-entry policy, the prompt wording, the re-mint rule — pure
 ladder.rs         the schedule, the occasion, the standing — pure
 machine.rs        the identity, the hostname, the flagship marker
 render/           one row model, three renderers
@@ -205,8 +205,25 @@ Things a future edit must not undo.
   and it names the dossier it is about to continue first, which is an accident
   guard rather than a check.
 - **A rotation removes the outgoing verifier.** Keyed by engram, setting the new one
-  no longer overwrites the old, and a verifier for a secret that has been rotated
-  away is a live oracle for it. `doctor` grades one Broken.
+  leaves the old in place, and a verifier for a secret that has been rotated away
+  is a live oracle for it. `doctor` grades one Broken.
+- **A secret proved against a verifier below the cost floor re-mints it.** The one
+  moment the plaintext is in hand is the one moment a stale verifier can be brought
+  up to cost without asking for anything; `intake::refreshed` is the policy and the
+  sitting's `verify` wiring is its only caller. A stored cost above
+  `M_COST_CEILING_KIB` is unreadable rather than allocated, so a corrupted entry is
+  a message and never an abort.
+- **Every record carries the instant it was written.** The clock is read once, at
+  the process boundary, and a sitting adds what the monotonic clock has counted
+  since it opened — a two-minute sitting is not one second of records.
+- **A lineage holds at most one current engram, by construction.** Whatever a merge
+  hands replay — an enrolment over a live lineage, a rotation naming a predecessor
+  this chain never saw — making an engram current supersedes every earlier one that
+  still stands. The property test asserts it over every interleaving.
+- **A dialog does not open in a terminal too small to hold a card.** A field that
+  cannot be drawn would still be reading keystrokes into a secret nobody can see, so
+  `Terminal::enter` refuses first. Bare `rote` with nothing due treats a cramped
+  terminal like a non-interactive one and says what is waiting.
 - **Bracketed paste is enabled so a cold try can refuse one.** Every other prompt
   takes a paste, because measurement is the whole of the line and nothing else
   here measures. The refusal is a commitment device and not a control: DECSET
@@ -422,19 +439,17 @@ The card, the placement, the cursor and the refusal of a paste only exist at a
 terminal, so `assert_cmd` cannot reach them: without a tty `Terminal::enter` bails
 before any of it runs. Drive the published binary under `pty.fork` with `TIOCSWINSZ`
 for the size, replay the output stream, and assert on what a person would actually
-have seen. Two defects were found that way and by nothing else: a discarded
-`Terminal` restoring the screen under the live one, which echoed the new secret
-during a rotation, and a resize leaving a broken box until the next keystroke.
+have seen. The defects only this finds are of the class *the terminal was put back
+under a live dialog* and *a resize left a broken box until the next keystroke*.
 
 **The check that matters most is a grep of the raw stream for the typed secret**,
-including its prefixes — that is what caught the echo. It is now two checks
-rather than one, because a reveal is a legitimate frame: the token must be
-**absent across a whole run in which `ctrl-r` is never pressed**, and **present
-exactly once after one `ctrl-r`**. A run that never presses it is the regression
-the echo taught; a run that does is the feature. Use tokens that cannot collide
-with the card's own words; `new` and `one` both appear in it. The
-**attachment card is the second thing worth driving that way**, because it is the
-second place a typed secret becomes a verifier.
+including its prefixes, and it is two checks because a reveal is a legitimate
+frame: the token must be **absent across a whole run in which `ctrl-r` is never
+pressed**, and **present exactly once after one `ctrl-r`**. The first is the
+regression check, the second is the feature. Use tokens that cannot collide with
+the card's own words; `new` and `one` both appear in it. The **attachment card is
+the second thing worth driving that way**, because it is the second place a typed
+secret becomes a verifier.
 
 ## Measured, so it is not re-derived
 
@@ -473,9 +488,8 @@ shell prompt — never reaches it at all.
   earlier record; a whole-file replacement re-serializes the past on every save,
   and a bug in that path rewrites history rather than failing.
 - **One file per machine**, where the lane elsewhere has one file. An append-only
-  hash chain is not a mergeable structure. The old shape said so as a complaint —
-  it warned when a second hostname appeared — and this is that complaint made into
-  a design.
+  hash chain is not a mergeable structure, so a second writer is a second file
+  rather than a warning about a second hostname.
 - **Local civil dates**, where the lane elsewhere uses UTC instants and day
   differences. A daily ritual is a calendar concept and a UTC boundary falls in the
   small hours here. Each record freezes the day it was credited to, so a later

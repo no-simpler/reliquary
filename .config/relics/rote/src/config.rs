@@ -115,8 +115,8 @@ mod tests {
     fn an_unknown_key_is_refused_rather_than_ignored() {
         assert!(toml::from_str::<Config>("rollover = 6").is_err());
         assert!(
-            toml::from_str::<Config>("filler = \"all\"").is_err(),
-            "the filler policy is gone, and a config that still names it should say so"
+            toml::from_str::<Config>("policy = \"all\"").is_err(),
+            "a key this binary does not read is a setting that silently does nothing"
         );
     }
 

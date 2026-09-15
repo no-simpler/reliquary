@@ -7,6 +7,10 @@ use rote::cmd;
 use rote::exit::REFUSED;
 
 fn main() -> std::process::ExitCode {
+    // A core dump is a copy of every buffer this process ever zeroized. Off
+    // before anything else runs; best effort, because a platform that refuses
+    // the limit is still one worth drilling on.
+    let _ = rlimit::setrlimit(rlimit::Resource::CORE, 0, 0);
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {

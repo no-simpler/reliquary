@@ -73,19 +73,17 @@ pub fn typed(
 pub fn working<T>(
     console: Option<&mut term::Terminal>,
     today: Date,
-    title: &'static str,
-    heading: &str,
-    intention: &str,
+    asking: &Asking<'_>,
     work: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
     let Some(console) = console else {
         return work();
     };
     let prompt = tui::Ask {
-        title,
+        title: asking.title,
         resting: tui::card::Tone::Calm,
-        heading,
-        intention,
+        heading: asking.heading,
+        intention: asking.intention,
         status: None,
     };
     let card = tui::waiting(console, today, &prompt);
@@ -137,7 +135,11 @@ pub fn twice(
     let mut pair = Pair::new(ctx.config.max_attempts());
     let mut status: Option<String> = None;
     loop {
-        let asking = if pair.holds_one() { "again" } else { intention };
+        let asking = if pair.holds_one() {
+            crate::intake::AGAIN
+        } else {
+            intention
+        };
         let Some(offered) = typed(
             console,
             today,
@@ -215,7 +217,7 @@ pub fn prove(
         else {
             return abandoned(console, today, heading).map(Some);
         };
-        let held = working(Some(console), today, title, heading, intention, || {
+        let held = working(Some(console), today, asking, || {
             Ok(current.accepts(&offered)?)
         })?;
         if held {
