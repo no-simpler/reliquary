@@ -97,7 +97,7 @@ pub enum Command {
     /// Report the state of the drill, for assay and for coop.
     Doctor,
 
-    /// One line for the shell, or nothing. Reads only the reminder cache.
+    /// One line for the shell, or nothing. Reads the record and never writes.
     Banner,
 
     /// Reference: flags, records, exit codes.

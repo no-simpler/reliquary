@@ -123,8 +123,8 @@ impl Rote {
         self.state.join("verifiers.toml")
     }
 
-    pub fn cache_path(&self) -> Utf8PathBuf {
-        self.state.join("cache.json")
+    pub fn stamp_path(&self) -> Utf8PathBuf {
+        self.state.join("stamp")
     }
 
     /// Take the flagship marker away.

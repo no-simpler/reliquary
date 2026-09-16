@@ -21,7 +21,7 @@ Commands:
   rotate       Supersede a lineage's engram with a new secret. Its ladder starts over
   retire       Take a lineage off the schedule. Its history stays; its verifiers do not
   doctor       Report the state of the drill, for assay and for coop
-  banner       One line for the shell, or nothing. Reads only the reminder cache
+  banner       One line for the shell, or nothing. Reads the record and never writes
   help         Reference: flags, records, exit codes
   guide        Doctrine: what this is for, and why it is shaped this way
   completions  Shell completions

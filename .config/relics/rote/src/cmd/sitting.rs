@@ -8,7 +8,7 @@
 use anyhow::Result;
 use jiff::civil::Date;
 
-use super::{Context, open_store, write_cache};
+use super::{Context, open_store, save_verifiers};
 use crate::cli::PracticeArgs;
 use crate::corpus::Corpus;
 use crate::corpus::record::{Captured, Event, SittingId};
@@ -52,7 +52,6 @@ pub fn daily(ctx: &Context, aided: bool) -> Result<u8> {
         );
     }
 
-    write_cache(ctx, &corpus, &verifiers, today, &ladder)?;
     if corpus.active().is_empty() {
         if !ctx.quiet {
             println!("{NOTHING_TO_DRILL}");
@@ -187,7 +186,6 @@ fn work(
     // sitting and never escape it.
     let store = std::cell::RefCell::new(store);
     let held = std::cell::RefCell::new(verifiers.clone());
-    let paths = ctx.paths.clone();
 
     // Every record carries the instant it was written, not the instant the
     // sitting opened: the clock is read once, at the process boundary, and
@@ -213,7 +211,7 @@ fn work(
             {
                 let mut held = held.borrow_mut();
                 held.set(turn.engram, &turn.slug, today, &fresh);
-                held.save(&paths.verifiers())?;
+                save_verifiers(ctx, &held)?;
             }
             Ok(accepted)
         };
@@ -245,7 +243,7 @@ fn work(
             let verifier = make_verifier(secret)?;
             let mut held = held.borrow_mut();
             held.set(turn.engram, &turn.slug, today, &verifier);
-            held.save(&paths.verifiers())?;
+            save_verifiers(ctx, &held)?;
             store.borrow_mut().append(
                 at(),
                 today,
@@ -332,7 +330,6 @@ fn close(
     console.hold()?;
     drop(console);
 
-    write_cache(ctx, &after, held, today, ladder)?;
     Ok(if outturn.aborted {
         INCOMPLETE
     } else if outturn.missed() > 0 {

@@ -4,7 +4,7 @@ use anyhow::Result;
 use jiff::civil::Date;
 use relic_core::ui::Format;
 
-use super::{Context, block, flagship, read_chains, write_cache};
+use super::{Context, block, flagship, read_chains};
 use crate::cli::{LogArgs, MeasurementArgs, ScheduleArgs};
 use crate::corpus::record::{Captured, Event, Line};
 use crate::corpus::{Corpus, Dossier, Lineage};
@@ -115,11 +115,6 @@ pub fn status(ctx: &Context, args: &ScheduleArgs) -> Result<u8> {
             here(row, &verifiers).to_owned(),
         ]);
     }
-
-    // The reminder cache is derived, so the command that replays the whole
-    // corpus is also the natural place to repair it. Best effort: a reminder
-    // that cannot be rewritten is not a reason to fail a reading.
-    let _ = write_cache(ctx, &corpus, &verifiers, today, &ladder);
 
     let notes = status_notes(ctx, &rows, &verifiers);
     let heading = match ctx.machine() {

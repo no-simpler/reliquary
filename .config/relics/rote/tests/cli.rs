@@ -279,7 +279,6 @@ fn a_dormant_lineage_is_reported_and_is_not_counted_as_due() {
 fn attaching_clears_the_reminder_it_was_raised_by() {
     let mut rote = Rote::new();
     rote.enroll_dormant(day(2026, 9, 1), "a");
-    rote.cmd(&["status"]).assert().success();
     rote.cmd(&["attach", "a", "--stdin"])
         .write_stdin(format!("{}\n", support::SECRET))
         .assert()
@@ -732,7 +731,6 @@ fn the_reminder_says_nothing_when_there_is_nothing_to_say() {
 fn the_reminder_counts_and_never_names() {
     let mut rote = Rote::new();
     rote.enroll(day(2020, 1, 1), "escrow-p", false);
-    rote.cmd(&["status"]).assert().success();
     rote.cmd(&["banner"])
         .assert()
         .success()
@@ -747,7 +745,6 @@ fn the_reminder_never_resolves_the_machine_identity() {
     // proves it: anything reaching for the identity would fail on it.
     let mut rote = Rote::new();
     rote.enroll(day(2020, 1, 1), "a", false);
-    rote.cmd(&["status"]).assert().success();
     rote.cmd(&["banner"])
         .env("ROTE_MACHINE", "not-an-identity")
         .assert()
@@ -758,30 +755,42 @@ fn the_reminder_never_resolves_the_machine_identity() {
 #[test]
 fn a_restored_machine_is_told_every_lineage_is_dormant() {
     // The corpus comes back and the verifiers do not, which is the one state
-    // the attachment verb exists to serve — and the state that also destroys
-    // the reminder's cache, so the reminder cannot depend on it.
+    // the attachment verb exists to serve. Nothing in the machine-local tree
+    // survives a restore either — no verifier, no stamp — and the reminder
+    // depends on none of it: it reads the corpus and the verifier file afresh.
     let mut rote = Rote::new();
     rote.enroll(day(2020, 1, 1), "a", false);
-    rote.cmd(&["status"]).assert().success();
+    rote.enroll(day(2020, 1, 1), "b", false);
     std::fs::remove_file(rote.verifiers_path()).unwrap();
-    std::fs::remove_file(rote.cache_path()).unwrap();
+    assert!(!rote.stamp_path().exists());
     rote.cmd(&["banner"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("dormant"));
+        .stdout(predicate::str::contains("2 lineages dormant here"))
+        .stdout(predicate::str::contains("due").not());
 }
 
 #[test]
-fn a_verifier_taken_away_by_hand_is_noticed_without_a_restore() {
-    let mut rote = Rote::new();
-    rote.enroll(day(2020, 1, 1), "a", false);
-    rote.cmd(&["status"]).assert().success();
-    // The cache still asserts the old answer; only the witness says otherwise.
-    std::fs::remove_file(rote.verifiers_path()).unwrap();
-    rote.cmd(&["banner"])
+fn every_write_touches_the_stamp_and_a_reading_does_not() {
+    // The stamp is what the shell reminder keys on, so a write that misses it
+    // is a change the reminder never hears about. Enrolling saves a verifier
+    // and appends a record; retiring does both again; status writes nothing.
+    let rote = Rote::new();
+    assert!(!rote.stamp_path().exists());
+    rote.cmd(&["enroll", "a", "--stdin"])
+        .write_stdin(format!("{}\n", support::SECRET))
         .assert()
-        .success()
-        .stdout(predicate::str::contains("dormant"));
+        .success();
+    assert!(rote.stamp_path().is_file());
+    assert_eq!(std::fs::read_to_string(rote.stamp_path()).unwrap(), "");
+
+    std::fs::remove_file(rote.stamp_path()).unwrap();
+    rote.cmd(&["status"]).assert().success();
+    rote.cmd(&["banner"]).assert().success();
+    assert!(!rote.stamp_path().exists());
+
+    rote.cmd(&["retire", "a"]).assert().success();
+    assert!(rote.stamp_path().is_file());
 }
 
 #[test]

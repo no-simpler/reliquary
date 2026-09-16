@@ -18,7 +18,7 @@ pub const DEFAULT_MAX_ATTEMPTS: u8 = 3;
 pub struct Config {
     /// Where the corpus lives. Defaults to `~/Trove/ark/rote`.
     pub root: Option<Utf8PathBuf>,
-    /// Where the verifiers and the reminder cache live. Defaults to
+    /// Where the verifiers and the stamp live. Defaults to
     /// `~/.local/state/rote`.
     pub state: Option<Utf8PathBuf>,
     /// The hour a drill day begins, 0 to 23.

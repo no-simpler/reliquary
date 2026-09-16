@@ -20,7 +20,7 @@
 use anyhow::{Result, bail};
 use jiff::civil::Date;
 
-use super::{Context, dialog, open_store, write_cache};
+use super::{Context, dialog, open_store, save_verifiers};
 use crate::cli::{AttachArgs, EnrollArgs, RetireArgs, RotateArgs};
 use crate::cmd::dialog::{Asking, Checked, Twice};
 use crate::corpus::record::{Attached, EngramId, Enrolled, Event, Retired, Rotated};
@@ -83,7 +83,7 @@ pub fn enroll(ctx: &Context, args: &EnrollArgs) -> Result<u8> {
 
     let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
     verifiers.set(engram, &args.slug, today, &verifier);
-    verifiers.save(&ctx.paths.verifiers())?;
+    save_verifiers(ctx, &verifiers)?;
 
     store.append(
         ctx.clock.now(),
@@ -95,8 +95,6 @@ pub fn enroll(ctx: &Context, args: &EnrollArgs) -> Result<u8> {
         }),
     )?;
 
-    let after = Corpus::replay(store.chains().records(), &ladder);
-    write_cache(ctx, &after, &verifiers, today, &ladder)?;
     let said = format!("{}@1 enrolled · first review tomorrow", args.slug);
     dialog::settled(ctx, console.as_mut(), today, &heading, &said, Checked::Yes)
 }
@@ -146,7 +144,7 @@ pub fn attach(ctx: &Context, args: &AttachArgs) -> Result<u8> {
     let verifier = dialog::working(console.as_mut(), today, &asking, || make_verifier(&secret))?;
     drop(secret);
     verifiers.set(engram, &args.slug, today, &verifier);
-    verifiers.save(&ctx.paths.verifiers())?;
+    save_verifiers(ctx, &verifiers)?;
 
     store.append(
         ctx.clock.now(),
@@ -157,8 +155,6 @@ pub fn attach(ctx: &Context, args: &AttachArgs) -> Result<u8> {
         }),
     )?;
 
-    let after = Corpus::replay(store.chains().records(), &ladder);
-    write_cache(ctx, &after, &verifiers, today, &ladder)?;
     let said = format!("{label} attached here · rote took your word for it");
     dialog::settled(ctx, console.as_mut(), today, &heading, &said, Checked::No)
 }
@@ -249,7 +245,7 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
     // rotated away is a live oracle for it.
     verifiers.remove(&from);
     verifiers.set(to, &args.slug, today, &verifier);
-    verifiers.save(&ctx.paths.verifiers())?;
+    save_verifiers(ctx, &verifiers)?;
 
     store.append(
         ctx.clock.now(),
@@ -263,7 +259,6 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
     )?;
 
     let after = Corpus::replay(store.chains().records(), &ladder);
-    write_cache(ctx, &after, &verifiers, today, &ladder)?;
     let ordinal = after
         .lineage(&args.slug)
         .and_then(|lineage| lineage.ordinal(&to))
@@ -287,7 +282,7 @@ pub fn retire(ctx: &Context, args: &RetireArgs) -> Result<u8> {
     for dossier in &lineage.engrams {
         verifiers.remove(&dossier.engram);
     }
-    verifiers.save(&ctx.paths.verifiers())?;
+    save_verifiers(ctx, &verifiers)?;
 
     let today = ctx.today();
     store.append(
@@ -298,8 +293,6 @@ pub fn retire(ctx: &Context, args: &RetireArgs) -> Result<u8> {
         }),
     )?;
 
-    let after = Corpus::replay(store.chains().records(), &ladder);
-    write_cache(ctx, &after, &verifiers, today, &ladder)?;
     if !ctx.quiet {
         println!(
             "{} retired · its history stays, its verifiers do not",

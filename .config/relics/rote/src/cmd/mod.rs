@@ -23,7 +23,7 @@ use crate::exit::CLEAN;
 use crate::ladder::{Ladder, Standing};
 use crate::machine::{Flagship, MachineId};
 use crate::render::{Table, agent, human};
-use crate::store::{Cache, Clock, Env, Paths, Store};
+use crate::store::{Clock, Env, Paths, Store};
 use crate::verifier::file::Verifiers;
 
 /// What every command is handed.
@@ -207,52 +207,54 @@ fn help_topic(topic: Option<&str>) -> Result<()> {
     )
 }
 
-/// Project the schedule down to what the reminder reads.
+/// What the reminder says: two counts, derived and never stored.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Reminder {
+    /// Lineages that can be drilled today and are asked for.
+    pub due: usize,
+    /// Active lineages with no verifier on this machine. They cannot be
+    /// drilled, so they are not counted as due — they are counted here.
+    pub dormant: usize,
+}
+
+/// Project the schedule down to the two questions a nag asks.
 ///
 /// A dormant lineage is counted apart from a due one rather than among them: it
 /// cannot be drilled at all, so calling it due would be asking for something
 /// that is not on offer.
-fn write_cache(
-    ctx: &Context,
+pub(super) fn reminder(
     corpus: &Corpus,
     verifiers: &Verifiers,
     today: Date,
     ladder: &Ladder,
-) -> Result<()> {
-    project(ctx, corpus, verifiers, today, ladder).save(&ctx.paths.cache())
-}
-
-/// The projection itself, so the reminder can redo it when its own copy has
-/// stopped answering for what is on disk.
-pub(super) fn project(
-    ctx: &Context,
-    corpus: &Corpus,
-    verifiers: &Verifiers,
-    today: Date,
-    ladder: &Ladder,
-) -> Cache {
-    let mut due = Vec::new();
-    let mut dormant = 0usize;
+) -> Reminder {
+    let mut counted = Reminder::default();
     for lineage in corpus.active() {
         let Some(dossier) = lineage.current() else {
             continue;
         };
         if !verifiers.holds(&dossier.engram) {
-            dormant = dormant.saturating_add(1);
+            counted.dormant = counted.dormant.saturating_add(1);
             continue;
         }
-        due.push(match dossier.standing(today, ladder) {
-            Standing::Due => today,
-            Standing::Waiting { until } => until,
-        });
+        if let Standing::Due = dossier.standing(today, ladder) {
+            counted.due = counted.due.saturating_add(1);
+        }
     }
-    Cache {
-        v: crate::corpus::record::SCHEMA,
-        due,
-        dormant,
-        witness: crate::store::Witness::of(&ctx.paths),
-        built: Some(today),
-    }
+    counted
+}
+
+/// Write the verifier file, then the stamp.
+///
+/// The one path a verifier reaches disk by, so a change to what this machine
+/// holds is a change the stamp has seen.
+///
+/// # Errors
+///
+/// When either file cannot be written.
+pub(super) fn save_verifiers(ctx: &Context, held: &Verifiers) -> Result<()> {
+    held.save(&ctx.paths.verifiers())?;
+    crate::store::touch_stamp(&ctx.paths)
 }
 
 /// Whether this machine may write, without taking the lock.
