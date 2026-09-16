@@ -22,9 +22,6 @@ pub const DIFFERED: &str = "the two entries differ";
 /// What it says when nothing was typed.
 pub const EMPTY: &str = "an empty secret is not a secret";
 
-/// What it says when a drill try was wrong.
-pub const NOT_IT: &str = "not it";
-
 /// What every prompt that takes a secret says it is for. One spelling each,
 /// read by the sitting's card and by the commands alike.
 pub const ENROLL_INTENTION: &str = "the secret this lineage will hold, typed twice";

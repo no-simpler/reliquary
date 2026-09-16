@@ -15,7 +15,6 @@ use relic_core::style::{Style, Tint};
 
 use crate::corpus::Corpus;
 use crate::corpus::chain::{Chains, Issue};
-use crate::corpus::record::Event;
 use crate::ladder::{Ladder, Standing};
 use crate::machine::{Flagship, MachineId};
 use crate::store::Paths;
@@ -79,7 +78,6 @@ pub fn report(health: &Health<'_>) -> Report {
     findings.extend(placement(health));
     findings.extend(verifier_findings(health));
     findings.extend(chain_findings(health));
-    findings.extend(divergence(health));
     findings.extend(concurrency(health));
     findings.extend(drill_findings(health));
     findings.extend(machine_findings(health));
@@ -115,7 +113,6 @@ fn verifier_findings(health: &Health<'_>) -> Vec<Finding> {
     let mut unreadable = Vec::new();
     let mut superseded = Vec::new();
     let mut orphan = Vec::new();
-    let mut mislabelled = Vec::new();
 
     for (engram, held) in health.verifiers.held() {
         match health.verifiers.get(engram) {
@@ -133,12 +130,6 @@ fn verifier_findings(health: &Health<'_>) -> Vec<Finding> {
         match health.corpus.owner(engram) {
             None => orphan.push(format!("{}  {}", held.slug, engram)),
             Some(lineage) => {
-                if held.slug != lineage.slug {
-                    mislabelled.push(format!(
-                        "{engram}  filed under {} and the corpus says {}",
-                        held.slug, lineage.slug
-                    ));
-                }
                 let current = lineage.current().is_some_and(|d| d.engram == *engram);
                 if !current {
                     superseded.push(health.corpus.label(engram));
@@ -183,15 +174,6 @@ fn verifier_findings(health: &Health<'_>) -> Vec<Finding> {
                     "remove the entry from {}",
                     health.paths.verifiers()
                 ))),
-        );
-    }
-    if !mislabelled.is_empty() {
-        findings.push(
-            verifiers_station()
-                .soft(summary(
-                    "a verifier names a lineage the corpus does not, so the file has been edited by hand",
-                ))
-                .detailed_with(Detail::new(mislabelled.join("\n"))),
         );
     }
     if !orphan.is_empty() {
@@ -270,44 +252,6 @@ fn chain_findings(health: &Health<'_>) -> Vec<Finding> {
     findings
 }
 
-/// A capture whose recorded predecessor is not the one merged order gives it.
-///
-/// The witness earning its keep: two machines that wrote without having seen
-/// each other each believed a different history, and this is where that shows.
-fn divergence(health: &Health<'_>) -> Vec<Finding> {
-    let mut rungs: BTreeMap<crate::corpus::record::EngramId, u8> = BTreeMap::new();
-    let mut found = Vec::new();
-    for record in health.chains.records() {
-        let Event::Capture(capture) = &record.event else {
-            continue;
-        };
-        if !capture.scores() {
-            continue;
-        }
-        let seen = rungs.get(&capture.engram).copied().unwrap_or(0);
-        if capture.rung_before != seen {
-            found.push(format!(
-                "{}  {}  says it followed rung {} and merged order gives rung {seen}",
-                health.corpus.label(&capture.engram),
-                record.day,
-                capture.rung_before
-            ));
-        }
-        rungs.insert(capture.engram, capture.rung_after);
-    }
-    if found.is_empty() {
-        return Vec::new();
-    }
-    vec![
-        corpus_station()
-            .soft(summary(
-                "a capture does not follow the one before it, so two chains were written against different histories",
-            ))
-            .detailed_with(Detail::new(found.join("\n")))
-            .fixed_by(FixHint::lossy("drill on one machine · rote machines")),
-    ]
-}
-
 /// Two machines writing on one drill day, which double-counts retention.
 fn concurrency(health: &Health<'_>) -> Vec<Finding> {
     let mut days: BTreeMap<Date, BTreeSet<&MachineId>> = BTreeMap::new();
@@ -338,10 +282,13 @@ fn concurrency(health: &Health<'_>) -> Vec<Finding> {
 }
 
 /// What is wrong with the drill itself.
+///
+/// One finding per dormant lineage, because each has its own fix: a dormant
+/// lineage is what a restore looks like, and the verb that puts a verifier
+/// back takes one name.
 fn drill_findings(health: &Health<'_>) -> Vec<Finding> {
     let mut overdue = Vec::new();
-    let mut dormant = Vec::new();
-    let mut mismatched = Vec::new();
+    let mut findings = Vec::new();
 
     for lineage in health.corpus.active() {
         let Some(dossier) = lineage.current() else {
@@ -349,7 +296,14 @@ fn drill_findings(health: &Health<'_>) -> Vec<Finding> {
         };
         let label = health.corpus.label(&dossier.engram);
         if !health.verifiers.holds(&dossier.engram) {
-            dormant.push(label.clone());
+            findings.push(
+                drill_station()
+                    .soft(summary(
+                        "a lineage on the schedule has no verifier on this machine, so it cannot be drilled",
+                    ))
+                    .detailed_with(Detail::new(label.clone()))
+                    .fixed_by(FixHint::lossy(&format!("rote attach {}", lineage.slug))),
+            );
         }
         if matches!(dossier.standing(health.today, health.ladder), Standing::Due) {
             let late = dossier.days_overdue(health.today, health.ladder);
@@ -364,40 +318,14 @@ fn drill_findings(health: &Health<'_>) -> Vec<Finding> {
                 ));
             }
         }
-        if dossier.aided_mismatch {
-            mismatched.push(label);
-        }
     }
 
-    let mut findings = Vec::new();
-    if !dormant.is_empty() {
-        findings.push(
-            drill_station()
-                .soft(summary(
-                    "a lineage on the schedule has no verifier on this machine, so it cannot be drilled",
-                ))
-                .detailed_with(Detail::new(dormant.join("\n")))
-                .fixed_by(FixHint::lossy("rote")),
-        );
-    }
     if !overdue.is_empty() {
         findings.push(
             drill_station()
                 .soft(summary("a drill is overdue"))
                 .detailed_with(Detail::new(overdue.join("\n")))
                 .fixed_by(FixHint::lossy("rote")),
-        );
-    }
-    if !mismatched.is_empty() {
-        findings.push(
-            drill_station()
-                .soft(summary(
-                    "an aided capture was refused, so the vault and the verifier hold different secrets",
-                ))
-                .detailed_with(Detail::new(mismatched.join("\n")))
-                .fixed_by(FixHint::lossy(
-                    "confirm which one is current, then rote rotate",
-                )),
         );
     }
     findings

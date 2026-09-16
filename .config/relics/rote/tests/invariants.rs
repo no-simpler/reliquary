@@ -8,8 +8,8 @@ mod support;
 
 use proptest::prelude::*;
 use rote::corpus::Corpus;
-use rote::corpus::record::Event;
-use rote::ladder::Ladder;
+use rote::corpus::record::{Event, Outcome};
+use rote::ladder::{Ladder, Rung, Standing};
 use support::{Seeded, World, merged, shape, steps};
 
 proptest! {
@@ -107,6 +107,71 @@ proptest! {
                     prop_assert!(dossier.anchor >= review);
                 }
             }
+        }
+    }
+
+    /// A fail returns an engram to the foot on any day, asked for or not, and
+    /// anchors the schedule there.
+    #[test]
+    fn a_fail_on_any_day_returns_to_the_foot(script in steps()) {
+        let records = World::build(&script);
+        let ladder = Ladder::default();
+        let ordered = merged(&records);
+        for (index, record) in ordered.iter().enumerate() {
+            let Event::Drill(drilled) = &record.event else {
+                continue;
+            };
+            if drilled.outcome != Outcome::Fail {
+                continue;
+            }
+            let after = Corpus::replay(ordered.iter().take(index + 1).copied(), &ladder);
+            let Some(dossier) = after
+                .owner(&drilled.engram)
+                .and_then(|lineage| lineage.dossier(&drilled.engram))
+            else {
+                continue;
+            };
+            prop_assert_eq!(dossier.rung, Rung::FIRST);
+            prop_assert!(dossier.anchor >= record.day);
+            prop_assert!(dossier.last_review.is_some_and(|day| day >= record.day));
+        }
+    }
+
+    /// A pass on a day the schedule did not ask moves neither the rung nor
+    /// the anchor; only the exposure moves.
+    #[test]
+    fn a_pass_while_not_due_moves_nothing(script in steps()) {
+        let records = World::build(&script);
+        let ladder = Ladder::default();
+        let ordered = merged(&records);
+        for (index, record) in ordered.iter().enumerate() {
+            let Event::Drill(drilled) = &record.event else {
+                continue;
+            };
+            if drilled.outcome != Outcome::Pass {
+                continue;
+            }
+            let before = Corpus::replay(ordered.iter().take(index).copied(), &ladder);
+            let Some(was) = before
+                .owner(&drilled.engram)
+                .and_then(|lineage| lineage.dossier(&drilled.engram))
+                .cloned()
+            else {
+                continue;
+            };
+            if was.standing(record.day, &ladder) == Standing::Due {
+                continue;
+            }
+            let after = Corpus::replay(ordered.iter().take(index + 1).copied(), &ladder);
+            let now = after
+                .owner(&drilled.engram)
+                .and_then(|lineage| lineage.dossier(&drilled.engram))
+                .cloned()
+                .unwrap();
+            prop_assert_eq!(now.rung, was.rung);
+            prop_assert_eq!(now.anchor, was.anchor);
+            prop_assert_eq!(now.last_review, was.last_review);
+            prop_assert!(now.last_exposed >= was.last_exposed);
         }
     }
 }

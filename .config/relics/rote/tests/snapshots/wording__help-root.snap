@@ -4,7 +4,7 @@ expression: help
 ---
 Spaced-repetition drill for the passwords you must hold in your head.
 
-Called bare, rote asks for whatever the schedule wants today. If nothing is due it offers voluntary practice instead, on one keystroke. It keeps a faithful record and proposes a schedule; it renders no verdict, so what the numbers mean is yours to decide.
+Called bare, rote asks for whatever the schedule wants today. If nothing is due it offers to drill everything anyway, on one keystroke. It keeps a faithful record and proposes a schedule; it renders no verdict, so what the numbers mean is yours to decide.
 
 The secret is held in no recoverable form. rote can say wrong; it can never say what the right answer was.
 
@@ -12,10 +12,10 @@ Usage: rote [OPTIONS] [COMMAND]
 
 Commands:
   status       Show the schedule, the rung and what this machine holds [alias: due]
-  stats        Show retention, latency, lapses and punctuality, per engram
+  stats        Show retention, the streak, recall latency and every fail, per engram
   log          Show recent records
   machines     Every machine that has written to the corpus, and this one
-  practice     Drill without the schedule asking, whatever it says
+  drill        Drill named lineages, due or not. Every active lineage when none is named
   enroll       Enroll a lineage. The secret is typed twice and kept only as a verifier
   attach       Make a verifier here for an engram this machine is dormant on. Nothing is verified: rote takes your word that the secret is unchanged
   rotate       Supersede a lineage's engram with a new secret, typed twice. Its ladder starts over
@@ -27,9 +27,6 @@ Commands:
   completions  Shell completions
 
 Options:
-      --aided
-          Declare this sitting aided: the answer was looked up first
-
       --format <FORMAT>
           Defaults to agent under Claude Code or off a terminal, human otherwise
 

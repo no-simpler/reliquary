@@ -211,8 +211,8 @@ pub enum Typed {
     Skipped,
     /// Abandoned, or the input ended.
     Aborted,
-    /// The reader asked for the lookup, which only a caller that has already
-    /// recorded a cold attempt puts on offer.
+    /// The reader asked for the lookup, which only a follow-up puts on offer
+    /// and only until it is taken.
     Lookup,
 }
 
@@ -909,7 +909,7 @@ pub fn offer(
     drawn.say(heading, Tint::Bold).gap();
     drawn.say(question, Tint::Dim);
     drawn.pad_to(ASK_SLOTS.saturating_sub(1));
-    drawn.say("y to practice · any other key to leave it", Tint::Dim);
+    drawn.say("y to drill · any other key to leave it", Tint::Dim);
     console.anchor(drawn.height());
     console.paint(&drawn)?;
     console.arm();

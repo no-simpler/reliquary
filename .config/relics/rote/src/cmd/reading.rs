@@ -6,12 +6,12 @@ use relic_core::ui::Format;
 
 use super::{Context, block, flagship, read_chains};
 use crate::cli::{LogArgs, MeasurementArgs, ScheduleArgs};
-use crate::corpus::record::{Captured, Event, Line};
+use crate::corpus::record::{Drilled, Event, Line};
 use crate::corpus::{Corpus, Dossier, Lineage};
 use crate::exit::CLEAN;
 use crate::ladder::{self, Ladder, Standing};
 use crate::render::{Table, json, seconds};
-use crate::stats::{Retention, Stats, Trend};
+use crate::stats::{Retention, Stats};
 use crate::verifier::file::Verifiers;
 
 /// One row of the schedule.
@@ -85,8 +85,6 @@ pub fn status(ctx: &Context, args: &ScheduleArgs) -> Result<u8> {
                     "last_exposed": row.dossier.last_exposed.to_string(),
                     "standing": standing_word(row.dossier.standing(today, &ladder)),
                     "due": row.dossier.due(&ladder).to_string(),
-                    "stood_alone": row.dossier.first_unaided.map(|d| d.to_string()),
-                    "aided_mismatch": row.dossier.aided_mismatch,
                     "here": here(row, &verifiers),
                 })
             })
@@ -103,14 +101,13 @@ pub fn status(ctx: &Context, args: &ScheduleArgs) -> Result<u8> {
         return Ok(CLEAN);
     }
 
-    let mut table = Table::new(&["ENGRAM", "RUNG", "EVERY", "STOOD", "LAST", "NEXT", "HERE"]);
+    let mut table = Table::new(&["ENGRAM", "RUNG", "EVERY", "LAST", "NEXT", "HERE"]);
     for row in &rows {
         table.push(vec![
             row.label(),
             format!("{}/{}", row.dossier.rung.get(), ladder.cap().get()),
             format!("{}d", ladder.interval(row.dossier.rung)),
-            since(row.dossier.first_unaided, today),
-            since(Some(row.dossier.last_exposed), today),
+            since(row.dossier.last_exposed, today),
             next_word(row, today, &ladder),
             here(row, &verifiers).to_owned(),
         ]);
@@ -150,12 +147,6 @@ fn status_notes(ctx: &Context, rows: &[ScheduleRow<'_>], verifiers: &Verifiers) 
                 "{}: dormant here — rote attach {}",
                 row.label(),
                 row.lineage.slug
-            ));
-        }
-        if row.dossier.first_unaided.is_none() {
-            notes.push(format!(
-                "{}: has not stood alone yet — no unaided first pass on record",
-                row.label()
             ));
         }
     }
@@ -205,11 +196,11 @@ fn next_word(row: &ScheduleRow<'_>, today: Date, ladder: &Ladder) -> String {
     }
 }
 
-fn since(day: Option<Date>, today: Date) -> String {
-    match day {
-        None => "never".to_owned(),
-        Some(day) if day == today => "today".to_owned(),
-        Some(day) => format!("{}d ago", ladder::days_between(day, today)),
+fn since(day: Date, today: Date) -> String {
+    if day == today {
+        "today".to_owned()
+    } else {
+        format!("{}d ago", ladder::days_between(day, today))
     }
 }
 
@@ -221,10 +212,9 @@ fn since(day: Option<Date>, today: Date) -> String {
 pub fn stats(ctx: &Context, args: &MeasurementArgs) -> Result<u8> {
     let chains = read_chains(ctx)?;
     let ladder = ctx.config.ladder()?;
-    let records = chains.records();
-    let corpus = Corpus::replay(records.iter().copied(), &ladder);
+    let corpus = Corpus::replay(chains.records(), &ladder);
     let today = ctx.today();
-    let stats = Stats::gather(&records, &corpus, today, args.days, &ladder);
+    let stats = Stats::gather(&corpus, today, args.days, &ladder);
 
     if ctx.format == Format::Json {
         println!("{}", json::document(&stats_json(&stats))?);
@@ -240,76 +230,38 @@ pub fn stats(ctx: &Context, args: &MeasurementArgs) -> Result<u8> {
 
 /// The table: one row per engram, never pooled across a rotation.
 fn stats_table(stats: &Stats) -> Table {
-    let mut table = Table::new(&[
-        "ENGRAM",
-        "AIDED",
-        "RETENTION",
-        "STREAK",
-        "RECALL",
-        "TYPING",
-        "RECENT",
-        "TREND",
-    ]);
+    let mut table = Table::new(&["ENGRAM", "DRILLS", "RETENTION", "STREAK", "RECALL"]);
     for engram in &stats.engrams {
         table.push(vec![
             engram.label.clone(),
-            engram.aided.to_string(),
+            engram.drills.to_string(),
             rate(engram.retention),
             engram.streak.to_string(),
             seconds(engram.ttfk_ms),
-            seconds(engram.total_ms),
-            crate::stats::sparkline(&engram.recent_ttfk),
-            trend_text(engram.trend),
         ]);
     }
     table
 }
 
-/// What sits under the table: the headline figures, the bands, the lapses.
+/// What sits under the table: the headline figures, the bands, the fails.
 fn stats_notes(stats: &Stats, ladder: &Ladder) -> Vec<String> {
     let mut notes = Vec::new();
-    if stats.retention.total == 0 && stats.practice.total == 0 && stats.aided.total == 0 {
+    if stats.drills == 0 {
         notes.push(format!(
             "nothing recorded in the last {}d",
             stats.window_days
         ));
     } else {
         notes.push(format!(
-            "true retention {} over scheduled reviews · practice {}",
-            rate(stats.retention),
-            rate(stats.practice)
+            "retention {} · cold passes over every drill",
+            rate(stats.retention)
         ));
-        if stats.aided.total > 0 {
-            // A count over the window, and nothing more. Whether the vault and
-            // the verifier disagree *now* is a different question with a
-            // different answer — a refusal followed by a pass clears it — and
-            // it belongs to doctor, which reads the state rather than the
-            // history. Stating it from a historical count is how the two came
-            // to contradict each other.
-            let refused = stats.aided.total.saturating_sub(stats.aided.passes);
-            notes.push(format!(
-                "{} aided, in no figure above{}",
-                stats.aided.total,
-                if refused > 0 {
-                    format!(" · {refused} refused")
-                } else {
-                    String::new()
-                }
-            ));
-        }
-        if stats.punctuality.total > 0 {
-            notes.push(format!(
-                "punctuality {} taken within a day of falling due{}",
-                ratio(stats.punctuality.on_time, stats.punctuality.total),
-                match stats.punctuality.median_lateness {
-                    Some(days) => format!(" · median {days}d late"),
-                    None => String::new(),
-                }
-            ));
+        if let Some(days) = stats.median_lateness_days {
+            notes.push(format!("reviews ran a median {days}d past due"));
         }
     }
     notes.push(format!(
-        "streak counts unaided passes at {}d or longer, back from the last drill",
+        "streak counts cold passes at {}d or longer, back from the last drill",
         ladder.cap_days()
     ));
     let bands: Vec<String> = stats
@@ -321,19 +273,22 @@ fn stats_notes(stats: &Stats, ladder: &Ladder) -> Vec<String> {
     if !bands.is_empty() {
         notes.push(format!("by interval · {}", bands.join("  ")));
     }
-    for lapse in stats.lapses.iter().take(5) {
-        notes.push(format!(
-            "lapse {} on {} at {}d against a scheduled {}d{}",
-            lapse.label,
-            lapse.day,
-            lapse.effective,
-            lapse.scheduled,
-            if lapse.beyond_schedule() {
-                " · beyond schedule"
-            } else {
-                ""
+    for fail in stats.fails.iter().take(5) {
+        let mut text = format!(
+            "fail {} on {} at {}d against a scheduled {}d",
+            fail.label, fail.day, fail.effective, fail.scheduled
+        );
+        for (holds, word) in [
+            (fail.recovered, "recovered"),
+            (fail.aided, "aided"),
+            (fail.beyond_schedule(), "beyond schedule"),
+        ] {
+            if holds {
+                text.push_str(" · ");
+                text.push_str(word);
             }
-        ));
+        }
+        notes.push(text);
     }
     notes
 }
@@ -341,62 +296,40 @@ fn stats_notes(stats: &Stats, ladder: &Ladder) -> Vec<String> {
 fn stats_json(stats: &Stats) -> serde_json::Value {
     serde_json::json!({
         "window_days": stats.window_days,
+        "drills": stats.drills,
         "retention": {"passes": stats.retention.passes, "total": stats.retention.total},
-        "practice": {"passes": stats.practice.passes, "total": stats.practice.total},
-        "aided": {"passes": stats.aided.passes, "total": stats.aided.total},
-        "punctuality": {
-            "on_time": stats.punctuality.on_time,
-            "total": stats.punctuality.total,
-            "median_lateness_days": stats.punctuality.median_lateness,
-        },
+        "median_lateness_days": stats.median_lateness_days,
         "buckets": stats.buckets.iter().map(|bucket| serde_json::json!({
             "interval": bucket.label,
             "passes": bucket.retention.passes,
             "total": bucket.retention.total,
         })).collect::<Vec<_>>(),
-        "lapses": stats.lapses.iter().map(|lapse| serde_json::json!({
-            "engram": lapse.label,
-            "day": lapse.day.to_string(),
-            "scheduled_interval_days": lapse.scheduled,
-            "effective_interval_days": lapse.effective,
-            "beyond_schedule": lapse.beyond_schedule(),
+        "fails": stats.fails.iter().map(|fail| serde_json::json!({
+            "engram": fail.label,
+            "day": fail.day.to_string(),
+            "scheduled_days": fail.scheduled,
+            "effective_days": fail.effective,
+            "beyond_schedule": fail.beyond_schedule(),
+            "recovered": fail.recovered,
+            "aided": fail.aided,
         })).collect::<Vec<_>>(),
         "engrams": stats.engrams.iter().map(|row| serde_json::json!({
             "lineage": row.slug.as_str(),
             "engram": row.engram.to_string(),
             "label": row.label,
+            "drills": row.drills,
             "passes": row.retention.passes,
             "total": row.retention.total,
-            "aided": row.aided,
             "streak": row.streak,
             "ttfk_ms": row.ttfk_ms,
-            "total_ms": row.total_ms,
-            "trend": trend_text(row.trend),
         })).collect::<Vec<_>>(),
     })
-}
-
-fn trend_text(trend: Trend) -> String {
-    match trend {
-        Trend::Unknown => "not yet".to_owned(),
-        Trend::Steady => "steady".to_owned(),
-        Trend::Rising(percent) => format!("slower by {percent}%"),
-        Trend::Falling(percent) => format!("faster by {percent}%"),
-    }
 }
 
 fn rate(retention: Retention) -> String {
     match retention.percent() {
         Some(percent) => format!("{percent:.0}% of {}", retention.total),
         None => "—".to_owned(),
-    }
-}
-
-fn ratio(part: u32, whole: u32) -> String {
-    if whole == 0 {
-        "—".to_owned()
-    } else {
-        format!("{part}/{whole}")
     }
 }
 
@@ -479,7 +412,7 @@ fn engram_label(corpus: &Corpus, event: &Event) -> String {
         Event::Enroll(e) => corpus.label(&e.engram),
         Event::Rotate(e) => corpus.label(&e.to),
         Event::Attach(e) => corpus.label(&e.engram),
-        Event::Capture(e) => corpus.label(&e.engram),
+        Event::Drill(e) => corpus.label(&e.engram),
         Event::Retire(e) => e.slug.to_string(),
     }
 }
@@ -499,7 +432,7 @@ fn event_text(event: &Event, corpus: &Corpus) -> String {
         },
         Event::Attach(_) => "a verifier was made here · nothing was checked".to_owned(),
         Event::Retire(_) => "off the schedule".to_owned(),
-        Event::Capture(capture) => capture_text(capture),
+        Event::Drill(drilled) => drill_text(drilled),
     }
 }
 
@@ -511,27 +444,21 @@ fn superseded(corpus: &Corpus, to: &crate::corpus::record::EngramId) -> Option<S
     (previous >= 1).then(|| lineage.label(previous))
 }
 
-fn capture_text(capture: &Captured) -> String {
-    let outcome = match capture.outcome {
-        crate::corpus::record::Outcome::Pass => "pass",
-        crate::corpus::record::Outcome::Fail => "fail",
-        crate::corpus::record::Outcome::Blank => "blank",
-        crate::corpus::record::Outcome::Skip => "skip",
-        crate::corpus::record::Outcome::Abort => "abandoned",
-    };
-    let what = if capture.aided {
-        "aided".to_owned()
-    } else {
-        capture.occasion.word().to_owned()
-    };
-    let mut text = format!("{what} · {outcome} · try {}", capture.ordinal);
-    // A lookup has no interval worth naming: whatever elapsed, the answer was on
-    // the screen.
-    if !capture.aided {
-        let _ = std::fmt::Write::write_fmt(
-            &mut text,
-            format_args!(" · {}d cold", capture.effective_interval_days),
-        );
+fn drill_text(drilled: &Drilled) -> String {
+    let mut text = drilled.outcome.word().to_owned();
+    if drilled.follow_ups > 0 {
+        text.push_str(" · ");
+        text.push_str(&relic_core::fmt::plural(
+            usize::from(drilled.follow_ups),
+            "follow-up",
+            "follow-ups",
+        ));
+    }
+    for (holds, word) in [(drilled.recovered, "recovered"), (drilled.aided, "aided")] {
+        if holds {
+            text.push_str(" · ");
+            text.push_str(word);
+        }
     }
     text
 }

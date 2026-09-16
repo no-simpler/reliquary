@@ -146,7 +146,7 @@ pub fn run(cli: &Cli) -> Result<u8> {
             | Command::Stats(_)
             | Command::Log(_)
             | Command::Machines
-            | Command::Practice(_)
+            | Command::Drill(_)
             | Command::Enroll(_)
             | Command::Attach(_)
             | Command::Rotate(_)
@@ -158,8 +158,8 @@ pub fn run(cli: &Cli) -> Result<u8> {
 
     let ctx = open_context(&cli.global)?;
     match &cli.command {
-        None => sitting::daily(&ctx, cli.aided),
-        Some(Command::Practice(args)) => sitting::practice(&ctx, args, cli.aided || args.aided),
+        None => sitting::daily(&ctx),
+        Some(Command::Drill(args)) => sitting::drill(&ctx, args),
         Some(Command::Status(args)) => reading::status(&ctx, args),
         Some(Command::Stats(args)) => reading::stats(&ctx, args),
         Some(Command::Log(args)) => reading::log(&ctx, args),

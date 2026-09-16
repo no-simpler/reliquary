@@ -7,8 +7,13 @@
 //! sitting does not attach, because an attachment is a claim and a drill is a
 //! measurement, and one prompt should not be both.
 //!
+//! A drill opens with a **cold capture**, which is the one prompt in the tool
+//! that measures a memory. A cold pass ends the turn. A cold fail opens the
+//! tail: **follow-ups**, unbounded, masked, with the lookup on offer, until one
+//! passes or the person leaves. One record per drill, written when it ends.
+//!
 //! The loop is generic over where keys come from, where the card is painted
-//! and where each capture is written, so every path through it is driven by a
+//! and where each drill is written, so every path through it is driven by a
 //! scripted list of keys in the tests. Only raw mode, the alternate screen and
 //! the real `event::read()` sit outside that, in `tui`.
 
@@ -18,10 +23,8 @@ use anyhow::Result;
 use jiff::civil::Date;
 use relic_core::style::Style;
 
-use crate::corpus::drill::Landing;
-use crate::corpus::record::{EngramId, Outcome};
-use crate::intake::NOT_IT;
-use crate::ladder::{Ladder, Occasion, Rung, Standing};
+use crate::corpus::record::{Drilled, EngramId, Outcome};
+use crate::ladder::{Ladder, Occasion, Standing};
 use crate::secret::Secret;
 use crate::slug::Slug;
 use crate::tui::{
@@ -54,18 +57,10 @@ pub enum Task {
 /// A drill, as the roster planned it.
 #[derive(Clone, Debug)]
 pub struct Drilling {
-    /// Whether the schedule asked.
+    /// Whether the schedule asked, read off the engram's standing today.
     pub occasion: Occasion,
-    /// Whether the whole sitting was declared aided up front.
-    pub aided: bool,
-    /// Where it sits on the ladder.
-    pub rung: Rung,
     /// What the ladder asked for.
     pub scheduled_interval_days: u32,
-    /// Days since the schedule's anchor.
-    pub actual_interval_days: u32,
-    /// Days since the secret was last in front of a person.
-    pub effective_interval_days: u32,
     /// Whether the rung is the top of the ladder.
     pub at_cap: bool,
     /// The verifier. Not an option: **a missing verifier is not a drill**, it is
@@ -80,33 +75,35 @@ impl Turn {
     }
 }
 
-/// What kind of sitting this is.
+/// Which lineages a sitting asks about.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
+pub enum Selection<'a> {
     /// What the schedule is asking for today, and nothing else.
     Due,
-    /// Voluntary. Nothing here is a review, whatever the schedule says.
-    Practice,
+    /// The named lineages, due or not. Empty means every active lineage.
+    Named(&'a [Slug]),
 }
 
 /// Decide what to ask for.
 ///
-/// `only` narrows a practice sitting to named lineages; empty means all of them.
-/// **A dormant turn appears wherever its lineage appears**, in either mode: an
-/// engram with no verifier here cannot be drilled, and a row that says so is
-/// how the sitting names the verb that puts one back.
+/// The occasion is never declared: it is read off each engram's standing today,
+/// in either selection, so a drill on a due engram is a review whoever asked
+/// for it. **A dormant turn appears wherever its lineage appears**: an engram
+/// with no verifier here cannot be drilled, and a row that says so is how the
+/// sitting names the verb that puts one back.
 pub fn roster(
     corpus: &crate::corpus::Corpus,
     verifiers: &crate::verifier::file::Verifiers,
     today: Date,
     ladder: &Ladder,
-    mode: Mode,
-    aided: bool,
-    only: &[Slug],
+    selection: Selection<'_>,
 ) -> Vec<Turn> {
     let mut turns = Vec::new();
     for lineage in corpus.active() {
-        if !only.is_empty() && !only.contains(&lineage.slug) {
+        if let Selection::Named(only) = selection
+            && !only.is_empty()
+            && !only.contains(&lineage.slug)
+        {
             continue;
         }
         let Some(dossier) = lineage.current() else {
@@ -121,23 +118,17 @@ pub fn roster(
             });
             continue;
         };
-        let occasion = match mode {
-            Mode::Practice => Occasion::Practice,
-            Mode::Due => match dossier.standing(today, ladder) {
-                Standing::Due => Occasion::Review,
-                Standing::Waiting { .. } => continue,
-            },
+        let occasion = match dossier.standing(today, ladder) {
+            Standing::Due => Occasion::Review,
+            Standing::Waiting { .. } if selection == Selection::Due => continue,
+            Standing::Waiting { .. } => Occasion::Practice,
         };
         turns.push(Turn {
             slug: lineage.slug.clone(),
             engram: dossier.engram,
             task: Task::Drill(Box::new(Drilling {
                 occasion,
-                aided,
-                rung: dossier.rung,
                 scheduled_interval_days: ladder.interval(dossier.rung),
-                actual_interval_days: dossier.actual_interval(today),
-                effective_interval_days: dossier.effective_interval(today),
                 at_cap: ladder.at_cap(dossier.rung),
                 verifier,
             })),
@@ -146,38 +137,11 @@ pub fn roster(
     turns
 }
 
-/// One sample, as the sitting saw it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Capture {
-    /// Which turn in the roster.
-    pub turn: usize,
-    /// Whether the schedule asked.
-    pub occasion: Occasion,
-    /// Whether the answer was consulted before this one was typed.
-    pub aided: bool,
-    /// Which sample within this drill. Only the first is measured.
-    pub ordinal: u8,
-    /// How it ended.
-    pub outcome: Outcome,
-    /// Milliseconds from the prompt appearing to the first keystroke.
-    pub ttfk_ms: Option<u64>,
-    /// Milliseconds from the first keystroke to submission.
-    pub total_ms: Option<u64>,
-    /// Keystrokes that removed something, one apiece.
-    pub corrections: u32,
-    /// Pastes that reached the field.
-    pub paste_accepted: u32,
-    /// Pastes that did not.
-    pub paste_refused: u32,
-    /// Where the engram lands after this sample.
-    pub rung_after: Rung,
-}
-
 /// How a whole sitting ended.
 #[derive(Clone, Debug, Default)]
 pub struct Outturn {
-    /// Every sample, in the order they were typed.
-    pub captures: Vec<Capture>,
+    /// Every drill written, with the turn it was, in the order they ended.
+    pub drills: Vec<(usize, Drilled)>,
     /// The turns skipped over because this machine holds no verifier for them.
     pub dormant: Vec<usize>,
     /// Whether the sitting was abandoned rather than finished.
@@ -190,52 +154,92 @@ impl Outturn {
     /// How each turn landed, in roster order.
     ///
     /// One landing per turn and no turn in two of them, so the counts add up to
-    /// what was actually in front of a person.
+    /// what was actually in front of a person. A turn passed over at its cold
+    /// capture landed nowhere.
     pub fn landings(&self, turns: usize) -> Vec<Landing> {
         (0..turns)
             .filter_map(|index| {
                 if self.dormant.contains(&index) {
                     return Some(Landing::Dormant);
                 }
-                let first = self
-                    .captures
-                    .iter()
-                    .find(|capture| capture.turn == index && capture.ordinal == 1)?;
-                Landing::from_parts(
-                    first.aided,
-                    first.outcome,
-                    first.occasion.serves_the_schedule(),
-                )
+                let (_, drill) = self.drills.iter().find(|(turn, _)| *turn == index)?;
+                Some(match drill.outcome {
+                    Outcome::Pass => Landing::Pass,
+                    Outcome::Fail => Landing::Fail,
+                })
             })
             .collect()
     }
 
-    /// First-sample failures on drills that measured something.
-    pub fn missed(&self) -> usize {
-        self.captures
+    /// Drills whose cold capture failed.
+    pub fn failed(&self) -> usize {
+        self.drills
             .iter()
-            .filter(|capture| capture.ordinal == 1 && !capture.aided && capture.outcome.lapsed())
+            .filter(|(_, drill)| drill.outcome == Outcome::Fail)
             .count()
+    }
+
+    /// Fails a follow-up got past.
+    pub fn recovered(&self) -> usize {
+        self.drills
+            .iter()
+            .filter(|(_, drill)| drill.recovered)
+            .count()
+    }
+
+    /// Drills in which the answer was looked up.
+    pub fn aided(&self) -> usize {
+        self.drills.iter().filter(|(_, drill)| drill.aided).count()
     }
 }
 
-/// What the line under the field says once the cold tries are spent.
-const OUT_OF_TRIES: &str = "out of tries";
-
-/// What it says when a drill try was conceded: nothing was offered, so *not
-/// it* would be false.
-const CONCEDED: &str = "conceded";
-
-/// What the line under the field says when a bounded retry has spent a round.
-fn tried(reason: &str, attempt: u8, of: u8) -> String {
-    format!("{reason} · try {} of {of}", attempt.clamp(1, of.max(1)))
+/// Where one engram ended up in one sitting.
+///
+/// A separate vocabulary from [`Occasion`] on purpose: the occasion says why the
+/// drill happened, the landing says how it went. Neither is spelled twice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Landing {
+    /// The cold capture passed.
+    Pass,
+    /// The cold capture failed, whatever followed.
+    Fail,
+    /// No verifier here, so nothing was asked. The row was skipped over.
+    Dormant,
 }
 
-/// Where each capture goes the moment it is taken.
+impl Landing {
+    /// The one spelling of this landing. Every render site reads it here.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Fail => "fail",
+            Self::Dormant => "dormant",
+        }
+    }
+
+    /// How it reads when it stands alone rather than in a tally.
+    pub fn alone(self) -> &'static str {
+        match self {
+            Self::Pass => "passed",
+            Self::Fail => "failed",
+            Self::Dormant => "dormant",
+        }
+    }
+}
+
+/// What the line under the field says when a capture was wrong.
+pub const NOT_IT: &str = "not it";
+
+/// The standing status through the tail: the follow-up about to be typed.
+fn follow_up_status(count: u16) -> String {
+    format!("{NOT_IT} · follow-up {count}")
+}
+
+/// Where each drill goes the moment it ends.
 ///
 /// Called before the next prompt is drawn, so a sitting cut short by a closed
-/// window or a signal keeps every reading it had already produced.
-pub type Record<'a> = dyn FnMut(&Capture) -> Result<()> + 'a;
+/// window or a signal keeps every drill that had already ended.
+pub type Record<'a> = dyn FnMut(usize, &Drilled) -> Result<()> + 'a;
 
 /// How a secret is judged. Passed in rather than reached for, so the loop can be
 /// driven in a test without paying 256 MiB and half a second per key. Told
@@ -252,7 +256,7 @@ pub struct Wiring<'a> {
     pub console: &'a mut dyn Console,
     /// How a secret is judged.
     pub verify: &'a Verify<'a>,
-    /// Where each capture goes.
+    /// Where each drill goes.
     pub record: &'a mut Record<'a>,
 }
 
@@ -260,16 +264,10 @@ pub struct Wiring<'a> {
 ///
 /// # Errors
 ///
-/// When the terminal cannot be read or written, a capture cannot be recorded,
-/// or the verifier fails outright — which is different from refusing a secret,
-/// and is not recorded as a lapse.
-pub fn run(
-    turns: &[Turn],
-    max_attempts: u8,
-    ladder: &Ladder,
-    today: Date,
-    wiring: Wiring<'_>,
-) -> Result<Outturn> {
+/// When the terminal cannot be read or written, a drill cannot be recorded, or
+/// the verifier fails outright — which is different from refusing a secret,
+/// and is not recorded as a fail.
+pub fn run(turns: &[Turn], today: Date, wiring: Wiring<'_>) -> Result<Outturn> {
     let Wiring {
         console,
         verify,
@@ -277,8 +275,6 @@ pub fn run(
     } = wiring;
     Session {
         turns,
-        max_attempts,
-        ladder,
         console,
         verify,
         record,
@@ -291,8 +287,6 @@ pub fn run(
 
 struct Session<'a> {
     turns: &'a [Turn],
-    max_attempts: u8,
-    ladder: &'a Ladder,
     console: &'a mut dyn Console,
     verify: &'a Verify<'a>,
     record: &'a mut Record<'a>,
@@ -301,14 +295,27 @@ struct Session<'a> {
     outturn: Outturn,
 }
 
-/// What the loop decided about one prompt, beyond what it produced.
-enum Next {
-    /// Ask this engram again.
-    Again,
-    /// Move to the next turn.
-    Done,
-    /// Ask nothing further of anyone.
-    Stop,
+/// Where the tail of one drill has got to, beyond what is on the card.
+#[derive(Clone, Copy, Debug, Default)]
+struct Tail {
+    /// Captures taken after the cold one.
+    follow_ups: u16,
+    /// Whether the lookup was taken. Latched: once the answer has been seen
+    /// there is nothing left in this drill to protect.
+    aided: bool,
+}
+
+impl Tail {
+    fn drilled(self, engram: EngramId, ttfk_ms: Option<u64>, recovered: bool) -> Drilled {
+        Drilled {
+            engram,
+            outcome: Outcome::Fail,
+            ttfk_ms,
+            follow_ups: self.follow_ups,
+            recovered,
+            aided: self.aided,
+        }
+    }
 }
 
 impl Session<'_> {
@@ -328,7 +335,7 @@ impl Session<'_> {
                 break;
             };
             let stopped = match &turn.task {
-                Task::Drill(drilling) => self.drill(index, drilling)?,
+                Task::Drill(drilling) => self.drill(index, turn.engram, drilling)?,
                 Task::Dormant => {
                     // Nothing to ask and nothing to write: the row says so,
                     // and the closing card names the verb that puts a
@@ -346,183 +353,137 @@ impl Session<'_> {
         Ok(self.outturn)
     }
 
-    /// Ask about one engram until it is answered, passed over, or walked away
-    /// from. `true` means the sitting was abandoned.
-    fn drill(&mut self, index: usize, drilling: &Drilling) -> Result<bool> {
-        let mut prompt = Prompt::new(drilling.aided);
-        loop {
-            match self.one_sample(index, drilling, &mut prompt)? {
-                Next::Again => {}
-                Next::Done => return Ok(false),
-                Next::Stop => return Ok(true),
-            }
-        }
-    }
-
-    /// One prompt: draw, read, judge, record.
-    fn one_sample(
-        &mut self,
-        index: usize,
-        drilling: &Drilling,
-        prompt: &mut Prompt,
-    ) -> Result<Next> {
-        prompt.ordinal = prompt.ordinal.saturating_add(1);
-        let lookup = prompt.missed && !prompt.aided;
-        // A cold try is the one prompt in the tool that measures a memory, and
-        // everything follows from that: it refuses a paste, stays blind, offers
-        // no reveal and moves no caret. Once the entry is aided there is
-        // nothing left here to protect.
-        let cold = !prompt.aided;
-        let status = prompt.status(self.max_attempts);
-        self.set(
-            index,
-            screen::RowState::Active {
-                attempt: prompt.ordinal,
-            },
-        );
-        if let Some(row) = self.rows.get_mut(index) {
-            row.set_aided(prompt.aided);
-        }
-        let resting = screen::resting(self.rows.get(index));
-        self.paint(
-            index,
-            resting,
-            status.clone(),
-            lookup,
-            &Field::resting(cold),
-        )?;
-
-        let entry = match self.read(index, status.as_deref(), lookup, cold)? {
-            // The cold tries are spent: what the field will still take is the
-            // lookup or the way out, and a typed answer is refused rather than
-            // judged, since a fourth cold try would be a reading nobody asked
-            // for.
-            Typed::Submitted(entry) if prompt.exhausted && !prompt.aided => {
-                let _ = entry.forget();
-                self.flash(
-                    index,
-                    Some(OUT_OF_TRIES.to_owned()),
-                    lookup,
-                    &Field::resting(cold),
-                )?;
-                prompt.ordinal = prompt.ordinal.saturating_sub(1);
-                return Ok(Next::Again);
-            }
+    /// One drill: the cold capture, and the tail if it failed. `true` means the
+    /// sitting was abandoned.
+    fn drill(&mut self, index: usize, engram: EngramId, drilling: &Drilling) -> Result<bool> {
+        // A cold capture is the one prompt in the tool that measures a memory,
+        // and everything follows from that: it refuses a paste, stays blind,
+        // offers no reveal and moves no caret.
+        self.set(index, screen::RowState::Cold);
+        self.paint(index, Tone::Calm, None, false, &Field::resting(true))?;
+        let entry = match self.read(index, None, false, true)? {
             Typed::Submitted(entry) => entry,
-            Typed::Lookup => {
-                prompt.aided = true;
-                if let Some(row) = self.rows.get_mut(index) {
-                    row.set_aided(true);
-                }
-                prompt.ordinal = prompt.ordinal.saturating_sub(1);
-                return Ok(Next::Again);
-            }
-            Typed::Skipped => {
-                self.left_it(index, *prompt, drilling, Outcome::Skip)?;
-                return Ok(Next::Done);
+            // Not on offer at a cold capture, so never returned here.
+            Typed::Lookup | Typed::Skipped => {
+                self.set(index, screen::RowState::Skipped);
+                return Ok(false);
             }
             Typed::Aborted => {
-                self.left_it(index, *prompt, drilling, Outcome::Abort)?;
+                self.set(index, screen::RowState::Aborted);
                 self.outturn.aborted = true;
-                return Ok(Next::Stop);
+                return Ok(true);
             }
         };
-
-        let outcome = self.judge(index, drilling, &entry.secret, status, lookup)?;
-        let timings = entry.forget();
-        self.record(index, drilling, prompt, outcome, timings)?;
-
+        let outcome = self.judge(index, drilling, &entry.secret, None, false)?;
+        let ttfk_ms = entry.forget().ttfk_ms;
         if outcome == Outcome::Pass {
             self.set(
                 index,
                 screen::RowState::Passed {
-                    // A latency is a claim about recall, so an aided entry
-                    // publishes none — the row would otherwise carry a figure
-                    // that a lookup, a reveal and a conceal all inflate, beside
-                    // rows whose figure means something else entirely. `stats`
-                    // draws the same line at `!drill.aided`.
-                    total_ms: if prompt.aided { None } else { timings.total_ms },
-                    retries: prompt.ordinal.saturating_sub(1),
+                    ttfk_ms,
+                    recovered: false,
                 },
             );
-            return Ok(Next::Done);
+            self.keep(
+                index,
+                Drilled {
+                    engram,
+                    outcome,
+                    ttfk_ms,
+                    follow_ups: 0,
+                    recovered: false,
+                    aided: false,
+                },
+            )?;
+            return Ok(false);
         }
-        self.set(
-            index,
-            screen::RowState::Failed {
-                attempt: prompt.ordinal,
-            },
-        );
-        if prompt.aided {
-            // The answer was in front of the person and the verifier refused it
-            // anyway. Nothing further to ask, and something else to look at.
-            return Ok(Next::Done);
-        }
-        prompt.missed = true;
-        prompt.reason = if outcome == Outcome::Blank {
-            CONCEDED
-        } else {
-            NOT_IT
-        };
-        prompt.exhausted = prompt.ordinal >= self.max_attempts;
-        let next = Prompt {
-            ordinal: prompt.ordinal.saturating_add(1),
-            ..*prompt
-        }
-        .status(self.max_attempts);
-        self.flash(index, next, true, &Field::resting(!prompt.aided))?;
-        Ok(Next::Again)
+        self.tail(index, engram, drilling, ttfk_ms)
     }
 
-    /// Write one sample the moment it is taken, before the next prompt is
-    /// drawn, so a closed window keeps every reading it had already produced.
-    fn record(
+    /// Follow-ups after a cold fail, until one passes or the person leaves.
+    fn tail(
         &mut self,
         index: usize,
+        engram: EngramId,
         drilling: &Drilling,
-        prompt: &mut Prompt,
-        outcome: Outcome,
-        timings: crate::tui::Timings,
-    ) -> Result<()> {
-        let rung_after = if prompt.aided {
-            prompt.resolved.unwrap_or(drilling.rung)
-        } else {
-            *prompt
-                .resolved
-                .get_or_insert_with(|| self.settle(drilling, outcome))
-        };
-        self.keep(Capture {
-            turn: index,
-            occasion: drilling.occasion,
-            aided: prompt.aided,
-            ordinal: prompt.ordinal,
-            outcome,
-            ttfk_ms: timings.ttfk_ms,
-            total_ms: timings.total_ms,
-            corrections: timings.corrections,
-            paste_accepted: timings.paste_accepted,
-            paste_refused: timings.paste_refused,
-            rung_after,
-        })
+        ttfk_ms: Option<u64>,
+    ) -> Result<bool> {
+        let mut tail = Tail::default();
+        // The cold fail is the first refusal; a later one is a follow-up's.
+        let mut refused = true;
+        loop {
+            let count = tail.follow_ups.saturating_add(1);
+            self.set(index, screen::RowState::FollowUp { count });
+            if let Some(row) = self.rows.get_mut(index) {
+                row.set_aided(tail.aided);
+            }
+            let status = Some(follow_up_status(count));
+            let lookup = !tail.aided;
+            let field = Field::resting(false);
+            if refused {
+                self.flash(index, status.clone(), lookup, &field)?;
+            } else {
+                self.paint(index, Tone::Calm, status.clone(), lookup, &field)?;
+            }
+            refused = false;
+
+            match self.read(index, status.as_deref(), lookup, false)? {
+                Typed::Lookup => {
+                    tail.aided = true;
+                }
+                Typed::Submitted(entry) => {
+                    tail.follow_ups = tail.follow_ups.saturating_add(1);
+                    let outcome = self.judge(index, drilling, &entry.secret, status, lookup)?;
+                    let _ = entry.forget();
+                    if outcome == Outcome::Pass {
+                        self.set(
+                            index,
+                            screen::RowState::Passed {
+                                ttfk_ms,
+                                recovered: true,
+                            },
+                        );
+                        self.keep(index, tail.drilled(engram, ttfk_ms, true))?;
+                        return Ok(false);
+                    }
+                    self.set(
+                        index,
+                        screen::RowState::Failed {
+                            follow_ups: tail.follow_ups,
+                        },
+                    );
+                    refused = true;
+                }
+                Typed::Skipped => {
+                    self.set(
+                        index,
+                        screen::RowState::Failed {
+                            follow_ups: tail.follow_ups,
+                        },
+                    );
+                    self.keep(index, tail.drilled(engram, ttfk_ms, false))?;
+                    return Ok(false);
+                }
+                Typed::Aborted => {
+                    self.set(
+                        index,
+                        screen::RowState::Failed {
+                            follow_ups: tail.follow_ups,
+                        },
+                    );
+                    self.keep(index, tail.drilled(engram, ttfk_ms, false))?;
+                    self.outturn.aborted = true;
+                    return Ok(true);
+                }
+            }
+        }
     }
 
-    /// Where the engram lands after an unaided sample on the first try.
-    fn settle(&self, drilling: &Drilling, outcome: Outcome) -> Rung {
-        if !drilling.occasion.serves_the_schedule() {
-            return drilling.rung;
-        }
-        match outcome {
-            Outcome::Pass => self.ladder.advanced(drilling.rung),
-            Outcome::Fail | Outcome::Blank => Rung::FIRST,
-            Outcome::Skip | Outcome::Abort => drilling.rung,
-        }
-    }
-
-    /// What the verifier makes of one sample.
+    /// What the verifier makes of one capture.
     ///
-    /// An empty entry is a concession, and the verifier has nothing to say about
-    /// it. Conceding is what the card asks for in place of typing something to
-    /// get past the prompt.
+    /// An empty entry is a fail the verifier is never asked about: nothing was
+    /// offered, and submitting nothing is what the card asks for in place of
+    /// typing something to get past the prompt.
     fn judge(
         &mut self,
         index: usize,
@@ -532,7 +493,7 @@ impl Session<'_> {
         lookup: bool,
     ) -> Result<Outcome> {
         if secret.is_empty() {
-            return Ok(Outcome::Blank);
+            return Ok(Outcome::Fail);
         }
         self.set(index, screen::RowState::Checking);
         // Checking: the box and its caret are taken down and no key does
@@ -549,39 +510,11 @@ impl Session<'_> {
         })
     }
 
-    /// Record a prompt somebody walked away from, and mark its row.
-    fn left_it(
-        &mut self,
-        index: usize,
-        prompt: Prompt,
-        drilling: &Drilling,
-        outcome: Outcome,
-    ) -> Result<()> {
-        let state = if outcome == Outcome::Skip {
-            screen::RowState::Skipped
-        } else {
-            screen::RowState::Aborted
-        };
-        self.set(index, state);
-        self.keep(Capture {
-            turn: index,
-            occasion: drilling.occasion,
-            aided: prompt.aided,
-            ordinal: prompt.ordinal,
-            outcome,
-            ttfk_ms: None,
-            total_ms: None,
-            corrections: 0,
-            paste_accepted: 0,
-            paste_refused: 0,
-            rung_after: prompt.resolved.unwrap_or(drilling.rung),
-        })
-    }
-
-    /// Keep one capture, and write it out before anything else happens.
-    fn keep(&mut self, capture: Capture) -> Result<()> {
-        self.outturn.captures.push(capture);
-        (self.record)(&capture)
+    /// Keep one drill, and write it out before anything else happens.
+    fn keep(&mut self, index: usize, drilled: Drilled) -> Result<()> {
+        (self.record)(index, &drilled)?;
+        self.outturn.drills.push((index, drilled));
+        Ok(())
     }
 
     fn set(&mut self, index: usize, state: screen::RowState) {
@@ -663,60 +596,15 @@ impl Session<'_> {
     }
 }
 
-/// Where one drill has got to, beyond what is on the card.
-#[derive(Clone, Copy, Debug)]
-struct Prompt {
-    ordinal: u8,
-    aided: bool,
-    missed: bool,
-    exhausted: bool,
-    /// Why the last cold try was refused: a wrong answer, or none at all.
-    reason: &'static str,
-    /// Where the first sample put the engram. Later samples in the same drill
-    /// carry it rather than deciding again.
-    resolved: Option<Rung>,
-}
-
-impl Prompt {
-    fn new(aided: bool) -> Self {
-        Self {
-            ordinal: 0,
-            aided,
-            missed: false,
-            exhausted: false,
-            reason: NOT_IT,
-            resolved: None,
-        }
-    }
-
-    /// What the line under the field says about how this drill is going.
-    ///
-    /// A standing status, so it is drawn on every card the prompt rests at
-    /// and not only in the pulse that first said it. An aided entry is not
-    /// bounded and carries no count; once the cold tries are spent the field
-    /// says so for as long as it stays.
-    fn status(self, max_attempts: u8) -> Option<String> {
-        if self.aided {
-            return None;
-        }
-        if self.exhausted {
-            return Some(OUT_OF_TRIES.to_owned());
-        }
-        self.missed
-            .then(|| tried(self.reason, self.ordinal, max_attempts))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use anyhow::Result;
     use jiff::civil::date;
     use relic_core::style::Style;
 
-    use super::{Capture, Drilling, Outturn, Task, Turn, screen};
-    use crate::corpus::drill::Landing;
-    use crate::corpus::record::{EngramId, Outcome};
-    use crate::ladder::{Ladder, Occasion, Rung};
+    use super::{Drilling, Landing, Outturn, Task, Turn, screen};
+    use crate::corpus::record::{Drilled, EngramId, Outcome};
+    use crate::ladder::Occasion;
     use crate::secret::Secret;
     use crate::tui::{Card, Input, Key, Screen};
     use crate::verifier::Verifier;
@@ -796,17 +684,13 @@ mod tests {
         }
     }
 
-    fn drill_turn(name: &str, occasion: Occasion, aided: bool) -> Turn {
+    fn drill_turn(name: &str, occasion: Occasion) -> Turn {
         Turn {
             slug: name.parse().unwrap(),
             engram: EngramId::mint().unwrap(),
             task: Task::Drill(Box::new(Drilling {
                 occasion,
-                aided,
-                rung: Rung::FIRST,
                 scheduled_interval_days: 1,
-                actual_interval_days: 1,
-                effective_interval_days: 1,
                 at_cap: false,
                 verifier: Verifier::parse(PHC).unwrap(),
             })),
@@ -838,7 +722,7 @@ mod tests {
 
     struct Ran {
         outturn: Outturn,
-        written: Vec<Capture>,
+        written: Vec<(usize, Drilled)>,
         flashes: usize,
         drains: usize,
         /// The card as it last stood, joined into one string.
@@ -847,19 +731,16 @@ mod tests {
 
     fn run(turns: &[Turn], keys: Vec<(Key, u64)>) -> Ran {
         let mut console = Fake::new(keys);
-        let ladder = Ladder::default();
         let verify =
             |_: usize, _: &Verifier, secret: &Secret| Ok(secret.expose() == RIGHT.as_bytes());
         let written = std::cell::RefCell::new(Vec::new());
         let outturn = {
-            let mut record = |capture: &Capture| -> Result<()> {
-                written.borrow_mut().push(*capture);
+            let mut record = |index: usize, drilled: &Drilled| -> Result<()> {
+                written.borrow_mut().push((index, drilled.clone()));
                 Ok(())
             };
             super::run(
                 turns,
-                3,
-                &ladder,
                 date(2026, 9, 13),
                 super::Wiring {
                     console: &mut console,
@@ -878,212 +759,206 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_passed_drill_records_one_capture_and_advances_the_rung() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
-        let ran = run(&turns, typing(RIGHT, 400));
-        assert_eq!(ran.written.len(), 1);
-        let capture = ran.written.first().unwrap();
-        assert_eq!(capture.outcome, Outcome::Pass);
-        assert_eq!(capture.ordinal, 1);
-        assert_eq!(capture.rung_after.get(), 1);
-        assert_eq!(capture.ttfk_ms, Some(400));
-        assert_eq!(ran.outturn.landings(1), vec![Landing::Pass]);
-        assert_eq!(ran.outturn.missed(), 0);
+    fn only(ran: &Ran) -> &Drilled {
+        assert_eq!(ran.written.len(), 1, "one record per drill");
+        &ran.written.first().unwrap().1
     }
 
     #[test]
-    fn a_missed_drill_goes_back_to_the_foot_and_the_retry_does_not_score_again() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
+    fn a_cold_pass_writes_one_pass_with_no_follow_ups() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
+        let ran = run(&turns, typing(RIGHT, 400));
+        let drill = only(&ran);
+        assert_eq!(drill.engram, turns.first().unwrap().engram);
+        assert_eq!(drill.outcome, Outcome::Pass);
+        assert_eq!(drill.follow_ups, 0);
+        assert!(!drill.recovered);
+        assert!(!drill.aided);
+        assert_eq!(drill.ttfk_ms, Some(400));
+        assert_eq!(ran.outturn.landings(1), vec![Landing::Pass]);
+        assert_eq!(ran.outturn.failed(), 0);
+        assert_eq!(
+            ran.outturn.rows.first().map(|row| row.state),
+            Some(screen::RowState::Passed {
+                ttfk_ms: Some(400),
+                recovered: false,
+            })
+        );
+    }
+
+    #[test]
+    fn a_cold_fail_and_a_follow_up_pass_write_one_fail_recovered() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
         let mut keys = typing("wrong", 300);
         keys.extend(typing(RIGHT, 900));
         let ran = run(&turns, keys);
 
-        assert_eq!(ran.written.len(), 2);
-        let first = ran.written.first().unwrap();
-        let second = ran.written.get(1).unwrap();
-        assert_eq!(first.outcome, Outcome::Fail);
-        assert_eq!(first.rung_after, Rung::FIRST);
-        assert_eq!(second.outcome, Outcome::Pass);
+        let drill = only(&ran);
         assert_eq!(
-            second.rung_after,
-            Rung::FIRST,
-            "the second sample carries what the first decided"
+            drill.outcome,
+            Outcome::Fail,
+            "the cold capture is what was measured"
         );
-        assert_eq!(ran.outturn.landings(1), vec![Landing::Lapse]);
-        assert_eq!(ran.outturn.missed(), 1);
+        assert_eq!(drill.follow_ups, 1);
+        assert!(drill.recovered);
+        assert!(!drill.aided);
+        assert_eq!(
+            drill.ttfk_ms,
+            Some(300),
+            "the latency is the cold capture's"
+        );
+        assert_eq!(ran.outturn.landings(1), vec![Landing::Fail]);
+        assert_eq!(ran.outturn.failed(), 1);
+        assert_eq!(ran.outturn.recovered(), 1);
         assert!(ran.flashes > 0, "a refusal is flashed");
-    }
-
-    #[test]
-    fn practice_never_moves_the_rung_in_either_direction() {
-        let turns = vec![drill_turn("a", Occasion::Practice, false)];
-        let ran = run(&turns, typing("wrong", 300));
-        let capture = ran.written.first().unwrap();
-        assert_eq!(capture.rung_after, Rung::FIRST);
-        assert_eq!(ran.outturn.landings(1), vec![Landing::Miss]);
-        assert_eq!(ran.outturn.missed(), 1);
-    }
-
-    #[test]
-    fn submitting_nothing_concedes_rather_than_being_judged() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
-        let ran = run(&turns, vec![(Key::Enter, 800)]);
-        assert_eq!(ran.written.first().map(|c| c.outcome), Some(Outcome::Blank));
-        assert_eq!(ran.outturn.landings(1), vec![Landing::Lapse]);
-    }
-
-    #[test]
-    fn an_aided_pass_publishes_no_latency_on_the_row() {
-        // A latency is a claim about recall, and an aided entry measures
-        // transcription. `stats` draws the same line at `!drill.aided`; the row
-        // beside it must not say otherwise, because a reveal and an idle
-        // conceal both sit inside the figure it would have shown.
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
-        let cold = run(&turns, typing(RIGHT, 400));
-        assert!(
-            matches!(
-                cold.outturn.rows.first().map(|row| row.state),
-                Some(screen::RowState::Passed {
-                    total_ms: Some(_),
-                    ..
-                })
-            ),
-            "a cold pass still reports what it cost"
-        );
-
-        let mut keys = typing("wrong", 300);
-        keys.push((Key::Lookup, 900));
-        keys.extend(typing(RIGHT, 1_000));
-        let aided = run(&turns, keys);
         assert_eq!(
-            aided.outturn.rows.first().map(|row| row.state),
+            ran.outturn.rows.first().map(|row| row.state),
             Some(screen::RowState::Passed {
-                total_ms: None,
-                retries: 1,
+                ttfk_ms: Some(300),
+                recovered: true,
             })
         );
-        assert!(
-            aided.written.get(1).unwrap().total_ms.is_some(),
-            "the record still keeps what the record kept"
-        );
     }
 
     #[test]
-    fn the_lookup_re_labels_the_drill_and_is_only_offered_after_a_cold_try() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
+    fn a_follow_up_that_fails_asks_again_and_counts() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
+        let mut keys = typing("wrong", 300);
+        keys.extend(typing("still wrong", 900));
+        keys.extend(typing("no", 1_500));
+        keys.extend(typing(RIGHT, 2_000));
+        let ran = run(&turns, keys);
+        let drill = only(&ran);
+        assert_eq!(drill.follow_ups, 3);
+        assert!(drill.recovered);
+    }
+
+    #[test]
+    fn the_lookup_latches_aided_onto_the_record() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
         let mut keys = typing("wrong", 300);
         keys.push((Key::Lookup, 900));
         keys.extend(typing(RIGHT, 1_000));
         let ran = run(&turns, keys);
+        let drill = only(&ran);
+        assert_eq!(drill.outcome, Outcome::Fail);
+        assert!(drill.aided);
+        assert!(drill.recovered);
+        assert_eq!(drill.follow_ups, 1, "a lookup is not a capture");
+        assert_eq!(ran.outturn.aided(), 1);
+    }
 
-        assert_eq!(ran.written.len(), 2);
-        assert!(!ran.written.first().unwrap().aided, "the cold try is cold");
-        assert!(ran.written.get(1).unwrap().aided);
+    #[test]
+    fn the_lookup_is_not_on_offer_at_a_cold_capture() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
+        let mut keys = vec![(Key::Lookup, 200)];
+        keys.extend(typing(RIGHT, 400));
+        let ran = run(&turns, keys);
+        let drill = only(&ran);
+        assert!(!drill.aided, "the key did nothing");
+        assert_eq!(drill.outcome, Outcome::Pass);
+        assert!(!ran.last.contains("^L"));
+    }
+
+    #[test]
+    fn escape_at_a_cold_capture_writes_nothing() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
+        let ran = run(&turns, vec![(Key::Escape, 200)]);
+        assert!(ran.written.is_empty());
+        assert_eq!(ran.outturn.landings(1), Vec::new());
+        assert!(!ran.outturn.aborted);
         assert_eq!(
-            ran.outturn.landings(1),
-            vec![Landing::Lapse],
-            "the cold miss it opened with is still what was measured"
+            ran.outturn.rows.first().map(|row| row.state),
+            Some(screen::RowState::Skipped)
         );
     }
 
     #[test]
-    fn a_sitting_declared_aided_measures_nothing_from_the_first_key() {
-        let turns = vec![drill_turn("a", Occasion::Review, true)];
-        let ran = run(&turns, typing(RIGHT, 400));
-        let capture = ran.written.first().unwrap();
-        assert!(capture.aided);
-        assert_eq!(capture.rung_after, Rung::FIRST);
-        assert_eq!(ran.outturn.landings(1), vec![Landing::Aided]);
-        assert_eq!(ran.outturn.missed(), 0);
-    }
-
-    #[test]
-    fn escape_passes_over_a_drill_and_records_that_nothing_was_typed() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
-        let ran = run(&turns, vec![(Key::Escape, 200)]);
-        assert_eq!(ran.written.first().map(|c| c.outcome), Some(Outcome::Skip));
-        assert_eq!(ran.outturn.landings(1), vec![Landing::Skipped]);
+    fn escape_in_a_follow_up_writes_one_fail_not_recovered() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
+        let mut keys = typing("wrong", 300);
+        keys.push((Key::Escape, 900));
+        let ran = run(&turns, keys);
+        let drill = only(&ran);
+        assert_eq!(drill.outcome, Outcome::Fail);
+        assert_eq!(drill.follow_ups, 0);
+        assert!(!drill.recovered);
         assert!(!ran.outturn.aborted);
     }
 
     #[test]
-    fn an_interrupt_abandons_the_sitting_and_asks_nobody_else() {
+    fn an_interrupt_in_a_follow_up_writes_the_drill_and_abandons_the_sitting() {
         let turns = vec![
-            drill_turn("a", Occasion::Review, false),
-            drill_turn("b", Occasion::Review, false),
+            drill_turn("a", Occasion::Review),
+            drill_turn("b", Occasion::Review),
+        ];
+        let mut keys = typing("wrong", 300);
+        keys.push((Key::Lookup, 800));
+        keys.push((Key::Interrupt, 900));
+        let ran = run(&turns, keys);
+        assert!(ran.outturn.aborted);
+        let drill = only(&ran);
+        assert_eq!(drill.outcome, Outcome::Fail);
+        assert!(drill.aided, "what was latched is on the record");
+        assert!(!drill.recovered);
+        assert_eq!(
+            ran.outturn.landings(2),
+            vec![Landing::Fail],
+            "the second turn was never reached"
+        );
+    }
+
+    #[test]
+    fn an_interrupt_at_a_cold_capture_writes_nothing_and_asks_nobody_else() {
+        let turns = vec![
+            drill_turn("a", Occasion::Review),
+            drill_turn("b", Occasion::Review),
         ];
         let ran = run(&turns, vec![(Key::Interrupt, 200)]);
         assert!(ran.outturn.aborted);
-        assert_eq!(ran.written.len(), 1);
-        assert_eq!(
-            ran.outturn.landings(2),
-            Vec::new(),
-            "an abandoned prompt is no reading at all"
-        );
+        assert!(ran.written.is_empty());
+        assert_eq!(ran.outturn.landings(2), Vec::new());
     }
 
     #[test]
-    fn the_cold_tries_run_out_and_a_further_answer_is_refused_rather_than_judged() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
-        let mut keys = Vec::new();
-        for _ in 0..4 {
-            keys.extend(typing("wrong", 300));
-        }
-        keys.push((Key::Escape, 9_000));
-        let ran = run(&turns, keys);
-        assert_eq!(
-            ran.written
-                .iter()
-                .filter(|c| c.outcome == Outcome::Fail)
-                .count(),
-            3,
-            "three tries, and the fourth is not a reading anybody asked for"
-        );
-    }
-
-    #[test]
-    fn once_the_cold_tries_are_spent_the_field_says_so_and_keeps_the_lookup_on_offer() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
-        let mut keys = Vec::new();
-        for _ in 0..3 {
-            keys.extend(typing("wrong", 300));
-        }
-        keys.push((Key::Escape, 9_000));
-        let ran = run(&turns, keys);
-        // The card the prompt rests at after the third miss, not a pulse.
-        assert!(ran.last.contains(super::OUT_OF_TRIES), "{}", ran.last);
-        assert!(ran.last.contains("^L"), "{}", ran.last);
-        assert!(!ran.last.contains("try 4"), "{}", ran.last);
-    }
-
-    #[test]
-    fn a_blank_is_a_concession_and_the_next_try_says_so() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
+    fn submitting_nothing_cold_is_a_fail_with_no_latency() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
         let ran = run(&turns, vec![(Key::Enter, 800), (Key::Escape, 1_200)]);
-        assert!(
-            ran.last.contains("conceded · try 2 of 3"),
-            "nothing was offered, so it was not *not it*: {}",
-            ran.last
-        );
+        let drill = only(&ran);
+        assert_eq!(drill.outcome, Outcome::Fail);
+        assert_eq!(drill.ttfk_ms, None, "nothing was typed");
+        assert_eq!(ran.outturn.landings(1), vec![Landing::Fail]);
     }
 
     #[test]
-    fn an_aided_entry_carries_no_try_count() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
+    fn the_tail_says_which_follow_up_is_next_and_offers_the_lookup() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
+        let mut keys = typing("wrong", 300);
+        keys.extend(typing("wrong", 900));
+        keys.push((Key::Escape, 2_000));
+        let ran = run(&turns, keys);
+        assert!(ran.last.contains("not it · follow-up 2"), "{}", ran.last);
+        assert!(ran.last.contains("^L"), "{}", ran.last);
+        assert!(ran.last.contains("a follow-up"), "{}", ran.last);
+    }
+
+    #[test]
+    fn once_looked_up_the_lookup_is_withdrawn_and_the_card_says_so() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
         let mut keys = typing("wrong", 300);
         keys.push((Key::Lookup, 900));
         keys.push((Key::Escape, 1_000));
         let ran = run(&turns, keys);
-        assert!(!ran.last.contains("try 2"), "{}", ran.last);
-        assert!(ran.last.contains("measures nothing"), "{}", ran.last);
+        assert!(!ran.last.contains("^L"), "{}", ran.last);
+        assert!(ran.last.contains("looked up"), "{}", ran.last);
+        assert!(ran.last.contains("aided"), "{}", ran.last);
     }
 
     #[test]
     fn the_verifier_is_told_which_turn_it_is_judging() {
         let turns = vec![
-            drill_turn("a", Occasion::Review, false),
-            drill_turn("b", Occasion::Review, false),
+            drill_turn("a", Occasion::Review),
+            drill_turn("b", Occasion::Review),
         ];
         let mut keys = typing(RIGHT, 300);
         keys.extend(typing(RIGHT, 900));
@@ -1093,11 +968,9 @@ mod tests {
             seen.borrow_mut().push(index);
             Ok(true)
         };
-        let mut record = |_: &Capture| -> Result<()> { Ok(()) };
+        let mut record = |_: usize, _: &Drilled| -> Result<()> { Ok(()) };
         super::run(
             &turns,
-            3,
-            &Ladder::default(),
             date(2026, 9, 13),
             super::Wiring {
                 console: &mut console,
@@ -1114,20 +987,20 @@ mod tests {
         // Two turns, one key script: the dormant row asks for nothing, so the
         // only keys consumed are the drill's. Were a prompt drawn for it, the
         // typed answer would land there and the drill would go unanswered.
-        let turns = vec![dormant_turn("a"), drill_turn("b", Occasion::Review, false)];
+        let turns = vec![dormant_turn("a"), drill_turn("b", Occasion::Review)];
         let ran = run(&turns, typing(RIGHT, 300));
         assert_eq!(
             ran.written.len(),
             1,
             "nothing is written for a dormant turn"
         );
-        assert_eq!(ran.written.first().map(|c| c.turn), Some(1));
+        assert_eq!(ran.written.first().map(|(turn, _)| *turn), Some(1));
         assert_eq!(ran.outturn.dormant, vec![0]);
         assert_eq!(
             ran.outturn.landings(2),
             vec![Landing::Dormant, Landing::Pass]
         );
-        assert_eq!(ran.outturn.missed(), 0);
+        assert_eq!(ran.outturn.failed(), 0);
         assert!(!ran.outturn.aborted);
         assert!(matches!(
             ran.outturn.rows.first().map(|row| row.state),
@@ -1137,103 +1010,39 @@ mod tests {
     }
 
     #[test]
-    fn a_cold_try_refuses_a_paste_and_counts_it() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
+    fn a_cold_capture_refuses_a_paste() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
         let mut keys = vec![pasting(RIGHT, 200)];
-        keys.extend(typing(RIGHT, 400));
+        keys.push((Key::Enter, 300));
         let ran = run(&turns, keys);
-        let capture = ran.written.first().unwrap();
-        assert_eq!(capture.paste_refused, 1);
-        assert_eq!(capture.paste_accepted, 0);
+        let drill = only(&ran);
         assert_eq!(
-            capture.outcome,
-            Outcome::Pass,
-            "the pass is the one that was typed"
+            drill.outcome,
+            Outcome::Fail,
+            "nothing of the paste reached the field, so nothing was offered"
         );
         assert!(ran.flashes > 0, "and the refusal was said");
     }
 
     #[test]
-    fn the_aided_entry_after_a_lookup_takes_a_paste() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
+    fn a_follow_up_takes_a_paste() {
+        let turns = vec![drill_turn("a", Occasion::Review)];
         let mut keys = typing("wrong", 300);
-        keys.push((Key::Lookup, 900));
         keys.push(pasting(RIGHT, 1_000));
         keys.push((Key::Enter, 1_100));
         let ran = run(&turns, keys);
-
-        assert_eq!(ran.written.len(), 2);
-        let cold = ran.written.first().unwrap();
-        let aided = ran.written.get(1).unwrap();
-        assert_eq!(cold.paste_accepted, 0);
-        assert!(aided.aided);
-        assert_eq!(aided.paste_accepted, 1);
-        assert_eq!(aided.paste_refused, 0);
-        assert_eq!(
-            aided.outcome,
-            Outcome::Pass,
+        let drill = only(&ran);
+        assert_eq!(drill.outcome, Outcome::Fail);
+        assert!(
+            drill.recovered,
             "what was pasted reached the field and the verifier saw it"
         );
-        assert_eq!(
-            ran.outturn.landings(1),
-            vec![Landing::Lapse],
-            "the cold miss it opened with is still what was measured"
-        );
-    }
-
-    #[test]
-    fn a_sitting_declared_aided_takes_a_paste_from_the_first_key() {
-        let turns = vec![drill_turn("a", Occasion::Review, true)];
-        let ran = run(&turns, vec![pasting(RIGHT, 200), (Key::Enter, 300)]);
-        let capture = ran.written.first().unwrap();
-        assert!(capture.aided, "nothing here was measured");
-        assert_eq!(capture.paste_accepted, 1);
-        assert_eq!(capture.outcome, Outcome::Pass);
-        assert_eq!(ran.outturn.landings(1), vec![Landing::Aided]);
-    }
-
-    #[test]
-    fn a_cold_try_with_its_tries_spent_still_refuses_a_paste() {
-        let turns = vec![drill_turn("a", Occasion::Review, false)];
-        let mut keys = Vec::new();
-        for _ in 0..3 {
-            keys.extend(typing("wrong", 300));
-        }
-        keys.push(pasting(RIGHT, 4_000));
-        keys.push((Key::Escape, 5_000));
-        let ran = run(&turns, keys);
-        assert_eq!(
-            ran.written.iter().filter(|c| c.paste_accepted > 0).count(),
-            0,
-            "out of tries is still cold"
-        );
-        assert_eq!(
-            ran.written.last().map(|c| c.outcome),
-            Some(Outcome::Skip),
-            "what was pasted never reached the field, so nothing was judged"
-        );
-    }
-
-    #[test]
-    fn a_paste_too_long_for_the_field_enters_none_of_itself() {
-        let turns = vec![drill_turn("a", Occasion::Review, true)];
-        let long = "x".repeat(crate::secret::CAPACITY + 1);
-        let mut keys = vec![pasting(&long, 200)];
-        keys.extend(typing(RIGHT, 400));
-        let ran = run(&turns, keys);
-        let capture = ran.written.first().unwrap();
-        assert_eq!(capture.paste_accepted, 0);
-        assert_eq!(capture.paste_refused, 1);
-        assert_eq!(
-            capture.outcome,
-            Outcome::Pass,
-            "the field held what was typed after it and nothing of the paste"
-        );
+        assert!(!drill.aided, "a paste is not a lookup");
     }
 
     #[test]
     fn the_field_goes_before_the_verifier_runs_and_the_keyboard_is_drained_after() {
-        let turns = vec![drill_turn("escrow-p", Occasion::Review, false)];
+        let turns = vec![drill_turn("escrow-p", Occasion::Review)];
         let ran = run(&turns, typing(RIGHT, 400));
         assert!(
             ran.drains > 0,

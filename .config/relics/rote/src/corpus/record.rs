@@ -16,12 +16,11 @@
 //! The envelope carries no machine and no position: the file a line sits in
 //! names the machine, and the line's index in that file is its position.
 //!
-//! **A record stores what its writer believed.** `scheduled_interval_days` and
-//! `rung_after` are authoritative — they are what the scheduler decided at the
-//! time, so replay reads them and history stays immune to a later change in the
-//! ladder. The remaining measurements are *witnesses*: `stats` recomputes them
-//! from the merged corpus, and a disagreement is how a two-machine divergence is
-//! found.
+//! **A record stores what cannot be derived and nothing else.** A drill carries
+//! its outcome, the latency of its cold capture and what followed it; the
+//! occasion, the rung and every interval are derived at replay from the ladder
+//! and the drills before it, so a later change to the ladder re-derives the
+//! whole history rather than leaving two schedules in one file.
 //!
 //! Nothing here holds secret material. The verifiers live elsewhere, and no
 //! field records the input, its length, or any prefix.
@@ -35,7 +34,6 @@ use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::ladder::Occasion;
 use crate::slug::Slug;
 
 /// The schema this binary writes and understands.
@@ -202,51 +200,6 @@ impl fmt::Display for EngramId {
     }
 }
 
-/// One invocation, so the captures typed in it can be told apart from a second
-/// visit the same day.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct SittingId(Minted);
-
-impl SittingId {
-    /// A fresh identity.
-    ///
-    /// # Errors
-    ///
-    /// When the system will not supply randomness.
-    pub fn mint() -> Result<Self> {
-        Ok(Self(Minted::mint()?))
-    }
-}
-
-impl FromStr for SittingId {
-    type Err = BadId;
-
-    fn from_str(text: &str) -> Result<Self, Self::Err> {
-        Minted::parse(text).map(Self).ok_or(BadId)
-    }
-}
-
-impl TryFrom<String> for SittingId {
-    type Error = BadId;
-
-    fn try_from(text: String) -> Result<Self, Self::Error> {
-        text.parse()
-    }
-}
-
-impl From<SittingId> for String {
-    fn from(id: SittingId) -> Self {
-        id.to_string()
-    }
-}
-
-impl fmt::Display for SittingId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
 /// One line of a chain.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -280,8 +233,8 @@ pub enum Event {
     Attach(Attached),
     /// A lineage left the schedule. Its history stays.
     Retire(Retired),
-    /// Something was typed.
-    Capture(Captured),
+    /// A secret was asked for from memory, and judged.
+    Drill(Drilled),
 }
 
 impl Event {
@@ -292,7 +245,7 @@ impl Event {
             Self::Enroll(e) => Some(e.engram),
             Self::Rotate(e) => Some(e.to),
             Self::Attach(e) => Some(e.engram),
-            Self::Capture(e) => Some(e.engram),
+            Self::Drill(e) => Some(e.engram),
             Self::Retire(_) => None,
         }
     }
@@ -304,7 +257,7 @@ impl Event {
             Self::Rotate(_) => "rotate",
             Self::Attach(_) => "attach",
             Self::Retire(_) => "retire",
-            Self::Capture(_) => "capture",
+            Self::Drill(_) => "drill",
         }
     }
 }
@@ -352,103 +305,49 @@ pub struct Retired {
     pub slug: Slug,
 }
 
-/// How one capture ended.
+/// How a drill ended: how its cold capture was judged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Outcome {
-    /// The verifier accepted it.
+    /// The verifier accepted the cold capture.
     Pass,
-    /// The verifier refused it.
+    /// It did not, or nothing was offered to it.
     Fail,
-    /// Nothing was offered. A failure of recall like any other, kept apart from
-    /// [`Outcome::Fail`] because producing a wrong answer and having none are
-    /// different readings, and the first week runs through both.
-    Blank,
-    /// Passed over deliberately.
-    Skip,
-    /// The sitting was abandoned at this prompt.
-    Abort,
 }
 
 impl Outcome {
-    /// Whether recall was reached for and missed. A blank is a failure, not an
-    /// absence.
-    pub fn lapsed(self) -> bool {
-        matches!(self, Self::Fail | Self::Blank)
-    }
-
-    /// Whether anything was put in front of a person.
-    pub fn exposed(self) -> bool {
-        matches!(self, Self::Pass | Self::Fail | Self::Blank)
+    /// The one spelling of this outcome. Every render site reads it here.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Fail => "fail",
+        }
     }
 }
 
-/// One typed sample.
+/// One drill: an engram asked for from memory once, and everything that
+/// followed until the turn ended.
 ///
-/// Nothing here is derived from the input's content: not its length, not a
-/// prefix, not a character class. `corrections` counts keystrokes that removed
-/// something, one apiece and whatever each removed, and the two paste counts
-/// partition the pastes the prompt saw — facts about the sitting rather than
-/// about the secret.
+/// Written once, when the drill ends. Nothing here is derived from the input's
+/// content: not its length, not a prefix, not a character class.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Captured {
-    /// The lineage. Determined by `engram`, and carried anyway so one line
-    /// grepped out of context names something a person recognises.
-    pub slug: Slug,
-    /// The engram that was asked for.
+pub struct Drilled {
+    /// The engram that was asked for. It names its lineage.
     pub engram: EngramId,
-    /// The sitting this belongs to.
-    pub sitting: SittingId,
-    /// Which sample within this drill. Only the first is measured.
-    pub ordinal: u8,
-    /// Whether the schedule asked for the drill this belongs to.
-    pub occasion: Occasion,
-    /// Whether the answer was consulted before it was typed. Not recall, so it
-    /// is kept out of every figure that claims to measure one.
-    pub aided: bool,
-    /// How it ended.
+    /// How the cold capture was judged.
     pub outcome: Outcome,
-    /// Milliseconds from the prompt appearing to the first keystroke. The
-    /// leading indicator of decay: it rises before the first failure.
+    /// Milliseconds from the prompt appearing to the first keystroke of the
+    /// cold capture. The leading indicator of decay: it rises before the first
+    /// fail. Absent when nothing was typed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttfk_ms: Option<u64>,
-    /// Milliseconds from the first keystroke to submission.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_ms: Option<u64>,
-    /// Keystrokes that removed something, one apiece.
-    pub corrections: u32,
-    /// Pastes that reached the field. One is taken wherever nothing is being
-    /// measured, which is every prompt but a cold try.
-    pub paste_accepted: u32,
-    /// Pastes that did not, whether the prompt refuses them or the field had no
-    /// room. The two counts together are every paste the prompt saw, and
-    /// neither is a count of lookups: a paste refused here is one steered onto
-    /// a channel that arrives as ordinary typing.
-    pub paste_refused: u32,
-    /// What the ladder asked for. Authoritative.
-    pub scheduled_interval_days: u32,
-    /// Days since the schedule's anchor, as the writer saw it. A witness.
-    pub actual_interval_days: u32,
-    /// Days since the secret was last in front of a person, as the writer saw
-    /// it. A witness.
-    pub effective_interval_days: u32,
-    /// The ladder position before this sample, as the writer saw it. A witness:
-    /// after a merge it can name a predecessor that never existed in merged
-    /// order, which is exactly how a divergence is found.
-    pub rung_before: u8,
-    /// The ladder position after it. Authoritative.
-    pub rung_after: u8,
-}
-
-impl Captured {
-    /// Whether this sample moves the ladder.
-    ///
-    /// The schedule must have asked, the memory must have been measured, and it
-    /// must be the first sample of its drill — a second is primed by the first.
-    pub fn scores(&self) -> bool {
-        self.occasion == Occasion::Review && !self.aided && self.ordinal == 1
-    }
+    /// Captures after the cold one. Only offered after a fail.
+    pub follow_ups: u16,
+    /// Whether a follow-up passed.
+    pub recovered: bool,
+    /// Whether the answer was looked up during a follow-up.
+    pub aided: bool,
 }
 
 /// A line as read back: parsed, or kept verbatim with the reason it would not
@@ -503,43 +402,30 @@ mod tests {
     use jiff::civil::date;
 
     use super::{
-        Captured, Digest, EngramId, Enrolled, Event, Line, Outcome, Record, SCHEMA, SittingId,
-        render,
+        Digest, Drilled, EngramId, Enrolled, Event, Line, Outcome, Record, SCHEMA, render,
     };
-    use crate::ladder::Occasion;
 
-    fn capture() -> Record {
+    fn drill() -> Record {
         Record {
             v: SCHEMA,
             at: "2026-09-10T07:12:03Z".parse().unwrap(),
             day: date(2026, 9, 10),
             host: "Mac".to_owned(),
             prev: Digest::GENESIS,
-            event: Event::Capture(Captured {
-                slug: "escrow-p".parse().unwrap(),
+            event: Event::Drill(Drilled {
                 engram: EngramId::mint().unwrap(),
-                sitting: SittingId::mint().unwrap(),
-                ordinal: 1,
-                occasion: Occasion::Review,
-                aided: false,
-                outcome: Outcome::Pass,
+                outcome: Outcome::Fail,
                 ttfk_ms: Some(1_200),
-                total_ms: Some(4_100),
-                corrections: 0,
-                paste_accepted: 0,
-                paste_refused: 0,
-                scheduled_interval_days: 30,
-                actual_interval_days: 30,
-                effective_interval_days: 30,
-                rung_before: 6,
-                rung_after: 6,
+                follow_ups: 1,
+                recovered: true,
+                aided: false,
             }),
         }
     }
 
     #[test]
     fn a_record_round_trips_through_one_line() {
-        let record = capture();
+        let record = drill();
         let line = render(&record).unwrap();
         assert!(!line.contains('\n'));
         assert_eq!(serde_json::from_str::<Record>(&line).unwrap(), record);
@@ -547,13 +433,13 @@ mod tests {
 
     #[test]
     fn the_wire_form_is_flat_enough_to_grep() {
-        let line = render(&capture()).unwrap();
+        let line = render(&drill()).unwrap();
         for expected in [
-            "\"kind\":\"capture\"",
-            "\"slug\":\"escrow-p\"",
-            "\"occasion\":\"review\"",
+            "\"kind\":\"drill\"",
+            "\"outcome\":\"fail\"",
+            "\"follow_ups\":1",
+            "\"recovered\":true",
             "\"aided\":false",
-            "\"outcome\":\"pass\"",
         ] {
             assert!(line.contains(expected), "missing {expected} in {line}");
         }
@@ -574,14 +460,14 @@ mod tests {
         });
         assert_eq!(retired.engram(), None);
         assert_eq!(retired.kind(), "retire");
+        assert_eq!(drill().event.kind(), "drill");
     }
 
     #[test]
-    fn an_absent_optional_is_omitted_rather_than_written_as_null() {
-        let mut record = capture();
-        if let Event::Capture(ref mut entry) = record.event {
+    fn an_absent_latency_is_omitted_rather_than_written_as_null() {
+        let mut record = drill();
+        if let Event::Drill(ref mut entry) = record.event {
             entry.ttfk_ms = None;
-            entry.total_ms = None;
         }
         let line = render(&record).unwrap();
         assert!(!line.contains("null"));
@@ -591,12 +477,12 @@ mod tests {
     #[test]
     fn an_unknown_key_is_refused_at_either_level() {
         let mut value: serde_json::Value =
-            serde_json::from_str(&render(&capture()).unwrap()).unwrap();
+            serde_json::from_str(&render(&drill()).unwrap()).unwrap();
         value["surprise"] = serde_json::json!(true);
         assert!(serde_json::from_str::<Record>(&value.to_string()).is_err());
 
         let mut value: serde_json::Value =
-            serde_json::from_str(&render(&capture()).unwrap()).unwrap();
+            serde_json::from_str(&render(&drill()).unwrap()).unwrap();
         value["event"]["surprise"] = serde_json::json!(true);
         assert!(serde_json::from_str::<Record>(&value.to_string()).is_err());
     }
@@ -637,38 +523,11 @@ mod tests {
             EngramId::mint().unwrap(),
             "two mints never collide"
         );
-        assert!(serde_json::from_str::<SittingId>("\"nope\"").is_err());
     }
 
     #[test]
-    fn only_a_first_unaided_review_sample_moves_the_ladder() {
-        let mut record = capture();
-        let Event::Capture(ref mut sample) = record.event else {
-            panic!("built a capture");
-        };
-        assert!(sample.scores());
-
-        sample.aided = true;
-        assert!(!sample.scores(), "an aided sample measures nothing");
-
-        sample.aided = false;
-        sample.ordinal = 2;
-        assert!(!sample.scores(), "a second sample is primed by the first");
-
-        sample.ordinal = 1;
-        sample.occasion = Occasion::Practice;
-        assert!(!sample.scores(), "nobody asked for practice");
-    }
-
-    #[test]
-    fn only_something_typed_counts_as_exposure() {
-        assert!(Outcome::Pass.exposed());
-        assert!(Outcome::Fail.exposed());
-        assert!(Outcome::Blank.exposed());
-        assert!(!Outcome::Skip.exposed());
-        assert!(!Outcome::Abort.exposed());
-        assert!(Outcome::Fail.lapsed());
-        assert!(Outcome::Blank.lapsed());
-        assert!(!Outcome::Pass.lapsed());
+    fn an_outcome_is_spelled_in_exactly_one_place() {
+        assert_eq!(Outcome::Pass.word(), "pass");
+        assert_eq!(Outcome::Fail.word(), "fail");
     }
 }

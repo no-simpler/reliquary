@@ -27,10 +27,8 @@ use jiff::civil::Date;
 use proptest::prelude::*;
 use rote::corpus::Corpus;
 use rote::corpus::record::{
-    Attached, Captured, Digest, EngramId, Enrolled, Event, Outcome, Record, Retired, Rotated,
-    SCHEMA, SittingId, render,
+    Attached, Digest, EngramId, Enrolled, Event, Outcome, Record, Retired, Rotated, SCHEMA, render,
 };
-use rote::ladder::Occasion;
 use rote::machine::MachineId;
 use rote::secret::Secret;
 use rote::slug::Slug;
@@ -239,34 +237,22 @@ impl Rote {
         self.append(day, Event::Retire(Retired { slug: slug(name) }));
     }
 
-    /// One drill, as one first sample, a day after the last exposure.
-    pub fn capture(&mut self, day: Date, name: &str, engram: EngramId, drill: Drilled) {
+    /// One drill, written the way the sitting writes one.
+    pub fn drill(&mut self, day: Date, engram: EngramId, drill: Drilled) {
         let Drilled {
-            occasion,
-            aided,
             outcome,
-            rung_after,
+            recovered,
+            aided,
         } = drill;
         self.append(
             day,
-            Event::Capture(Captured {
-                slug: slug(name),
+            Event::Drill(rote::corpus::record::Drilled {
                 engram,
-                sitting: SittingId::mint().expect("a sitting"),
-                ordinal: 1,
-                occasion,
-                aided,
                 outcome,
                 ttfk_ms: Some(900),
-                total_ms: Some(3_000),
-                corrections: 0,
-                paste_accepted: 0,
-                paste_refused: 0,
-                scheduled_interval_days: 1,
-                actual_interval_days: 1,
-                effective_interval_days: 1,
-                rung_before: 0,
-                rung_after,
+                follow_ups: u16::from(recovered),
+                recovered,
+                aided,
             }),
         );
     }
@@ -301,44 +287,48 @@ impl Rote {
 /// What one seeded drill was.
 #[derive(Clone, Copy, Debug)]
 pub struct Drilled {
-    /// Whether the schedule asked.
-    pub occasion: Occasion,
-    /// Whether the answer was consulted.
-    pub aided: bool,
-    /// How it ended.
+    /// How the cold capture was judged.
     pub outcome: Outcome,
-    /// Where it leaves the ladder.
-    pub rung_after: u8,
+    /// Whether a follow-up passed.
+    pub recovered: bool,
+    /// Whether the answer was looked up.
+    pub aided: bool,
 }
 
 impl Drilled {
-    /// An unaided review that passed.
+    /// A cold pass.
     pub fn passed() -> Self {
         Self {
-            occasion: Occasion::Review,
-            aided: false,
             outcome: Outcome::Pass,
-            rung_after: 1,
-        }
-    }
-
-    /// An unaided review that missed.
-    pub fn missed() -> Self {
-        Self {
-            occasion: Occasion::Review,
+            recovered: false,
             aided: false,
-            outcome: Outcome::Fail,
-            rung_after: 0,
         }
     }
 
-    /// One taken with the answer in front of the person.
-    pub fn aided(outcome: Outcome) -> Self {
+    /// A cold fail, and nothing after it.
+    pub fn failed() -> Self {
         Self {
-            occasion: Occasion::Review,
+            outcome: Outcome::Fail,
+            recovered: false,
+            aided: false,
+        }
+    }
+
+    /// A cold fail that a follow-up got past.
+    pub fn recovered() -> Self {
+        Self {
+            outcome: Outcome::Fail,
+            recovered: true,
+            aided: false,
+        }
+    }
+
+    /// A cold fail recovered with the answer looked up.
+    pub fn aided() -> Self {
+        Self {
+            outcome: Outcome::Fail,
+            recovered: true,
             aided: true,
-            outcome,
-            rung_after: 0,
         }
     }
 }
@@ -349,8 +339,8 @@ impl Drilled {
 pub enum Step {
     Drill {
         pass: bool,
+        recovered: bool,
         aided: bool,
-        review: bool,
     },
     Attach,
     Rotate,
@@ -362,7 +352,7 @@ pub enum Step {
 pub fn steps() -> impl Strategy<Value = Vec<(u8, u8, Step)>> {
     let step = prop_oneof![
         6 => (any::<bool>(), any::<bool>(), any::<bool>())
-            .prop_map(|(pass, aided, review)| Step::Drill { pass, aided, review }),
+            .prop_map(|(pass, recovered, aided)| Step::Drill { pass, recovered, aided }),
         2 => Just(Step::Attach),
         1 => Just(Step::Rotate),
         1 => Just(Step::Enroll),
@@ -493,35 +483,21 @@ impl World {
                 }
                 Step::Drill {
                     pass,
+                    recovered,
                     aided,
-                    review,
                 } => {
                     let outcome = if *pass { Outcome::Pass } else { Outcome::Fail };
-                    let occasion = if *review {
-                        Occasion::Review
-                    } else {
-                        Occasion::Practice
-                    };
+                    // A follow-up only exists after a fail.
+                    let recovered = *recovered && !*pass;
                     world.push(
                         &machine,
-                        Event::Capture(Captured {
-                            slug,
+                        Event::Drill(rote::corpus::record::Drilled {
                             engram,
-                            sitting: SittingId::mint().expect("a sitting"),
-                            ordinal: 1,
-                            occasion,
-                            aided: *aided,
                             outcome,
                             ttfk_ms: Some(900),
-                            total_ms: Some(3_000),
-                            corrections: 0,
-                            paste_accepted: 0,
-                            paste_refused: 0,
-                            scheduled_interval_days: 30,
-                            actual_interval_days: 30,
-                            effective_interval_days: 30,
-                            rung_before: 0,
-                            rung_after: u8::from(*pass),
+                            follow_ups: u16::from(recovered),
+                            recovered,
+                            aided: *aided && !*pass,
                         }),
                     );
                 }
@@ -540,7 +516,7 @@ pub fn merged(records: &[Seeded]) -> Vec<&Record> {
 }
 
 /// A reading small enough to compare, and wide enough to catch a difference.
-pub fn shape(corpus: &Corpus) -> Vec<(String, u8, String, String, usize)> {
+pub fn shape(corpus: &Corpus) -> Vec<(String, u8, String, String)> {
     let mut out = Vec::new();
     for lineage in corpus.lineages() {
         for dossier in &lineage.engrams {
@@ -549,7 +525,6 @@ pub fn shape(corpus: &Corpus) -> Vec<(String, u8, String, String, usize)> {
                 dossier.rung.get(),
                 dossier.anchor.to_string(),
                 dossier.last_exposed.to_string(),
-                usize::from(dossier.aided_mismatch),
             ));
         }
     }

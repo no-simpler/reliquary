@@ -19,7 +19,7 @@ rote help keys|intervals|records|files|machines|stdin|exit = reference topics";
     about = "Spaced-repetition drill for the passwords you must hold in your head.",
     long_about = "Spaced-repetition drill for the passwords you must hold in your head.\n\n\
                   Called bare, rote asks for whatever the schedule wants today. If nothing is \
-                  due it offers voluntary practice instead, on one keystroke. It keeps a faithful \
+                  due it offers to drill everything anyway, on one keystroke. It keeps a faithful \
                   record and proposes a schedule; it renders no verdict, so what the numbers mean \
                   is yours to decide.\n\n\
                   The secret is held in no recoverable form. rote can say wrong; it can never say \
@@ -32,10 +32,6 @@ pub struct Cli {
     /// Bare, this runs today's sitting.
     #[command(subcommand)]
     pub command: Option<Command>,
-
-    /// Declare this sitting aided: the answer was looked up first.
-    #[arg(long)]
-    pub aided: bool,
 
     /// Flags every command carries.
     #[command(flatten)]
@@ -69,7 +65,7 @@ pub enum Command {
     #[command(visible_alias = "due")]
     Status(ScheduleArgs),
 
-    /// Show retention, latency, lapses and punctuality, per engram.
+    /// Show retention, the streak, recall latency and every fail, per engram.
     Stats(MeasurementArgs),
 
     /// Show recent records.
@@ -78,8 +74,9 @@ pub enum Command {
     /// Every machine that has written to the corpus, and this one.
     Machines,
 
-    /// Drill without the schedule asking, whatever it says.
-    Practice(PracticeArgs),
+    /// Drill named lineages, due or not. Every active lineage when none is
+    /// named.
+    Drill(DrillArgs),
 
     /// Enroll a lineage. The secret is typed twice and kept only as a verifier.
     Enroll(EnrollArgs),
@@ -143,16 +140,12 @@ pub struct LogArgs {
     pub lineage: Option<Slug>,
 }
 
-/// Arguments for voluntary practice.
+/// Arguments for drilling by name.
 #[derive(Args)]
-pub struct PracticeArgs {
-    /// Which lineages. All of them when none is named.
+pub struct DrillArgs {
+    /// Which lineages. Every active one when none is named.
     #[arg(value_name = "LINEAGE")]
     pub lineages: Vec<Slug>,
-
-    /// Declare this sitting aided: the answer was looked up first.
-    #[arg(long)]
-    pub aided: bool,
 }
 
 /// Arguments for enrolment.
@@ -286,16 +279,17 @@ mod tests {
     }
 
     #[test]
-    fn a_sitting_is_declared_aided_on_either_side_of_the_verb_and_nowhere_else() {
-        assert!(Cli::parse_from(["rote", "--aided"]).aided);
-        assert!(Cli::parse_from(["rote", "--aided", "practice", "a"]).aided);
-        match Cli::parse_from(["rote", "practice", "--aided", "a"]).command {
-            Some(super::Command::Practice(args)) => assert!(args.aided),
-            _ => panic!("practice"),
+    fn drill_takes_any_number_of_names_and_nothing_declares_a_sitting_aided() {
+        match Cli::parse_from(["rote", "drill"]).command {
+            Some(super::Command::Drill(args)) => assert!(args.lineages.is_empty()),
+            _ => panic!("drill"),
         }
-        assert!(
-            Cli::try_parse_from(["rote", "status", "--aided"]).is_err(),
-            "a reading is never aided"
-        );
+        match Cli::parse_from(["rote", "drill", "a", "b"]).command {
+            Some(super::Command::Drill(args)) => assert_eq!(args.lineages.len(), 2),
+            _ => panic!("drill"),
+        }
+        assert!(Cli::try_parse_from(["rote", "--aided"]).is_err());
+        assert!(Cli::try_parse_from(["rote", "drill", "--aided", "a"]).is_err());
+        assert!(Cli::try_parse_from(["rote", "practice"]).is_err());
     }
 }

@@ -1,26 +1,27 @@
-//! The sitting: the daily call, and voluntary practice.
+//! The sitting: the daily call, and drilling by name.
 //!
 //! **Bare `rote` asks for what is due and nothing else.** One lineage due out of
-//! ten means one turn. If nothing is due it says so and offers practice on one
-//! keystroke, rather than deciding on your behalf what to add: deciding what to
-//! add beyond what is due is the schedule deciding again.
+//! ten means one turn. If nothing is due it says so and offers to drill
+//! everything anyway, on one keystroke, rather than deciding on your behalf
+//! what to add: deciding what to add beyond what is due is the schedule
+//! deciding again.
 
 use anyhow::Result;
 use jiff::civil::Date;
 
 use super::{Context, open_store, save_verifiers};
-use crate::cli::PracticeArgs;
+use crate::cli::DrillArgs;
 use crate::corpus::Corpus;
-use crate::corpus::record::{Captured, Event, SittingId};
-use crate::exit::{CLEAN, INCOMPLETE, LAPSE};
+use crate::corpus::record::{Drilled, Event};
+use crate::exit::{CLEAN, FAIL, INCOMPLETE};
 use crate::intake::refreshed;
 use crate::ladder::{Ladder, Standing};
-use crate::sitting::{self, Mode, Turn, screen};
+use crate::sitting::{self, Selection, Turn, screen};
 use crate::store::Store;
 use crate::tui::{Screen as _, term};
 use crate::verifier::file::Verifiers;
 
-/// What bare `rote` and `rote practice` say when there is no lineage to ask
+/// What bare `rote` and `rote drill` say when there is no lineage to ask
 /// about.
 const NOTHING_TO_DRILL: &str = "nothing to drill · rote enroll <name> to start one";
 
@@ -29,22 +30,21 @@ const NOTHING_TO_DRILL: &str = "nothing to drill · rote enroll <name> to start 
 /// # Errors
 ///
 /// When the corpus cannot be read or written, or the terminal refuses.
-pub fn daily(ctx: &Context, aided: bool) -> Result<u8> {
+pub fn daily(ctx: &Context) -> Result<u8> {
     let mut store = open_store(ctx)?;
     let ladder = ctx.config.ladder()?;
     let corpus = Corpus::replay(store.chains().records(), &ladder);
     let verifiers = Verifiers::load(&ctx.paths.verifiers())?;
     let today = ctx.today();
 
-    let due = sitting::roster(&corpus, &verifiers, today, &ladder, Mode::Due, aided, &[]);
+    let due = sitting::roster(&corpus, &verifiers, today, &ladder, Selection::Due);
     if !due.is_empty() {
         return work(
             ctx,
             &mut store,
             &Opening {
-                before: &corpus,
+                corpus: &corpus,
                 verifiers: &verifiers,
-                ladder: &ladder,
                 today,
             },
             &due,
@@ -70,30 +70,21 @@ pub fn daily(ctx: &Context, aided: bool) -> Result<u8> {
         return Ok(CLEAN);
     }
 
-    // Nothing is due, so the only thing left to offer is practice. Asked rather
-    // than assumed: it is voluntary, and a sitting nobody asked for is the
-    // schedule deciding again.
+    // Nothing is due, so the only thing left to offer is everything. Asked
+    // rather than assumed: a sitting nobody asked for is the schedule deciding
+    // again.
     let mut console = term::Terminal::enter(ctx.style)?;
-    let wanted = crate::tui::offer(&mut console, today, &waiting, "practice anyway?")?;
+    let wanted = crate::tui::offer(&mut console, today, &waiting, "drill everything anyway?")?;
     if !wanted {
         return Ok(CLEAN);
     }
-    let roster = sitting::roster(
-        &corpus,
-        &verifiers,
-        today,
-        &ladder,
-        Mode::Practice,
-        aided,
-        &[],
-    );
+    let roster = sitting::roster(&corpus, &verifiers, today, &ladder, Selection::Named(&[]));
     work(
         ctx,
         &mut store,
         &Opening {
-            before: &corpus,
+            corpus: &corpus,
             verifiers: &verifiers,
-            ladder: &ladder,
             today,
         },
         &roster,
@@ -101,12 +92,12 @@ pub fn daily(ctx: &Context, aided: bool) -> Result<u8> {
     )
 }
 
-/// `rote practice`.
+/// `rote drill`.
 ///
 /// # Errors
 ///
 /// When a named lineage is unknown, or the corpus cannot be read or written.
-pub fn practice(ctx: &Context, args: &PracticeArgs, aided: bool) -> Result<u8> {
+pub fn drill(ctx: &Context, args: &DrillArgs) -> Result<u8> {
     let mut store = open_store(ctx)?;
     let ladder = ctx.config.ladder()?;
     let corpus = Corpus::replay(store.chains().records(), &ladder);
@@ -124,9 +115,7 @@ pub fn practice(ctx: &Context, args: &PracticeArgs, aided: bool) -> Result<u8> {
         &verifiers,
         today,
         &ladder,
-        Mode::Practice,
-        aided,
-        &args.lineages,
+        Selection::Named(&args.lineages),
     );
     if roster.is_empty() {
         if !ctx.quiet {
@@ -138,9 +127,8 @@ pub fn practice(ctx: &Context, args: &PracticeArgs, aided: bool) -> Result<u8> {
         ctx,
         &mut store,
         &Opening {
-            before: &corpus,
+            corpus: &corpus,
             verifiers: &verifiers,
-            ladder: &ladder,
             today,
         },
         &roster,
@@ -150,13 +138,10 @@ pub fn practice(ctx: &Context, args: &PracticeArgs, aided: bool) -> Result<u8> {
 
 /// What a sitting starts from: the record and the day, as they stood before it.
 struct Opening<'a> {
-    /// The corpus as it was, so the closing card can read an edge rather than a
-    /// state.
-    before: &'a Corpus,
+    /// The corpus as it was, which is what the closing card names rows by.
+    corpus: &'a Corpus,
     /// What this machine holds.
     verifiers: &'a Verifiers,
-    /// The schedule.
-    ladder: &'a Ladder,
     /// The drill day.
     today: Date,
 }
@@ -170,12 +155,8 @@ fn work(
     open: Option<term::Terminal>,
 ) -> Result<u8> {
     let Opening {
-        verifiers,
-        ladder,
-        today,
-        ..
+        verifiers, today, ..
     } = *opening;
-    let id = SittingId::mint()?;
     let mut console = match open {
         Some(console) => console,
         None => term::Terminal::enter(ctx.style)?,
@@ -217,26 +198,16 @@ fn work(
         };
 
     let outturn = {
-        // Each capture goes to the corpus the moment it is taken, so a sitting
-        // cut short keeps every reading it had already produced.
-        let mut record = |capture: &sitting::Capture| -> Result<()> {
-            let Some(turn) = turns.get(capture.turn) else {
-                return Ok(());
-            };
-            let sitting::Task::Drill(drilling) = &turn.task else {
-                return Ok(());
-            };
-            store.borrow_mut().append(
-                at(),
-                today,
-                Event::Capture(captured(turn, drilling, id, capture)),
-            )
+        // Each drill goes to the corpus the moment it ends, so a sitting cut
+        // short keeps every drill that had already ended.
+        let mut record = |_: usize, drilled: &Drilled| -> Result<()> {
+            store
+                .borrow_mut()
+                .append(at(), today, Event::Drill(drilled.clone()))
         };
 
         sitting::run(
             turns,
-            ctx.config.max_attempts(),
-            ladder,
             today,
             sitting::Wiring {
                 console: &mut console,
@@ -246,59 +217,20 @@ fn work(
         )?
     };
 
-    let store = store.into_inner();
-    close(ctx, opening, turns, &outturn, store, console)
+    close(ctx, opening, turns, &outturn, console)
 }
 
-/// One typed sample as the record spells it: what the sitting saw, and what the
-/// roster knew about the engram when it planned the drill.
-fn captured(
-    turn: &Turn,
-    drilling: &sitting::Drilling,
-    id: SittingId,
-    capture: &sitting::Capture,
-) -> Captured {
-    Captured {
-        slug: turn.slug.clone(),
-        engram: turn.engram,
-        sitting: id,
-        ordinal: capture.ordinal,
-        occasion: capture.occasion,
-        aided: capture.aided,
-        outcome: capture.outcome,
-        ttfk_ms: capture.ttfk_ms,
-        total_ms: capture.total_ms,
-        corrections: capture.corrections,
-        paste_accepted: capture.paste_accepted,
-        paste_refused: capture.paste_refused,
-        scheduled_interval_days: drilling.scheduled_interval_days,
-        actual_interval_days: drilling.actual_interval_days,
-        effective_interval_days: drilling.effective_interval_days,
-        rung_before: drilling.rung.get(),
-        rung_after: capture.rung_after.get(),
-    }
-}
-
-/// The closing card, drawn from the corpus after the last write, held until it
-/// has been read; then the reminder, and the exit status.
+/// The closing card, held until it has been read; then the exit status.
 fn close(
     ctx: &Context,
     opening: &Opening<'_>,
     turns: &[Turn],
     outturn: &sitting::Outturn,
-    store: &Store,
     mut console: term::Terminal,
 ) -> Result<u8> {
-    let Opening {
-        before,
-        ladder,
-        today,
-        ..
-    } = *opening;
-    let after = Corpus::replay(store.chains().records(), ladder);
-    let notes = closing_notes(turns, before, &after);
+    let notes = closing_notes(turns, opening.corpus);
     let closing = screen::card(
-        &screen::Frame::done(today, &outturn.rows, outturn, &notes),
+        &screen::Frame::done(opening.today, &outturn.rows, outturn, &notes),
         &crate::tui::card::Field::blind(),
         ctx.style,
     );
@@ -308,58 +240,25 @@ fn close(
 
     Ok(if outturn.aborted {
         INCOMPLETE
-    } else if outturn.missed() > 0 {
-        LAPSE
+    } else if outturn.failed() > 0 {
+        FAIL
     } else {
         CLEAN
     })
 }
 
-/// What belongs under the closing card: a reading of the corpus *after* the
-/// sitting, which the sitting itself cannot know, and the verb for each row
-/// the sitting could not ask about.
-///
-/// Drift is read as an **edge** rather than a state. The standing claim about
-/// whether the vault and the verifier agree is `doctor`'s alone; what belongs
-/// here is the moment it changed, which is the moment a person is looking. An
-/// edge names a moment, so it cannot go stale the way a second copy of a
-/// standing claim does. A dormant row is named on the day it is skipped for
-/// the same reason: the person is looking now.
-fn closing_notes(turns: &[Turn], before: &Corpus, after: &Corpus) -> Vec<screen::Note> {
-    let mut notes = Vec::new();
-    let drifted = |corpus: &Corpus, turn: &Turn| -> bool {
-        corpus
-            .lineage(&turn.slug)
-            .and_then(|lineage| lineage.dossier(&turn.engram))
-            .is_some_and(|dossier| dossier.aided_mismatch)
-    };
-    for turn in turns {
-        let Some(lineage) = after.lineage(&turn.slug) else {
-            continue;
-        };
-        if lineage.dossier(&turn.engram).is_none() {
-            continue;
-        }
-        let label = after.label(&turn.engram);
-        let say = |said: &str| screen::Note {
-            label: label.clone(),
-            said: said.to_owned(),
-        };
-        if turn.dormant() {
-            notes.push(say(&format!("dormant here — rote attach {}", turn.slug)));
-        }
-        match (drifted(before, turn), drifted(after, turn)) {
-            (false, true) => notes.push(say(
-                "an aided capture was refused — the vault and the verifier hold \
-                 different secrets. Confirm which one is current, then rote rotate",
-            )),
-            (true, false) => notes.push(say(
-                "the vault and the verifier agree again — an aided capture passed",
-            )),
-            (false, false) | (true, true) => {}
-        }
-    }
-    notes
+/// What belongs under the closing card: the verb for each row the sitting
+/// could not ask about. A dormant row is named on the day it is skipped,
+/// because that is the day the person is looking.
+fn closing_notes(turns: &[Turn], corpus: &Corpus) -> Vec<screen::Note> {
+    turns
+        .iter()
+        .filter(|turn| turn.dormant())
+        .map(|turn| screen::Note {
+            label: corpus.label(&turn.engram),
+            said: format!("dormant here — rote attach {}", turn.slug),
+        })
+        .collect()
 }
 
 fn nothing_due(corpus: &Corpus, today: Date, ladder: &Ladder) -> String {

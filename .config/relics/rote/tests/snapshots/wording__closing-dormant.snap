@@ -1,14 +1,14 @@
 ---
 source: rote/tests/wording.rs
-assertion_line: 233
-expression: "closing(&rows, captures, &[])"
+expression: "closing(&rows, drills, vec![1], &notes)"
 ---
 ╭─ done ────────────────────────────────────────────────────── Sun 13 Sep ─╮
 │                                                                          │
-│     warmup-p  aided                       ✓  x2                          │
+│     escrow-p  review · 30d · at cap       ✓  0.9s                        │
+│     warmup-p  dormant                     –                              │
 │                                                                          │
-│   recorded  lapsed                                                       │
-│                                                                          │
+│   recorded  1 pass · 1 dormant                                           │
+│   warmup-p@1  dormant here — rote attach warmup-p                        │
 │                                                                          │
 │                                                                          │
 │                                                                          │

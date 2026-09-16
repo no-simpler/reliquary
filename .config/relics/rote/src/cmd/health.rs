@@ -7,7 +7,7 @@ use relic_core::ui::Format;
 use super::{Context, Reminder, flagship, read_chains, reminder};
 use crate::corpus::Corpus;
 use crate::doctor::{self, Health};
-use crate::exit::{CLEAN, INCOMPLETE, LAPSE};
+use crate::exit::{CLEAN, FAIL, INCOMPLETE};
 use crate::render::json;
 use crate::verifier::file::Verifiers;
 
@@ -56,7 +56,7 @@ fn emit(ctx: &Context, report: &Report) -> Result<u8> {
     }
     Ok(match report.grade() {
         Grade::Ok => CLEAN,
-        Grade::Soft => LAPSE,
+        Grade::Soft => FAIL,
         Grade::Broken => INCOMPLETE,
     })
 }

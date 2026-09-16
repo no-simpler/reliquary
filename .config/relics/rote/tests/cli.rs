@@ -7,7 +7,6 @@
 mod support;
 
 use predicates::prelude::*;
-use rote::corpus::record::Outcome;
 use support::{Drilled, Rote, day, days_ago, today};
 
 // ── describing the tool ──────────────────────────────────────────────────────
@@ -199,7 +198,7 @@ fn a_bad_lineage_name_is_refused_at_the_edge() {
 fn attaching_restores_a_verifier_and_leaves_the_record_alone() {
     let mut rote = Rote::new();
     let engram = rote.enroll(day(2026, 9, 1), "escrow-p", false);
-    rote.capture(day(2026, 9, 2), "escrow-p", engram, Drilled::passed());
+    rote.drill(day(2026, 9, 2), engram, Drilled::passed());
     // What a restore onto a new machine looks like.
     rote.drop_verifiers();
 
@@ -390,7 +389,7 @@ fn retire_answers_json() {
 fn status_shows_the_rung_the_schedule_and_what_this_machine_holds() {
     let mut rote = Rote::new();
     let engram = rote.enroll(day(2026, 9, 1), "escrow-p", true);
-    rote.capture(day(2026, 9, 2), "escrow-p", engram, Drilled::passed());
+    rote.drill(day(2026, 9, 2), engram, Drilled::passed());
     rote.cmd(&["status"])
         .assert()
         .success()
@@ -420,15 +419,61 @@ fn status_shows_only_the_current_engram_of_a_lineage() {
 fn stats_are_per_engram_and_never_pooled_across_a_rotation() {
     let mut rote = Rote::new();
     let first = rote.enroll(day(2026, 9, 1), "a", false);
-    rote.capture(day(2026, 9, 2), "a", first, Drilled::passed());
+    rote.drill(day(2026, 9, 2), first, Drilled::passed());
     let second = rote.rotate(day(2026, 9, 3), "a");
-    rote.capture(day(2026, 9, 4), "a", second, Drilled::missed());
+    rote.drill(day(2026, 9, 4), second, Drilled::failed());
     rote.cmd(&["stats"])
         .assert()
         .success()
         .stdout(predicate::str::contains("a@1"))
         .stdout(predicate::str::contains("a@2"))
-        .stdout(predicate::str::contains("STREAK"));
+        .stdout(predicate::str::contains("DRILLS"))
+        .stdout(predicate::str::contains("STREAK"))
+        .stdout(predicate::str::contains("RECALL"));
+}
+
+#[test]
+fn stats_list_each_fail_with_what_followed_it() {
+    let mut rote = Rote::new();
+    let engram = rote.enroll(days_ago(3), "a", false);
+    rote.drill(days_ago(2), engram, Drilled::passed());
+    rote.drill(days_ago(1), engram, Drilled::aided());
+    rote.cmd(&["stats"])
+        .env("ROTE_UI", "human")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("retention 50% of 2"))
+        .stdout(predicate::str::contains("fail a@1 on"))
+        .stdout(predicate::str::contains("· recovered · aided"))
+        .stdout(predicate::str::contains("median 0d past due"));
+    let out = rote
+        .cmd(&["stats", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let document: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(document["drills"], 2);
+    assert_eq!(document["fails"][0]["recovered"], true);
+    assert_eq!(document["fails"][0]["aided"], true);
+    assert_eq!(document["engrams"][0]["drills"], 2);
+}
+
+#[test]
+fn the_log_spells_a_drill_by_its_outcome_and_what_followed() {
+    let mut rote = Rote::new();
+    let engram = rote.enroll(day(2026, 9, 1), "a", false);
+    rote.drill(day(2026, 9, 2), engram, Drilled::passed());
+    rote.drill(day(2026, 9, 3), engram, Drilled::aided());
+    rote.cmd(&["log"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("drill"))
+        .stdout(predicate::str::contains("pass"))
+        .stdout(predicate::str::contains(
+            "fail · 1 follow-up · recovered · aided",
+        ));
 }
 
 #[test]
@@ -484,7 +529,7 @@ fn the_output_shape_changes_what_is_printed_and_never_what_is_done() {
     // that read the shape to decide whether to act would differ here.
     let mut rote = Rote::new();
     let engram = rote.enroll(days_ago(1), "a", false);
-    rote.capture(today(), "a", engram, Drilled::passed());
+    rote.drill(today(), engram, Drilled::passed());
     let chain = std::fs::read(rote.chain()).expect("the chain");
 
     for args in [
@@ -534,7 +579,7 @@ fn nothing_enrolled_says_so_rather_than_opening_a_screen() {
 fn nothing_due_says_when_the_next_one_is_and_offers_no_prompt_off_a_terminal() {
     let mut rote = Rote::new();
     let engram = rote.enroll(days_ago(1), "a", false);
-    rote.capture(today(), "a", engram, Drilled::passed());
+    rote.drill(today(), engram, Drilled::passed());
     rote.cmd(&[])
         .assert()
         .success()
@@ -552,12 +597,47 @@ fn a_drill_refuses_to_run_where_it_cannot_be_typed() {
 }
 
 #[test]
-fn practice_on_an_unknown_lineage_is_refused() {
+fn drill_on_an_unknown_lineage_is_refused() {
     Rote::new()
-        .cmd(&["practice", "ghost"])
+        .cmd(&["drill", "ghost"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("no lineage called ghost"));
+}
+
+#[test]
+fn drill_with_no_name_asks_for_every_active_lineage_due_or_not() {
+    // Nothing is due, so bare rote has nothing to insist on and says so. The
+    // same corpus under rote drill has a roster, and a roster wants a terminal.
+    let mut rote = Rote::new();
+    let engram = rote.enroll(days_ago(1), "a", false);
+    rote.drill(today(), engram, Drilled::passed());
+    rote.cmd(&[])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("nothing due"));
+    rote.cmd(&["drill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("terminal"));
+    rote.cmd(&["drill", "a"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("terminal"));
+}
+
+#[test]
+fn drill_with_nothing_enrolled_says_so() {
+    Rote::new()
+        .cmd(&["drill"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rote enroll"));
+}
+
+#[test]
+fn practice_is_no_longer_a_verb() {
+    Rote::new().cmd(&["practice"]).assert().failure();
 }
 
 // ── health ───────────────────────────────────────────────────────────────────
@@ -566,7 +646,7 @@ fn practice_on_an_unknown_lineage_is_refused() {
 fn a_clean_machine_reports_nothing() {
     let mut rote = Rote::new();
     let engram = rote.enroll(days_ago(1), "a", false);
-    rote.capture(today(), "a", engram, Drilled::passed());
+    rote.drill(today(), engram, Drilled::passed());
     rote.cmd(&["doctor", "--format", "human"])
         .assert()
         .success()
@@ -620,14 +700,16 @@ fn a_verifier_below_the_memory_floor_is_broken() {
 }
 
 #[test]
-fn a_dormant_lineage_is_soft_and_points_at_the_sitting() {
+fn a_dormant_lineage_is_soft_and_names_the_attach_verb_for_each_one() {
     let mut rote = Rote::new();
     rote.enroll_dormant(today(), "a");
+    rote.enroll_dormant(today(), "b");
     rote.cmd(&["doctor", "--format", "human"])
         .assert()
         .code(1)
         .stdout(predicate::str::contains("no verifier on this machine"))
-        .stdout(predicate::str::contains("fix: rote"));
+        .stdout(predicate::str::contains("fix: rote attach a"))
+        .stdout(predicate::str::contains("fix: rote attach b"));
 }
 
 #[test]
@@ -638,17 +720,6 @@ fn an_overdue_drill_is_reported_once_the_grace_is_spent() {
         .assert()
         .code(1)
         .stdout(predicate::str::contains("overdue"));
-}
-
-#[test]
-fn a_refused_aided_capture_is_the_vault_drift_signal() {
-    let mut rote = Rote::new();
-    let engram = rote.enroll(day(2026, 9, 1), "a", false);
-    rote.capture(day(2026, 9, 2), "a", engram, Drilled::aided(Outcome::Fail));
-    rote.cmd(&["doctor", "--format", "human"])
-        .assert()
-        .code(1)
-        .stdout(predicate::str::contains("different secrets"));
 }
 
 #[test]
@@ -690,7 +761,7 @@ fn two_machines_writing_on_one_day_is_reported_as_a_double_count() {
     let mut first = Rote::new();
     let engram = first.enroll(day(2026, 9, 1), "a", false);
     let mut second = Rote::beside(&first, "two");
-    second.capture(day(2026, 9, 1), "a", engram, Drilled::passed());
+    second.drill(day(2026, 9, 1), engram, Drilled::passed());
     first
         .cmd(&["doctor", "--format", "human"])
         .assert()
@@ -701,22 +772,6 @@ fn two_machines_writing_on_one_day_is_reported_as_a_double_count() {
         .assert()
         .success()
         .stdout(predicate::str::contains(second.machine.to_string()));
-}
-
-#[test]
-fn a_capture_written_against_a_history_the_merge_does_not_give_is_reported() {
-    let mut first = Rote::new();
-    let engram = first.enroll(day(2026, 9, 1), "a", false);
-    first.capture(day(2026, 9, 2), "a", engram, Drilled::passed());
-    let mut second = Rote::beside(&first, "two");
-    // A machine that had not seen the first capture, so it believed the rung was
-    // still at the foot.
-    second.capture(day(2026, 9, 3), "a", engram, Drilled::passed());
-    first
-        .cmd(&["doctor", "--format", "human"])
-        .assert()
-        .code(1)
-        .stdout(predicate::str::contains("different histories"));
 }
 
 // ── the reminder ─────────────────────────────────────────────────────────────
@@ -878,73 +933,13 @@ fn walk(root: &camino::Utf8Path) -> Vec<String> {
 }
 
 #[test]
-fn drift_is_stated_by_doctor_and_restated_nowhere() {
-    // Drift is a defect with a remedy, and `assay` collects doctor's findings
-    // into `yadm doctor` — so doctor holds the standing claim (asserted next
-    // door) and the descriptive surfaces do not restate it. Two copies of one
-    // state is how they came to give opposite answers about it.
-    let mut rote = Rote::new();
-    let engram = rote.enroll(days_ago(40), "escrow-p", false);
-    rote.capture(
-        days_ago(2),
-        "escrow-p",
-        engram,
-        Drilled::aided(Outcome::Fail),
-    );
-
-    rote.cmd(&["status"])
-        .env("ROTE_UI", "human")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("disagree").not());
-    // A count, and nothing attached to it: a present-tense clause over a
-    // ninety-day window outlives the state it describes.
-    rote.cmd(&["stats"])
-        .env("ROTE_UI", "human")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("1 refused"))
-        .stdout(predicate::str::contains("disagree").not());
-}
-
-#[test]
-fn a_later_aided_pass_clears_the_drift_and_leaves_the_count_behind() {
-    let mut rote = Rote::new();
-    let engram = rote.enroll(days_ago(40), "escrow-p", false);
-    rote.capture(
-        days_ago(3),
-        "escrow-p",
-        engram,
-        Drilled::aided(Outcome::Fail),
-    );
-    rote.capture(
-        days_ago(1),
-        "escrow-p",
-        engram,
-        Drilled::aided(Outcome::Pass),
-    );
-
-    rote.cmd(&["doctor"])
-        .env("ROTE_UI", "human")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("different secrets").not());
-    // The history is still history. It is a count and says so.
-    rote.cmd(&["stats"])
-        .env("ROTE_UI", "human")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("1 refused"));
-}
-
-#[test]
 fn the_first_interval_band_says_what_it_covers() {
     let mut rote = Rote::new();
     let engram = rote.enroll(days_ago(10), "escrow-p", false);
     // Two drills on one day: an effective gap of zero, which the first band
     // covers and must not report as a point value of one day.
-    rote.capture(days_ago(1), "escrow-p", engram, Drilled::passed());
-    rote.capture(days_ago(1), "escrow-p", engram, Drilled::passed());
+    rote.drill(days_ago(1), engram, Drilled::passed());
+    rote.drill(days_ago(1), engram, Drilled::passed());
     rote.cmd(&["stats"])
         .env("ROTE_UI", "human")
         .assert()

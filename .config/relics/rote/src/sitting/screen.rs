@@ -13,8 +13,7 @@
 use jiff::civil::Date;
 use relic_core::style::{Style, Tint};
 
-use super::{Outturn, Task, Turn};
-use crate::corpus::drill::Landing;
+use super::{Landing, Outturn, Task, Turn};
 use crate::ladder::Occasion;
 use crate::slug::Slug;
 use crate::tui::card::{CONTENT, Card, Field, Piece, Tone, fit_to, join};
@@ -42,24 +41,27 @@ pub const SLOTS: usize = 8;
 pub enum RowState {
     /// Not reached yet.
     Pending,
-    /// At the prompt.
-    Active {
-        /// Which try.
-        attempt: u8,
+    /// At the cold capture.
+    Cold,
+    /// At a follow-up.
+    FollowUp {
+        /// Which follow-up is about to be typed, counting from one.
+        count: u16,
     },
     /// Submitted, and the verifier is working.
     Checking,
     /// Accepted.
     Passed {
-        /// Milliseconds from first keystroke to submission.
-        total_ms: Option<u64>,
-        /// Tries before this one.
-        retries: u8,
+        /// Milliseconds from the prompt appearing to the cold capture's first
+        /// keystroke.
+        ttfk_ms: Option<u64>,
+        /// Whether it was a follow-up that passed.
+        recovered: bool,
     },
     /// Refused.
     Failed {
-        /// Which try.
-        attempt: u8,
+        /// Follow-ups taken so far.
+        follow_ups: u16,
     },
     /// Passed over.
     Skipped,
@@ -108,7 +110,7 @@ impl Row {
             kind: match &turn.task {
                 Task::Drill(drilling) => Kind::Drill {
                     occasion: drilling.occasion,
-                    aided: drilling.aided,
+                    aided: false,
                     interval_days: drilling.scheduled_interval_days,
                     at_cap: drilling.at_cap,
                 },
@@ -139,7 +141,7 @@ pub struct Frame<'a> {
     pub tone: Tone,
     /// What the line under the field says.
     pub status: Option<String>,
-    /// Whether the lookup is on offer, which it is once a miss is on record.
+    /// Whether the lookup is on offer, which it is in a follow-up until taken.
     pub lookup: bool,
     /// The sitting, once it is over.
     pub outturn: Option<&'a Outturn>,
@@ -257,8 +259,8 @@ pub fn card(frame: &Frame<'_>, field: &Field<'_>, style: Style) -> Card {
     }
 
     if let Some(outturn) = frame.outturn {
-        // The tally names its own subject. It buckets each turn by its *first*
-        // capture, so a drill recovered with the vault still reads as the miss
+        // The tally names its own subject. It buckets each turn by its cold
+        // capture, so a drill recovered in a follow-up still reads as the fail
         // it opened with — true, and unreadable beside a row that says the
         // sitting got there in the end, unless the two say what they are about.
         card.gap().prose(
@@ -354,20 +356,22 @@ fn chip_width(frame: &Frame<'_>, names: usize, style: Style) -> usize {
 /// The one character that says where a row stands.
 ///
 /// One rule over every state, so no screen decides this for itself: **green is
-/// only ever a clean pass — unaided, first try. Yellow is everything that got
-/// there another way. Red is a failure. Dim is nothing measured.**
+/// only ever a cold pass. Yellow is a drill recovered in a follow-up. Red is a
+/// fail. Dim is nothing measured.**
 ///
-/// A green tick on a drill that took three goes, or on one answered with the
-/// vault open, claims a verdict nobody rendered. The tally below says what
+/// A green tick on a drill recovered in a follow-up, or on one answered with
+/// the vault open, claims a verdict nobody rendered. The tally below says what
 /// went on the record; the glyph says how the sitting went, and the two agree
 /// about which of them is which.
 fn icon(row: &Row) -> (&'static str, Tint) {
     match row.state {
         // The marker already says which row is being asked about, and a row
         // nobody has reached says nothing at all.
-        RowState::Pending | RowState::Active { .. } => (" ", Tint::Dim),
+        RowState::Pending | RowState::Cold | RowState::FollowUp { .. } => (" ", Tint::Dim),
         RowState::Checking => ("·", Tint::Dim),
-        RowState::Passed { retries, .. } if retries == 0 && !aided(row) => ("✓", Tint::Green),
+        RowState::Passed {
+            recovered: false, ..
+        } if !aided(row) => ("✓", Tint::Green),
         RowState::Passed { .. } => ("✓", Tint::Yellow),
         RowState::Failed { .. } => ("✗", Tint::Red),
         RowState::Skipped | RowState::Aborted | RowState::Dormant => ("–", Tint::Dim),
@@ -383,27 +387,22 @@ fn aided(row: &Row) -> bool {
 }
 
 /// What the glyph cannot say on its own.
+///
+/// A latency is a claim about recall, so only a cold pass publishes one. A
+/// drill recovered in a follow-up carries the latency of the capture that
+/// failed, and a figure beside a yellow tick would read as the time it took to
+/// get there.
 fn detail(row: &Row, style: Style) -> Piece {
     match row.state {
-        RowState::Passed { total_ms, retries } => {
-            // A latency that was not measured is left out rather than dashed:
-            // a dash is a table's empty cell, and on a card beside a try count
-            // it reads as one more fact.
-            let mut parts = Vec::new();
-            if total_ms.is_some() {
-                parts.push(crate::render::seconds(total_ms));
-            }
-            if retries > 0 {
-                parts.push(format!("x{}", retries.saturating_add(1)));
-            }
-            Piece::painted(parts.join("   "), Tint::Dim, style)
-        }
-        RowState::Failed { attempt } if attempt > 1 => {
-            Piece::painted(format!("x{attempt}"), Tint::Dim, style)
-        }
+        RowState::Passed {
+            ttfk_ms: Some(ms),
+            recovered: false,
+        } => Piece::painted(crate::render::seconds(Some(ms)), Tint::Dim, style),
         RowState::Pending
-        | RowState::Active { .. }
+        | RowState::Cold
+        | RowState::FollowUp { .. }
         | RowState::Checking
+        | RowState::Passed { .. }
         | RowState::Failed { .. }
         | RowState::Skipped
         | RowState::Aborted
@@ -414,8 +413,8 @@ fn detail(row: &Row, style: Style) -> Piece {
 /// What the row is for, spelled the way `status` and `log` spell it.
 fn chip(row: &Row) -> String {
     match &row.kind {
-        // An aided sample has no position of its own and moves nothing, so the
-        // interval and the cap would be reporting somebody else's business.
+        // Once the answer has been seen the interval and the cap are somebody
+        // else's business: the chip says what was declared and nothing else.
         Kind::Drill { aided: true, .. } => "aided".to_owned(),
         Kind::Drill {
             occasion,
@@ -449,11 +448,12 @@ fn intention_tint(row: &Row) -> Tint {
 /// The discipline is one line, and this is the only place it reaches a person at
 /// the moment it is due.
 fn intention(row: &Row) -> &'static str {
-    match &row.kind {
-        Kind::Drill { aided: true, .. } => "looked up, so this one measures nothing",
-        Kind::Drill { aided: false, .. } => "from memory — submit nothing to concede",
+    match (&row.kind, row.state) {
+        (Kind::Drill { aided: true, .. }, _) => "looked up",
+        (Kind::Drill { .. }, RowState::FollowUp { .. }) => "a follow-up — measured by nothing",
+        (Kind::Drill { .. }, _) => "from memory — submit nothing to concede",
         // Never at the prompt, so never said; the row's chip says it instead.
-        Kind::Dormant => "dormant here — nothing to ask",
+        (Kind::Dormant, _) => "dormant here — nothing to ask",
     }
 }
 
@@ -461,6 +461,9 @@ fn intention(row: &Row) -> &'static str {
 const RECORDED: &str = "recorded  ";
 
 /// How the sitting went, in one line.
+///
+/// Fails carry their two qualifiers beside them: how many a follow-up got
+/// past, and how many had the answer looked up.
 fn tally(outturn: &Outturn, turns: usize) -> String {
     let landings = outturn.landings(turns);
     let mut parts = Vec::new();
@@ -473,8 +476,14 @@ fn tally(outturn: &Outturn, turns: usize) -> String {
                 if count > 0 {
                     parts.push(relic_core::fmt::plural(count, one, more));
                 }
+                if *landing == Landing::Fail {
+                    parts.extend(qualifiers(outturn, count > 1));
+                }
             }
         }
+    }
+    if matches!(landings.as_slice(), [Landing::Fail]) {
+        parts.extend(qualifiers(outturn, false));
     }
     if outturn.aborted {
         parts.push("abandoned".to_owned());
@@ -485,13 +494,29 @@ fn tally(outturn: &Outturn, turns: usize) -> String {
     parts.join(" · ")
 }
 
+/// What stands beside the fails: recovered, aided, each only when it happened.
+fn qualifiers(outturn: &Outturn, counted: bool) -> Vec<String> {
+    let mut out = Vec::new();
+    for (count, word) in [
+        (outturn.recovered(), "recovered"),
+        (outturn.aided(), "aided"),
+    ] {
+        if count == 0 {
+            continue;
+        }
+        out.push(if counted {
+            format!("{count} {word}")
+        } else {
+            word.to_owned()
+        });
+    }
+    out
+}
+
 /// The buckets, in the order they are read out, with what to call one and many.
 const ORDER: &[(Landing, &str, &str)] = &[
     (Landing::Pass, "pass", "passes"),
-    (Landing::Lapse, "lapse", "lapses"),
-    (Landing::Miss, "miss", "misses"),
-    (Landing::Skipped, "skipped", "skipped"),
-    (Landing::Aided, "aided", "aided"),
+    (Landing::Fail, "fail", "fails"),
     (Landing::Dormant, "dormant", "dormant"),
 ];
 
@@ -501,9 +526,9 @@ mod tests {
     use relic_core::style::{Style, Tint};
 
     use super::{Frame, Kind, Note, Row, RowState, SLOTS, card};
-    use crate::corpus::record::Outcome;
-    use crate::ladder::{Occasion, Rung};
-    use crate::sitting::{Capture, Outturn};
+    use crate::corpus::record::{Drilled, EngramId, Outcome};
+    use crate::ladder::Occasion;
+    use crate::sitting::Outturn;
     use crate::tui::card::{CONTENT, Card, Field, Reveal, Tone, WIDTH};
 
     /// A card over a field nothing has been typed into, which is what every
@@ -538,13 +563,18 @@ mod tests {
     fn every_state() -> Vec<RowState> {
         vec![
             RowState::Pending,
-            RowState::Active { attempt: 3 },
+            RowState::Cold,
+            RowState::FollowUp { count: 12 },
             RowState::Checking,
             RowState::Passed {
-                total_ms: Some(12_345),
-                retries: 2,
+                ttfk_ms: Some(12_345),
+                recovered: false,
             },
-            RowState::Failed { attempt: 2 },
+            RowState::Passed {
+                ttfk_ms: Some(12_345),
+                recovered: true,
+            },
+            RowState::Failed { follow_ups: 12 },
             RowState::Skipped,
             RowState::Aborted,
             RowState::Dormant,
@@ -561,21 +591,20 @@ mod tests {
         out
     }
 
+    fn drilled(outcome: Outcome, recovered: bool, aided: bool) -> Drilled {
+        Drilled {
+            engram: EngramId::mint().unwrap(),
+            outcome,
+            ttfk_ms: Some(900),
+            follow_ups: u16::from(recovered),
+            recovered,
+            aided,
+        }
+    }
+
     fn outturn() -> Outturn {
         Outturn {
-            captures: vec![Capture {
-                turn: 0,
-                occasion: Occasion::Review,
-                aided: false,
-                ordinal: 1,
-                outcome: Outcome::Pass,
-                ttfk_ms: Some(900),
-                total_ms: Some(3_000),
-                corrections: 0,
-                paste_accepted: 0,
-                paste_refused: 0,
-                rung_after: Rung::FIRST,
-            }],
+            drills: vec![(0, drilled(Outcome::Pass, false, false))],
             dormant: vec![1],
             aborted: false,
             rows: Vec::new(),
@@ -595,7 +624,7 @@ mod tests {
             let list = vec![row];
             for tone in [Tone::Calm, Tone::Alarm] {
                 for lookup in [false, true] {
-                    for status in ["not it · try 2 of 3", widest] {
+                    for status in ["not it · follow-up 2", widest] {
                         for field in [
                             Field::blind(),
                             Field::empty(Reveal::Masked),
@@ -740,7 +769,7 @@ mod tests {
             "escrow-p",
             Occasion::Review,
             false,
-            RowState::Active { attempt: 1 },
+            RowState::Cold,
         )];
         let other = card_with(
             &Frame::running(date(2026, 9, 13), &typing, Some(0)),
@@ -765,12 +794,7 @@ mod tests {
     fn a_dormant_row_says_so_and_asks_for_nothing() {
         let list = vec![
             dormant_row("escrow-p", RowState::Dormant),
-            drill_row(
-                "a",
-                Occasion::Review,
-                false,
-                RowState::Active { attempt: 1 },
-            ),
+            drill_row("a", Occasion::Review, false, RowState::Cold),
         ];
         let frame = Frame::running(date(2026, 9, 13), &list, Some(1));
         let rendered = card(&frame, &Field::blind(), Style::PLAIN)
@@ -787,12 +811,7 @@ mod tests {
 
     #[test]
     fn a_drill_states_the_discipline_where_it_applies() {
-        let list = vec![drill_row(
-            "a",
-            Occasion::Review,
-            false,
-            RowState::Active { attempt: 1 },
-        )];
+        let list = vec![drill_row("a", Occasion::Review, false, RowState::Cold)];
         let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
         let rendered = card(&frame, &Field::blind(), Style::PLAIN)
             .render()
@@ -800,20 +819,33 @@ mod tests {
         assert!(rendered.contains("from memory"));
         assert!(rendered.contains("review · 30d · at cap"));
 
+        let follow_up = vec![drill_row(
+            "a",
+            Occasion::Review,
+            false,
+            RowState::FollowUp { count: 1 },
+        )];
+        let frame = Frame::running(date(2026, 9, 13), &follow_up, Some(0));
+        let rendered = card(&frame, &Field::empty(Reveal::Masked), Style::PLAIN)
+            .render()
+            .join("\n");
+        assert!(rendered.contains("a follow-up"));
+        assert!(rendered.contains("review · 30d · at cap"));
+
         let aided = vec![drill_row(
             "a",
             Occasion::Review,
             true,
-            RowState::Active { attempt: 1 },
+            RowState::FollowUp { count: 2 },
         )];
         let frame = Frame::running(date(2026, 9, 13), &aided, Some(0));
-        let rendered = card(&frame, &Field::blind(), Style::PLAIN)
+        let rendered = card(&frame, &Field::empty(Reveal::Masked), Style::PLAIN)
             .render()
             .join("\n");
-        assert!(rendered.contains("measures nothing"));
+        assert!(rendered.contains("looked up"));
         assert!(
             rendered.contains("aided") && !rendered.contains("30d"),
-            "an aided sample has no interval of its own to report"
+            "once looked up there is no interval of its own to report"
         );
     }
 
@@ -834,8 +866,8 @@ mod tests {
                 Occasion::Review,
                 false,
                 RowState::Passed {
-                    total_ms: Some(1_000),
-                    retries: 0,
+                    ttfk_ms: Some(1_000),
+                    recovered: false,
                 },
             ),
             dormant_row("b", RowState::Dormant),
@@ -853,6 +885,49 @@ mod tests {
     }
 
     #[test]
+    fn the_closing_tally_qualifies_its_fails_and_never_its_passes() {
+        let list = vec![
+            drill_row("a", Occasion::Review, false, RowState::Cold),
+            drill_row("b", Occasion::Review, false, RowState::Cold),
+            drill_row("c", Occasion::Review, false, RowState::Cold),
+        ];
+        let done = Outturn {
+            drills: vec![
+                (0, drilled(Outcome::Pass, false, false)),
+                (1, drilled(Outcome::Fail, true, true)),
+                (2, drilled(Outcome::Fail, false, false)),
+            ],
+            dormant: Vec::new(),
+            aborted: true,
+            rows: Vec::new(),
+        };
+        let rendered = card_with(
+            &Frame::done(date(2026, 9, 13), &list, &done, &[]),
+            Style::PLAIN,
+        )
+        .render()
+        .join("\n");
+        assert!(
+            rendered.contains("1 pass · 2 fails · 1 recovered · 1 aided · abandoned"),
+            "{rendered}"
+        );
+
+        let lone = Outturn {
+            drills: vec![(0, drilled(Outcome::Fail, true, false))],
+            dormant: Vec::new(),
+            aborted: false,
+            rows: Vec::new(),
+        };
+        let rendered = card_with(
+            &Frame::done(date(2026, 9, 13), &list[..1], &lone, &[]),
+            Style::PLAIN,
+        )
+        .render()
+        .join("\n");
+        assert!(rendered.contains("failed · recovered"), "{rendered}");
+    }
+
+    #[test]
     fn no_frame_ever_carries_what_was_typed() {
         // The field is blind, so nothing a person types can reach a rendered
         // line. The sitting passes a count of zero and the card never sees the
@@ -867,23 +942,23 @@ mod tests {
     }
 
     #[test]
-    fn a_green_tick_is_only_ever_an_unaided_first_try_pass() {
-        let clean = RowState::Passed {
-            total_ms: Some(1_000),
-            retries: 0,
+    fn a_green_tick_is_only_ever_a_cold_pass() {
+        let cold = RowState::Passed {
+            ttfk_ms: Some(1_000),
+            recovered: false,
         };
-        let retried = RowState::Passed {
-            total_ms: Some(1_000),
-            retries: 1,
+        let recovered = RowState::Passed {
+            ttfk_ms: Some(1_000),
+            recovered: true,
         };
         assert_eq!(
-            super::icon(&drill_row("a", Occasion::Review, false, clean)),
+            super::icon(&drill_row("a", Occasion::Review, false, cold)),
             ("✓", Tint::Green)
         );
         for row in [
-            drill_row("a", Occasion::Review, true, clean),
-            drill_row("a", Occasion::Review, false, retried),
-            drill_row("a", Occasion::Review, true, retried),
+            drill_row("a", Occasion::Review, true, cold),
+            drill_row("a", Occasion::Review, false, recovered),
+            drill_row("a", Occasion::Review, true, recovered),
         ] {
             assert_eq!(super::icon(&row), ("✓", Tint::Yellow));
         }
@@ -895,9 +970,10 @@ mod tests {
         // green is a clean pass and nothing else wears it.
         let states = [
             RowState::Pending,
-            RowState::Active { attempt: 1 },
+            RowState::Cold,
+            RowState::FollowUp { count: 1 },
             RowState::Checking,
-            RowState::Failed { attempt: 1 },
+            RowState::Failed { follow_ups: 1 },
             RowState::Skipped,
             RowState::Aborted,
             RowState::Dormant,

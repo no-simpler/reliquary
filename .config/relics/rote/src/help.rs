@@ -126,30 +126,23 @@ const RECORDS: &str = "\
 RECORDS
 
   One JSON object per line, appended and never rewritten, one file per machine.
-  Every record carries the schema, the instant, the drill day, the machine, the
-  hostname it wore, its position in its own chain, the digest of the line before
-  it, and one event.
+  Every record carries the schema, the instant, the drill day, the hostname the
+  machine wore, the digest of the line before it, and one event. The file a
+  line sits in names the machine; its index in that file is its position.
 
-  Five kinds of event: enroll, rotate, attach, retire, capture.
+  Five kinds of event: enroll, rotate, attach, retire, drill.
 
-  A capture is one typed sample. It records the lineage and the engram, the
-  sitting, which sample within the drill, the occasion, whether it was aided,
-  the outcome, time to the first keystroke, time to submit, corrections, pastes
-  accepted, pastes refused, the three intervals, and the rung either side.
+  A drill is one engram asked for from memory once. It records the engram, the
+  outcome of the cold capture, time to its first keystroke, how many follow-ups
+  were typed after a fail, whether one of them passed, and whether the answer
+  was looked up along the way.
 
-  Corrections counts keystrokes that removed something, one apiece, whatever
-  each of them removed. It is a fact about the typing and never about the
-  secret: not its length, not a prefix, not a character class.
+  Two outcomes: pass and fail. Nothing was offered is a fail. What a follow-up
+  did is recorded beside the outcome and changes it in no figure.
 
-  The two paste counts are every paste the prompt saw, and neither is a count
-  of lookups: a refused paste is one steered onto a channel that arrives as
-  ordinary typing.
-
-  Two occasions: review, which the schedule asked for, and practice, which it
-  did not. Aided rides beside the occasion as a flag rather than replacing it,
-  so an aided review is still a review.
-
-  Five outcomes: pass, fail, blank, skip, abandoned.
+  The occasion, the rung and every interval are derived at replay from the
+  ladder and the drills before, and never written: a drill on a day the engram
+  was due is a review, and any other is a practice.
 
   Nothing derived from the secret is recorded: not its length, not a prefix, not
   a character class. The digest chain is tamper evidence and corruption
@@ -284,13 +277,24 @@ mod tests {
     }
 
     #[test]
-    fn every_occasion_and_landing_is_spelled_in_the_records_topic() {
-        let body = topic("records").unwrap();
+    fn every_outcome_and_occasion_is_spelled_where_it_is_defined() {
+        let records = topic("records").unwrap();
+        for outcome in [
+            crate::corpus::record::Outcome::Pass,
+            crate::corpus::record::Outcome::Fail,
+        ] {
+            assert!(records.contains(outcome.word()), "{}", outcome.word());
+        }
+        let ladder = crate::guide::TOPICS
+            .iter()
+            .find(|(name, _)| *name == "ladder")
+            .map(|(_, body)| *body)
+            .unwrap();
         for occasion in [
             crate::ladder::Occasion::Review,
             crate::ladder::Occasion::Practice,
         ] {
-            assert!(body.contains(occasion.word()), "{}", occasion.word());
+            assert!(ladder.contains(occasion.word()), "{}", occasion.word());
         }
     }
 }

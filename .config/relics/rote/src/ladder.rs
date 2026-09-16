@@ -33,7 +33,7 @@ pub const MAX_RUNGS: usize = 64;
 pub struct Rung(u8);
 
 impl Rung {
-    /// Where a new engram starts, and where a lapse returns it to.
+    /// Where a new engram starts, and where a fail returns it to.
     pub const FIRST: Self = Self(0);
 
     /// The position as a number, for rendering and for the log.
@@ -126,7 +126,7 @@ impl Ladder {
             .unwrap_or_else(|| self.cap_days())
     }
 
-    /// The next position after a first-attempt unaided pass.
+    /// The next position after a cold pass on a review.
     pub fn advanced(&self, rung: Rung) -> Rung {
         Rung(rung.get().saturating_add(1).min(self.cap().get()))
     }
@@ -134,14 +134,6 @@ impl Ladder {
     /// Whether a position is the top.
     pub fn at_cap(&self, rung: Rung) -> bool {
         rung.get() >= self.cap().get()
-    }
-
-    /// A position read out of a record, clamped into this ladder.
-    ///
-    /// A shortened ladder must not leave a record addressing a rung that is no
-    /// longer there.
-    pub fn recorded(&self, rung: u8) -> Rung {
-        Rung(rung.min(self.cap().get()))
     }
 
     /// The day an engram next falls due.
@@ -164,13 +156,12 @@ impl Ladder {
     }
 }
 
-/// What an invocation counted as for one engram.
+/// What a drill counted as for one engram.
 ///
-/// Orthogonal to whether the answer was consulted, which rides beside it as a
-/// plain `aided` flag. **The occasion decides whether the schedule was served;
-/// aided decides whether the memory was measured.**
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+/// Never declared and never stored: replay reads it off the engram's standing
+/// on the drill day. A drill on a day the schedule asked is a review, and one
+/// on any other day is a practice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Occasion {
     /// The schedule asked for it.
     Review,
@@ -184,14 +175,6 @@ impl Occasion {
         match self {
             Self::Review => "review",
             Self::Practice => "practice",
-        }
-    }
-
-    /// Whether the schedule asked, and so whether the anchor moves.
-    pub fn serves_the_schedule(self) -> bool {
-        match self {
-            Self::Review => true,
-            Self::Practice => false,
         }
     }
 }
@@ -254,16 +237,6 @@ mod tests {
     }
 
     #[test]
-    fn a_recorded_rung_past_the_ladder_clamps_rather_than_addressing_nothing() {
-        let ladder = Ladder::default();
-        assert_eq!(ladder.recorded(200), ladder.cap());
-        assert_eq!(ladder.recorded(1).get(), 1);
-
-        let short = Ladder::new(vec![1, 2]).unwrap();
-        assert_eq!(short.recorded(6), short.cap(), "a shortened ladder clamps");
-    }
-
-    #[test]
     fn a_new_engram_falls_due_the_day_after_enrolment() {
         let ladder = Ladder::default();
         let minted = date(2026, 9, 10);
@@ -293,8 +266,6 @@ mod tests {
     fn an_occasion_is_spelled_in_exactly_one_place() {
         assert_eq!(Occasion::Review.word(), "review");
         assert_eq!(Occasion::Practice.word(), "practice");
-        assert!(Occasion::Review.serves_the_schedule());
-        assert!(!Occasion::Practice.serves_the_schedule());
     }
 
     #[test]

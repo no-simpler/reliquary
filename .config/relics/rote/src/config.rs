@@ -9,9 +9,6 @@ use crate::ladder::Ladder;
 /// belongs to the day before.
 pub const DEFAULT_ROLLOVER_HOUR: i8 = 4;
 
-/// Samples allowed per engram per sitting. Only the first is measured.
-pub const DEFAULT_MAX_ATTEMPTS: u8 = 3;
-
 /// The file, as read.
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
@@ -23,8 +20,6 @@ pub struct Config {
     pub state: Option<Utf8PathBuf>,
     /// The hour a drill day begins, 0 to 23.
     pub rollover_hour: Option<i8>,
-    /// Samples per engram per sitting.
-    pub max_attempts: Option<u8>,
     /// Days between reviews, by rung, the last held forever.
     pub ladder: Option<Vec<u32>>,
 }
@@ -56,11 +51,6 @@ impl Config {
             .clamp(0, 23)
     }
 
-    /// Samples per engram per sitting, at least one.
-    pub fn max_attempts(&self) -> u8 {
-        self.max_attempts.unwrap_or(DEFAULT_MAX_ATTEMPTS).max(1)
-    }
-
     /// The schedule.
     ///
     /// # Errors
@@ -80,14 +70,13 @@ impl Config {
 mod tests {
     use camino::Utf8PathBuf;
 
-    use super::{Config, DEFAULT_MAX_ATTEMPTS, DEFAULT_ROLLOVER_HOUR};
+    use super::{Config, DEFAULT_ROLLOVER_HOUR};
     use crate::ladder::{DEFAULT_LADDER, Ladder};
 
     #[test]
     fn an_absent_file_reads_as_defaults() {
         let config = Config::read(&Utf8PathBuf::from("/nowhere/at/all/rote.toml")).unwrap();
         assert_eq!(config.rollover_hour(), DEFAULT_ROLLOVER_HOUR);
-        assert_eq!(config.max_attempts(), DEFAULT_MAX_ATTEMPTS);
         assert_eq!(config.ladder().unwrap(), Ladder::default());
         assert_eq!(Ladder::default().days(), DEFAULT_LADDER);
         assert!(config.root.is_none());
@@ -100,14 +89,12 @@ mod tests {
             root = "/tmp/ark/rote"
             state = "/tmp/state/rote"
             rollover-hour = 6
-            max-attempts = 2
             ladder = [1, 3, 9]
             "#,
         )
         .unwrap();
         assert_eq!(config.root.as_deref(), Some("/tmp/ark/rote".into()));
         assert_eq!(config.rollover_hour(), 6);
-        assert_eq!(config.max_attempts(), 2);
         assert_eq!(config.ladder().unwrap().days(), [1, 3, 9]);
     }
 
@@ -118,13 +105,16 @@ mod tests {
             toml::from_str::<Config>("policy = \"all\"").is_err(),
             "a key this binary does not read is a setting that silently does nothing"
         );
+        assert!(
+            toml::from_str::<Config>("max-attempts = 3").is_err(),
+            "a bound this binary no longer holds is refused rather than ignored"
+        );
     }
 
     #[test]
     fn nonsense_values_are_clamped_rather_than_obeyed() {
-        let config: Config = toml::from_str("rollover-hour = 40\nmax-attempts = 0").unwrap();
+        let config: Config = toml::from_str("rollover-hour = 40").unwrap();
         assert_eq!(config.rollover_hour(), 23);
-        assert_eq!(config.max_attempts(), 1);
     }
 
     #[test]

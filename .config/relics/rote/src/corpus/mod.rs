@@ -4,12 +4,14 @@
 //! invocation. There is no second file holding schedule state, so state and
 //! record have no way to disagree.
 //!
-//! **What replay reads and what it recomputes.** `rung_after` is read rather
-//! than recomputed, so a later change to the ladder cannot rewrite the past.
-//! Everything with a threshold in it — the streak above all — is computed in
-//! `stats` from the merged corpus instead, which is both the right home for a
-//! threshold and the only way to stay correct when two machines wrote without
-//! having seen each other.
+//! **Replay derives the rung, the anchor and the occasion; the record stores
+//! none of them.** A drill on a day the engram is due is a review, and a
+//! review passed climbs a rung; a fail on any day returns to the foot. So a
+//! later change to the ladder re-derives the whole history, which is the
+//! feature. Everything with a threshold in it — the streak above all — is
+//! computed in `stats` over the derived drills, which is both the right home
+//! for a threshold and the only way to stay correct when two machines wrote
+//! without having seen each other.
 //!
 //! **Every date here is monotone non-decreasing.** The merge orders by instant
 //! while the schedule reads civil days, so a second machine in another zone can
@@ -25,9 +27,10 @@ use std::collections::BTreeMap;
 use jiff::Timestamp;
 use jiff::civil::Date;
 
-use crate::ladder::{self, Ladder, Rung, Standing};
+use crate::ladder::{self, Ladder, Occasion, Rung, Standing};
 use crate::slug::Slug;
-use record::{Captured, EngramId, Event, Outcome, Record};
+use drill::Drill;
+use record::{Drilled, EngramId, Event, Outcome, Record};
 
 /// What the record says about one enrolled secret.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,20 +46,12 @@ pub struct Dossier {
     /// The day the schedule counts from: the last review, else the mint.
     pub anchor: Date,
     /// The last day the secret was in front of a person by any route — a
-    /// capture, an enrolment, a rotation, an attachment.
+    /// drill, an enrolment, a rotation, an attachment.
     pub last_exposed: Date,
     /// When that was, to the second.
     pub last_exposed_at: Timestamp,
-    /// The last day the schedule asked and got an answer.
+    /// The last day the schedule moved: a review passed, or a fail on any day.
     pub last_review: Option<Date>,
-    /// The day it first stood alone: a first sample passed with the answer
-    /// nowhere in front of the person. The honest start of the memory, and the
-    /// only reading that says anything while the rung is still at the foot.
-    pub first_unaided: Option<Date>,
-    /// Whether the last aided sample was refused. Typing what the vault shows
-    /// and being told wrong means the vault and the verifier have parted. A
-    /// blank aided sample says nothing either way, and any pass clears it.
-    pub aided_mismatch: bool,
 }
 
 impl Dossier {
@@ -70,8 +65,6 @@ impl Dossier {
             last_exposed: day,
             last_exposed_at: at,
             last_review: None,
-            first_unaided: None,
-            aided_mismatch: false,
         }
     }
 
@@ -93,22 +86,6 @@ impl Dossier {
     /// Whole days past the due day, zero while not yet due.
     pub fn days_overdue(&self, today: Date, ladder: &Ladder) -> u32 {
         ladder::days_between(self.due(ladder), today)
-    }
-
-    /// Days since the secret was last in front of a person. The honest
-    /// retention interval.
-    pub fn effective_interval(&self, today: Date) -> u32 {
-        ladder::days_between(self.last_exposed, today)
-    }
-
-    /// Days since the schedule's anchor.
-    pub fn actual_interval(&self, today: Date) -> u32 {
-        ladder::days_between(self.anchor, today)
-    }
-
-    /// Whether the secret has already been in front of a person today.
-    pub fn seen_today(&self, today: Date) -> bool {
-        self.last_exposed >= today
     }
 
     fn expose(&mut self, day: Date, at: Timestamp) {
@@ -197,6 +174,7 @@ impl Lineage {
 pub struct Corpus {
     lineages: BTreeMap<Slug, Lineage>,
     by_engram: BTreeMap<EngramId, Slug>,
+    drills: Vec<Drill>,
 }
 
 impl Corpus {
@@ -229,6 +207,11 @@ impl Corpus {
     /// Whether any lineage has ever held this engram.
     pub fn knows(&self, engram: &EngramId) -> bool {
         self.by_engram.contains_key(engram)
+    }
+
+    /// Every drill, in merged order, with what the schedule made of each.
+    pub fn drills(&self) -> &[Drill] {
+        &self.drills
     }
 
     /// How an engram is spelled to a person, wherever it sits.
@@ -297,9 +280,10 @@ impl Corpus {
                     lineage.retired = true;
                 }
             }
-            Event::Capture(event) => {
+            Event::Drill(event) => {
                 if let Some(dossier) = self.dossier_mut(&event.engram) {
-                    apply_capture(dossier, record, event, ladder);
+                    let view = apply_drill(dossier, record, event, ladder);
+                    self.drills.push(view);
                 }
             }
         }
@@ -311,51 +295,46 @@ impl Corpus {
     }
 }
 
-/// What one sample does to an engram.
+/// What one drill does to an engram, and what it was.
 ///
-/// **The occasion decides whether the schedule was served; aided decides
-/// whether the memory was measured.** Those are separate effects on separate
-/// fields, which is the whole reason the two are separate fields on the wire.
-fn apply_capture(dossier: &mut Dossier, record: &Record, event: &Captured, ladder: &Ladder) {
-    if !event.outcome.exposed() {
-        // Nothing was typed, so nothing was exposed: neither the schedule nor
-        // the retention interval moves.
-        return;
-    }
+/// The occasion is read off the standing **before** the dossier moves: a drill
+/// on a day the engram is due is a review, whatever anyone declared. Then the
+/// three-line reconciliation — a review passed climbs and anchors; a practice
+/// passed moves nothing; a fail on any day returns to the foot and anchors.
+fn apply_drill(dossier: &mut Dossier, record: &Record, event: &Drilled, ladder: &Ladder) -> Drill {
+    let occasion = match ladder.standing(record.day, dossier.anchor, dossier.rung) {
+        Standing::Due => Occasion::Review,
+        Standing::Waiting { .. } => Occasion::Practice,
+    };
+    let view = Drill {
+        engram: event.engram,
+        day: record.day,
+        at: record.at,
+        occasion,
+        scheduled_days: ladder.interval(dossier.rung),
+        since_anchor: ladder::days_between(dossier.anchor, record.day),
+        gap: ladder::days_between(dossier.last_exposed, record.day),
+        outcome: event.outcome,
+        ttfk_ms: event.ttfk_ms,
+        follow_ups: event.follow_ups,
+        recovered: event.recovered,
+        aided: event.aided,
+    };
     dossier.expose(record.day, record.at);
-
-    if event.occasion.serves_the_schedule() {
-        // Even aided. The schedule asked and got an answer, so asking again the
-        // same day would be nagging; the rung stays where it was, so the next
-        // ask lands at the same interval it would have.
+    let moved = match (occasion, event.outcome) {
+        (Occasion::Review, Outcome::Pass) => Some(ladder.advanced(dossier.rung)),
+        (Occasion::Practice, Outcome::Pass) => None,
+        (Occasion::Review | Occasion::Practice, Outcome::Fail) => Some(Rung::FIRST),
+    };
+    if let Some(rung) = moved {
+        dossier.rung = rung;
         dossier.anchor = dossier.anchor.max(record.day);
         dossier.last_review = Some(match dossier.last_review {
             Some(previous) => previous.max(record.day),
             None => record.day,
         });
     }
-
-    match (event.aided, event.outcome) {
-        // The answer was in front of the person and the verifier refused it:
-        // the one signal that the vault and the verifier have parted. A blank
-        // aided sample offered nothing, so it says nothing.
-        (true, Outcome::Fail) => dossier.aided_mismatch = true,
-        (true | false, Outcome::Pass) => dossier.aided_mismatch = false,
-        (false, Outcome::Fail)
-        | (true | false, Outcome::Blank | Outcome::Skip | Outcome::Abort) => {}
-    }
-
-    if event.scores() {
-        dossier.rung = ladder.recorded(event.rung_after);
-    }
-
-    if event.ordinal == 1
-        && !event.aided
-        && event.outcome == Outcome::Pass
-        && dossier.first_unaided.is_none()
-    {
-        dossier.first_unaided = Some(record.day);
-    }
+    view
 }
 
 #[cfg(test)]
@@ -391,35 +370,16 @@ mod tests {
         )
     }
 
-    fn captured(
-        day: Date,
-        name: &str,
-        engram: EngramId,
-        occasion: Occasion,
-        aided: bool,
-        outcome: Outcome,
-        rung_after: u8,
-    ) -> Record {
+    fn drilled(day: Date, engram: EngramId, outcome: Outcome) -> Record {
         line(
             day,
-            Event::Capture(Captured {
-                slug: name.parse().unwrap(),
+            Event::Drill(Drilled {
                 engram,
-                sitting: SittingId::mint().unwrap(),
-                ordinal: 1,
-                occasion,
-                aided,
                 outcome,
                 ttfk_ms: Some(900),
-                total_ms: Some(3_000),
-                corrections: 0,
-                paste_accepted: 0,
-                paste_refused: 0,
-                scheduled_interval_days: 7,
-                actual_interval_days: 7,
-                effective_interval_days: 7,
-                rung_before: 0,
-                rung_after,
+                follow_ups: 0,
+                recovered: false,
+                aided: false,
             }),
         )
     }
@@ -449,139 +409,133 @@ mod tests {
             Standing::Due,
             "a fresh engram is due the day after enrolment"
         );
+        assert!(corpus.drills().is_empty());
     }
 
     #[test]
-    fn an_unaided_review_moves_both_the_rung_and_the_anchor() {
+    fn a_pass_while_due_advances_the_rung_and_anchors() {
         let engram = EngramId::mint().unwrap();
         let corpus = replay(&[
             enrolled(date(2026, 9, 10), "a", engram, false),
-            captured(
-                date(2026, 9, 11),
-                "a",
-                engram,
-                Occasion::Review,
-                false,
-                Outcome::Pass,
-                1,
-            ),
+            drilled(date(2026, 9, 11), engram, Outcome::Pass),
         ]);
         let dossier = corpus.lineage(&slug("a")).unwrap().current().unwrap();
         assert_eq!(dossier.rung.get(), 1);
         assert_eq!(dossier.anchor, date(2026, 9, 11));
         assert_eq!(dossier.last_review, Some(date(2026, 9, 11)));
-        assert_eq!(dossier.first_unaided, Some(date(2026, 9, 11)));
+        let drill = corpus.drills().first().unwrap();
+        assert_eq!(drill.occasion, Occasion::Review);
+        assert_eq!(drill.scheduled_days, 1);
+        assert_eq!(drill.since_anchor, 1);
+        assert_eq!(drill.gap, 1);
     }
 
     #[test]
-    fn an_aided_review_moves_the_anchor_and_withholds_the_rung() {
+    fn a_pass_while_not_due_moves_nothing_but_the_exposure() {
         let engram = EngramId::mint().unwrap();
         let corpus = replay(&[
             enrolled(date(2026, 9, 10), "a", engram, false),
-            captured(
-                date(2026, 9, 11),
-                "a",
-                engram,
-                Occasion::Review,
-                true,
-                Outcome::Pass,
-                0,
-            ),
+            drilled(date(2026, 9, 11), engram, Outcome::Pass),
+            drilled(date(2026, 9, 11), engram, Outcome::Pass),
         ]);
         let dossier = corpus.lineage(&slug("a")).unwrap().current().unwrap();
-        assert_eq!(dossier.rung, Rung::FIRST, "nothing was measured");
+        assert_eq!(dossier.rung.get(), 1, "the second was a practice");
+        assert_eq!(dossier.anchor, date(2026, 9, 11));
+        assert_eq!(dossier.last_exposed, date(2026, 9, 11));
+        let second = corpus.drills().get(1).unwrap();
+        assert_eq!(second.occasion, Occasion::Practice);
         assert_eq!(
-            dossier.anchor,
-            date(2026, 9, 11),
-            "but the schedule was served, so it is not asked again today"
+            second.gap, 0,
+            "a second drill the same day is zero days cold"
         );
-        assert_eq!(dossier.first_unaided, None);
+        assert_eq!(second.since_anchor, 0);
+    }
+
+    #[test]
+    fn a_fail_on_any_day_returns_to_the_foot_and_anchors() {
+        let engram = EngramId::mint().unwrap();
+        let mut records = vec![
+            enrolled(date(2026, 9, 1), "a", engram, false),
+            drilled(date(2026, 9, 2), engram, Outcome::Pass),
+            drilled(date(2026, 9, 3), engram, Outcome::Pass),
+            drilled(date(2026, 9, 5), engram, Outcome::Pass),
+        ];
+        let climbed = replay(&records);
+        let dossier = climbed.lineage(&slug("a")).unwrap().current().unwrap();
+        assert_eq!(dossier.rung.get(), 3);
         assert_eq!(
-            dossier.standing(date(2026, 9, 11), &Ladder::default()),
+            dossier.standing(date(2026, 9, 6), &Ladder::default()),
             Standing::Waiting {
-                until: date(2026, 9, 12)
+                until: date(2026, 9, 9)
             }
         );
+
+        // A fail on a day nobody asked.
+        records.push(drilled(date(2026, 9, 6), engram, Outcome::Fail));
+        let fallen = replay(&records);
+        let dossier = fallen.lineage(&slug("a")).unwrap().current().unwrap();
+        assert_eq!(dossier.rung, Rung::FIRST);
+        assert_eq!(dossier.anchor, date(2026, 9, 6));
+        assert_eq!(dossier.last_review, Some(date(2026, 9, 6)));
+        let last = fallen.drills().last().unwrap();
+        assert_eq!(last.occasion, Occasion::Practice, "nobody asked");
+        assert_eq!(last.outcome, Outcome::Fail);
     }
 
     #[test]
-    fn practice_moves_the_retention_interval_and_nothing_else() {
-        let engram = EngramId::mint().unwrap();
-        let corpus = replay(&[
-            enrolled(date(2026, 9, 10), "a", engram, false),
-            captured(
-                date(2026, 9, 11),
-                "a",
-                engram,
-                Occasion::Review,
-                false,
-                Outcome::Pass,
-                1,
-            ),
-            captured(
-                date(2026, 9, 12),
-                "a",
-                engram,
-                Occasion::Practice,
-                false,
-                Outcome::Pass,
-                1,
-            ),
-        ]);
-        let dossier = corpus.lineage(&slug("a")).unwrap().current().unwrap();
-        assert_eq!(dossier.rung.get(), 1, "practice never measures");
-        assert_eq!(
-            dossier.anchor,
-            date(2026, 9, 11),
-            "and never serves the schedule"
-        );
-        assert_eq!(dossier.last_exposed, date(2026, 9, 12));
-        assert_eq!(dossier.effective_interval(date(2026, 9, 13)), 1);
-        assert_eq!(dossier.actual_interval(date(2026, 9, 13)), 2);
-    }
-
-    #[test]
-    fn a_blank_lapses_the_ladder_like_any_other_failure() {
+    fn the_occasion_is_read_off_the_standing_on_the_day() {
         let engram = EngramId::mint().unwrap();
         let corpus = replay(&[
             enrolled(date(2026, 9, 1), "a", engram, false),
-            captured(
-                date(2026, 9, 8),
-                "a",
-                engram,
-                Occasion::Review,
-                false,
-                Outcome::Blank,
-                0,
-            ),
+            drilled(date(2026, 9, 2), engram, Outcome::Pass),
+            // Rung 1 asks for one day; three days later is still due.
+            drilled(date(2026, 9, 5), engram, Outcome::Pass),
+            // Rung 2 asks for two days; the next morning is not.
+            drilled(date(2026, 9, 6), engram, Outcome::Pass),
         ]);
-        let dossier = corpus.lineage(&slug("a")).unwrap().current().unwrap();
-        assert_eq!(dossier.rung, Rung::FIRST);
-        assert_eq!(dossier.first_unaided, None);
+        let occasions: Vec<Occasion> = corpus.drills().iter().map(|d| d.occasion).collect();
+        assert_eq!(
+            occasions,
+            vec![Occasion::Review, Occasion::Review, Occasion::Practice]
+        );
+        let late = corpus.drills().get(1).unwrap();
+        assert_eq!(late.scheduled_days, 1);
+        assert_eq!(late.since_anchor, 3);
     }
 
     #[test]
-    fn a_skipped_prompt_exposes_nothing_and_so_moves_nothing() {
+    fn a_shorter_ladder_re_derives_the_history() {
         let engram = EngramId::mint().unwrap();
-        let corpus = replay(&[
-            enrolled(date(2026, 9, 10), "a", engram, false),
-            captured(
-                date(2026, 9, 11),
-                "a",
-                engram,
-                Occasion::Review,
-                false,
-                Outcome::Skip,
-                0,
-            ),
-        ]);
-        let dossier = corpus.lineage(&slug("a")).unwrap().current().unwrap();
-        assert_eq!(dossier.last_exposed, date(2026, 9, 10));
-        assert_eq!(dossier.anchor, date(2026, 9, 10));
+        let records = [
+            enrolled(date(2026, 9, 1), "a", engram, false),
+            drilled(date(2026, 9, 2), engram, Outcome::Pass),
+            drilled(date(2026, 9, 3), engram, Outcome::Pass),
+            drilled(date(2026, 9, 5), engram, Outcome::Pass),
+        ];
+        let long = replay(&records);
         assert_eq!(
-            dossier.standing(date(2026, 9, 11), &Ladder::default()),
-            Standing::Due,
-            "a skipped drill is still due"
+            long.lineage(&slug("a"))
+                .unwrap()
+                .current()
+                .unwrap()
+                .rung
+                .get(),
+            3
+        );
+
+        let short = Ladder::new(vec![1, 2]).unwrap();
+        let corpus = Corpus::replay(records.iter(), &short);
+        let dossier = corpus.lineage(&slug("a")).unwrap().current().unwrap();
+        assert_eq!(
+            dossier.rung,
+            short.cap(),
+            "the same drills climb a shorter ladder"
+        );
+        let occasions: Vec<Occasion> = corpus.drills().iter().map(|d| d.occasion).collect();
+        assert_eq!(
+            occasions,
+            vec![Occasion::Review, Occasion::Practice, Occasion::Review],
+            "under a two-day cap the second came a day early"
         );
     }
 
@@ -591,15 +545,7 @@ mod tests {
         let second = EngramId::mint().unwrap();
         let corpus = replay(&[
             enrolled(date(2026, 9, 1), "a", first, false),
-            captured(
-                date(2026, 9, 8),
-                "a",
-                first,
-                Occasion::Review,
-                false,
-                Outcome::Pass,
-                1,
-            ),
+            drilled(date(2026, 9, 8), first, Outcome::Pass),
             line(
                 date(2026, 9, 9),
                 Event::Rotate(Rotated {
@@ -628,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn a_late_capture_against_a_superseded_engram_lands_on_its_own_record() {
+    fn a_late_drill_against_a_superseded_engram_lands_on_its_own_record() {
         let first = EngramId::mint().unwrap();
         let second = EngramId::mint().unwrap();
         let corpus = replay(&[
@@ -640,15 +586,7 @@ mod tests {
                     to: second,
                 }),
             ),
-            captured(
-                date(2026, 9, 3),
-                "a",
-                first,
-                Occasion::Review,
-                false,
-                Outcome::Pass,
-                1,
-            ),
+            drilled(date(2026, 9, 3), first, Outcome::Pass),
         ]);
         let lineage = corpus.lineage(&slug("a")).unwrap();
         assert_eq!(lineage.dossier(&first).unwrap().rung.get(), 1);
@@ -664,15 +602,7 @@ mod tests {
         let engram = EngramId::mint().unwrap();
         let history = vec![
             enrolled(date(2026, 9, 1), "a", engram, false),
-            captured(
-                date(2026, 9, 2),
-                "a",
-                engram,
-                Occasion::Review,
-                false,
-                Outcome::Pass,
-                1,
-            ),
+            drilled(date(2026, 9, 2), engram, Outcome::Pass),
         ];
         let before = replay(&history);
         let mut with = history;
@@ -724,17 +654,14 @@ mod tests {
     }
 
     #[test]
-    fn a_capture_on_an_engram_nothing_knows_is_ignored_rather_than_inventing_one() {
-        let corpus = replay(&[captured(
+    fn a_drill_on_an_engram_nothing_knows_is_ignored_rather_than_inventing_one() {
+        let corpus = replay(&[drilled(
             date(2026, 9, 1),
-            "ghost",
             EngramId::mint().unwrap(),
-            Occasion::Review,
-            false,
             Outcome::Pass,
-            1,
         )]);
         assert_eq!(corpus.lineages().count(), 0);
+        assert!(corpus.drills().is_empty());
     }
 
     #[test]
@@ -742,124 +669,24 @@ mod tests {
         let engram = EngramId::mint().unwrap();
         let corpus = replay(&[
             enrolled(date(2026, 9, 1), "a", engram, false),
-            captured(
-                date(2026, 9, 20),
-                "a",
-                engram,
-                Occasion::Review,
-                false,
-                Outcome::Pass,
-                1,
-            ),
+            drilled(date(2026, 9, 20), engram, Outcome::Pass),
             // A second machine in another zone, sorting later by instant while
             // naming an earlier civil day.
-            captured(
-                date(2026, 9, 19),
-                "a",
-                engram,
-                Occasion::Review,
-                false,
-                Outcome::Pass,
-                2,
-            ),
+            drilled(date(2026, 9, 19), engram, Outcome::Fail),
         ]);
         let dossier = corpus.lineage(&slug("a")).unwrap().current().unwrap();
         assert_eq!(dossier.anchor, date(2026, 9, 20));
         assert_eq!(dossier.last_exposed, date(2026, 9, 20));
         assert_eq!(dossier.last_review, Some(date(2026, 9, 20)));
         assert_eq!(
-            dossier.rung.get(),
-            2,
+            dossier.rung,
+            Rung::FIRST,
             "the rung still follows the last record applied"
         );
-    }
-
-    #[test]
-    fn a_rung_recorded_past_a_shortened_ladder_clamps_rather_than_addressing_nothing() {
-        let engram = EngramId::mint().unwrap();
-        let records = [
-            enrolled(date(2026, 9, 1), "a", engram, false),
-            captured(
-                date(2026, 9, 8),
-                "a",
-                engram,
-                Occasion::Review,
-                false,
-                Outcome::Pass,
-                6,
-            ),
-        ];
-        let short = Ladder::new(vec![1, 2]).unwrap();
-        let corpus = Corpus::replay(records.iter(), &short);
-        let dossier = corpus.lineage(&slug("a")).unwrap().current().unwrap();
-        assert_eq!(dossier.rung, short.cap());
-    }
-
-    #[test]
-    fn a_refused_aided_capture_stands_until_something_passes() {
-        let engram = EngramId::mint().unwrap();
-        let mut records = vec![
-            enrolled(date(2026, 9, 1), "a", engram, false),
-            captured(
-                date(2026, 9, 2),
-                "a",
-                engram,
-                Occasion::Review,
-                true,
-                Outcome::Fail,
-                0,
-            ),
-        ];
-        assert!(
-            replay(&records)
-                .lineage(&slug("a"))
-                .unwrap()
-                .current()
-                .unwrap()
-                .aided_mismatch
-        );
-
-        records.push(captured(
-            date(2026, 9, 3),
-            "a",
-            engram,
-            Occasion::Review,
-            false,
-            Outcome::Pass,
-            1,
-        ));
-        assert!(
-            !replay(&records)
-                .lineage(&slug("a"))
-                .unwrap()
-                .current()
-                .unwrap()
-                .aided_mismatch
-        );
-    }
-
-    #[test]
-    fn a_blank_aided_capture_is_not_a_disagreement() {
-        let engram = EngramId::mint().unwrap();
-        let corpus = replay(&[
-            enrolled(date(2026, 9, 1), "a", engram, false),
-            captured(
-                date(2026, 9, 2),
-                "a",
-                engram,
-                Occasion::Review,
-                true,
-                Outcome::Blank,
-                0,
-            ),
-        ]);
-        assert!(
-            !corpus
-                .lineage(&slug("a"))
-                .unwrap()
-                .current()
-                .unwrap()
-                .aided_mismatch
+        assert_eq!(
+            corpus.drills().last().unwrap().gap,
+            0,
+            "a backwards day is a gap of zero, never a wrap"
         );
     }
 

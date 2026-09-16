@@ -8,10 +8,10 @@
 
 use jiff::civil::date;
 use relic_core::style::Style;
-use rote::corpus::record::Outcome;
-use rote::ladder::{Occasion, Rung};
+use rote::corpus::record::{Drilled, EngramId, Outcome};
+use rote::ladder::Occasion;
+use rote::sitting::Outturn;
 use rote::sitting::screen::{Frame, Kind, Note, Row, RowState, card};
-use rote::sitting::{Capture, Outturn};
 use rote::slug::Slug;
 use rote::tui::card::{Field, Reveal, Tone};
 use rote::tui::{Ask, Refusal, ask_card};
@@ -65,12 +65,7 @@ fn field_render(
 #[test]
 fn a_drill_card_reads_the_way_it_is_meant_to() {
     let rows = vec![
-        drill(
-            name("escrow-p"),
-            Occasion::Review,
-            false,
-            RowState::Active { attempt: 1 },
-        ),
+        drill(name("escrow-p"), Occasion::Review, false, RowState::Cold),
         drill(
             name("op-master"),
             Occasion::Practice,
@@ -82,42 +77,31 @@ fn a_drill_card_reads_the_way_it_is_meant_to() {
 }
 
 #[test]
-fn a_refused_drill_says_which_try_this_is_and_offers_the_lookup() {
+fn a_follow_up_says_which_one_it_is_and_offers_the_lookup() {
     let rows = vec![drill(
         name("escrow-p"),
         Occasion::Review,
         false,
-        RowState::Failed { attempt: 2 },
+        RowState::FollowUp { count: 2 },
     )];
     insta::assert_snapshot!(
-        "drill-refused",
-        render(&rows, 0, Some("not it · try 2 of 3"), true, true)
+        "drill-follow-up",
+        render(&rows, 0, Some("not it · follow-up 2"), true, false)
     );
 }
 
 #[test]
-fn a_drill_whose_tries_are_spent_says_so_and_still_offers_the_lookup() {
-    let rows = vec![drill(
-        name("escrow-p"),
-        Occasion::Review,
-        false,
-        RowState::Failed { attempt: 3 },
-    )];
-    insta::assert_snapshot!(
-        "drill-spent",
-        render(&rows, 0, Some("out of tries"), true, true)
-    );
-}
-
-#[test]
-fn an_aided_drill_says_it_measures_nothing() {
+fn an_aided_follow_up_says_the_answer_was_looked_up_and_withdraws_the_lookup() {
     let rows = vec![drill(
         name("escrow-p"),
         Occasion::Review,
         true,
-        RowState::Active { attempt: 2 },
+        RowState::FollowUp { count: 2 },
     )];
-    insta::assert_snapshot!("drill-aided", render(&rows, 0, None, false, false));
+    insta::assert_snapshot!(
+        "drill-aided",
+        render(&rows, 0, Some("not it · follow-up 2"), false, false)
+    );
 }
 
 /// The one card every intake draws, in the state asked for.
@@ -181,20 +165,15 @@ fn a_revealed_field_shows_the_characters_and_says_how_to_put_them_back() {
     );
 }
 
-/// One sample, as the closing card saw it.
-fn capture(turn: usize, aided: bool, ordinal: u8, outcome: Outcome) -> Capture {
-    Capture {
-        turn,
-        occasion: Occasion::Review,
-        aided,
-        ordinal,
+/// One drill, as the closing card saw it.
+fn drilled(outcome: Outcome, recovered: bool, aided: bool) -> Drilled {
+    Drilled {
+        engram: EngramId::mint().unwrap_or_else(|_| unreachable!("randomness")),
         outcome,
         ttfk_ms: Some(900),
-        total_ms: Some(3_000),
-        corrections: 0,
-        paste_accepted: 0,
-        paste_refused: 0,
-        rung_after: Rung::FIRST,
+        follow_ups: u16::from(recovered),
+        recovered,
+        aided,
     }
 }
 
@@ -205,10 +184,15 @@ fn note(label: &str, said: &str) -> Note {
     }
 }
 
-fn closing(rows: &[Row], captures: Vec<Capture>, notes: &[Note]) -> String {
+fn closing(
+    rows: &[Row],
+    drills: Vec<(usize, Drilled)>,
+    dormant: Vec<usize>,
+    notes: &[Note],
+) -> String {
     let outturn = Outturn {
-        captures,
-        dormant: Vec::new(),
+        drills,
+        dormant,
         aborted: false,
         rows: Vec::new(),
     };
@@ -219,7 +203,7 @@ fn closing(rows: &[Row], captures: Vec<Capture>, notes: &[Note]) -> String {
 }
 
 #[test]
-fn a_drill_recovered_with_the_vault_says_what_was_recorded() {
+fn a_drill_recovered_in_a_follow_up_says_what_was_recorded() {
     // The row says the sitting got there; the tally says what went on the
     // record. Both are true and they are about different things, so the card
     // has to name which is which.
@@ -228,78 +212,65 @@ fn a_drill_recovered_with_the_vault_says_what_was_recorded() {
         Occasion::Review,
         true,
         RowState::Passed {
-            total_ms: None,
-            retries: 1,
+            ttfk_ms: Some(900),
+            recovered: true,
         },
     )];
-    let captures = vec![
-        capture(0, false, 1, Outcome::Fail),
-        capture(0, true, 2, Outcome::Pass),
-    ];
-    insta::assert_snapshot!("closing-aided", closing(&rows, captures, &[]));
+    let drills = vec![(0, drilled(Outcome::Fail, true, true))];
+    insta::assert_snapshot!("closing-recovered", closing(&rows, drills, Vec::new(), &[]));
 }
 
 #[test]
-fn a_closing_note_wraps_under_its_label_rather_than_losing_its_tail() {
-    let rows = vec![drill(
-        name("warmup-p"),
-        Occasion::Review,
-        true,
-        RowState::Passed {
-            total_ms: None,
-            retries: 1,
-        },
-    )];
-    let captures = vec![capture(0, true, 1, Outcome::Fail)];
-    let notes = vec![note(
-        "warmup-p@1",
-        "an aided capture was refused — the vault and the verifier hold \
-         different secrets. Confirm which one is current, then rote rotate",
-    )];
-    insta::assert_snapshot!("closing-drifted", closing(&rows, captures, &notes));
+fn a_dormant_row_is_named_on_the_way_out_with_the_verb_that_puts_it_back() {
+    let rows = vec![
+        drill(
+            name("escrow-p"),
+            Occasion::Review,
+            false,
+            RowState::Passed {
+                ttfk_ms: Some(900),
+                recovered: false,
+            },
+        ),
+        dormant(name("warmup-p")),
+    ];
+    let drills = vec![(0, drilled(Outcome::Pass, false, false))];
+    let notes = vec![note("warmup-p@1", "dormant here — rote attach warmup-p")];
+    insta::assert_snapshot!("closing-dormant", closing(&rows, drills, vec![1], &notes));
 }
 
 #[test]
 fn the_widest_sitting_the_binary_can_produce_still_fits_the_box() {
     // Every bucket at once, under the longest slug a lineage may have, with
-    // both closing notes. Nothing here is a plausible sitting; it is the
-    // envelope, and the render choke point asserts on every line of it.
+    // a closing note. Nothing here is a plausible sitting; it is the envelope,
+    // and the render choke point asserts on every line of it.
     let long = "a".repeat(rote::slug::MAX);
     let states = [
         RowState::Passed {
-            total_ms: Some(3_000),
-            retries: 4,
+            ttfk_ms: Some(3_000),
+            recovered: false,
         },
-        RowState::Failed { attempt: 3 },
+        RowState::Passed {
+            ttfk_ms: Some(3_000),
+            recovered: true,
+        },
+        RowState::Failed { follow_ups: 300 },
         RowState::Skipped,
         RowState::Aborted,
     ];
     let mut rows: Vec<Row> = states
         .into_iter()
-        .map(|state| drill(name(&long), Occasion::Review, false, state))
+        .map(|state| drill(name(&long), Occasion::Review, true, state))
         .collect();
     rows.push(dormant(name(&long)));
-    let captures: Vec<Capture> = [
-        Outcome::Pass,
-        Outcome::Fail,
-        Outcome::Blank,
-        Outcome::Skip,
-        Outcome::Abort,
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(turn, outcome)| capture(turn, false, 1, outcome))
-    .collect();
-    let label = format!("{long}@12");
-    let notes = vec![
-        note(&label, &format!("dormant here — rote attach {long}")),
-        note(
-            &label,
-            "an aided capture was refused — the vault and the verifier hold \
-             different secrets. Confirm which one is current, then rote rotate",
-        ),
+    let drills = vec![
+        (0, drilled(Outcome::Pass, false, false)),
+        (1, drilled(Outcome::Fail, true, true)),
+        (2, drilled(Outcome::Fail, false, true)),
     ];
-    for line in closing(&rows, captures, &notes).lines() {
+    let label = format!("{long}@12");
+    let notes = vec![note(&label, &format!("dormant here — rote attach {long}"))];
+    for line in closing(&rows, drills, vec![5], &notes).lines() {
         assert_eq!(line.chars().count(), rote::tui::card::WIDTH, "{line}");
         assert!(!line.contains('…'), "{line}");
     }

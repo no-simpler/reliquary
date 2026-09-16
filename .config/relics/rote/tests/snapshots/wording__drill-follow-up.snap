@@ -1,18 +1,17 @@
 ---
 source: rote/tests/wording.rs
-assertion_line: 108
-expression: "render(&rows, 0, Some(\"out of tries\"), true, true)"
+expression: "render(&rows, 0, Some(\"not it · follow-up 2\"), true, false)"
 ---
 ╭─ rote ────────────────────────────────────────────────────── Sun 13 Sep ─╮
 │                                                                          │
-│   ▸ escrow-p  review · 30d · at cap       ✗  x3                          │
+│   ▸ escrow-p  review · 30d · at cap                                      │
 │                                                                          │
 │                                                                          │
-│   from memory — submit nothing to concede                                │
+│   a follow-up — measured by nothing                                      │
 │   ╭──────────────────────────────────────────────────────────────────╮   │
 │   │                                                                  │   │
 │   ╰──────────────────────────────────────────────────────────────────╯   │
 │                                                                          │
-│   out of tries                                          ^L  look it up   │
+│   not it · follow-up 2                       ^L  look it up   ^R  show   │
 │                                                                          │
 ╰──────────────────────────────────────────────────────────────────────────╯
