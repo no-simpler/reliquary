@@ -3,8 +3,8 @@
 //! Four verbs, and the distinction between three of them is the whole point:
 //!
 //! - **enroll** opens a lineage with its first engram.
-//! - **rotate** proves the current secret, supersedes its engram, and starts the
-//!   ladder over on a new one. A different secret, a different memory.
+//! - **rotate** supersedes a lineage's engram and starts the ladder over on a
+//!   new secret. A different secret, a different memory.
 //! - **attach** makes a verifier here for the engram that is already current,
 //!   and leaves its record untouched. The same secret, a machine that lost its
 //!   copy.
@@ -19,17 +19,18 @@
 
 use anyhow::{Result, bail};
 use jiff::civil::Date;
+use relic_core::ui::Format;
 
 use super::{Context, dialog, open_store, save_verifiers};
 use crate::cli::{AttachArgs, EnrollArgs, RetireArgs, RotateArgs};
 use crate::cmd::dialog::{Asking, Checked, Twice};
 use crate::corpus::record::{Attached, EngramId, Enrolled, Event, Retired, Rotated};
-use crate::corpus::{Corpus, Lineage};
+use crate::corpus::{Corpus, Dossier, Lineage};
 use crate::exit::{CLEAN, INCOMPLETE};
 use crate::intake::{
-    ATTACH_INTENTION, EMPTY, ENROLL_INTENTION, ROTATE_NEW_INTENTION, ROTATE_PROVE_INTENTION,
-    make_verifier,
+    ATTACH_INTENTION, DIFFERED, EMPTY, ENROLL_INTENTION, ROTATE_INTENTION, make_verifier,
 };
+use crate::render::json;
 use crate::secret::Secret;
 use crate::tui::term;
 use crate::verifier::file::Verifiers;
@@ -47,7 +48,7 @@ pub fn enroll(ctx: &Context, args: &EnrollArgs) -> Result<u8> {
     if let Some(lineage) = corpus.lineage(&args.slug) {
         if lineage.retired {
             bail!(
-                "{} is retired. rote rotate --force {} puts it back with a new engram",
+                "{} is retired. rote rotate {} puts it back with a new engram",
                 args.slug,
                 args.slug
             );
@@ -73,7 +74,7 @@ pub fn enroll(ctx: &Context, args: &EnrollArgs) -> Result<u8> {
         cost: "nothing was enrolled",
     };
     let mut console = dialog::open(args.stdin, ctx)?;
-    let Some(secret) = take_one(ctx, &mut console, today, &asking, args.stdin)? else {
+    let Some(secret) = take_one(&mut console, today, &asking, args.stdin)? else {
         return Ok(INCOMPLETE);
     };
 
@@ -126,7 +127,7 @@ pub fn attach(ctx: &Context, args: &AttachArgs) -> Result<u8> {
     let heading = crate::tui::card::fit(&if replacing {
         format!("{label} · replacing the verifier held here")
     } else {
-        crate::sitting::describe(&label, dossier, today)
+        describe(&label, dossier, today)
     });
     let asking = Asking {
         title: "attach",
@@ -137,7 +138,7 @@ pub fn attach(ctx: &Context, args: &AttachArgs) -> Result<u8> {
     };
 
     let mut console = dialog::open(args.stdin, ctx)?;
-    let Some(secret) = take_one(ctx, &mut console, today, &asking, args.stdin)? else {
+    let Some(secret) = take_one(&mut console, today, &asking, args.stdin)? else {
         return Ok(INCOMPLETE);
     };
 
@@ -146,14 +147,7 @@ pub fn attach(ctx: &Context, args: &AttachArgs) -> Result<u8> {
     verifiers.set(engram, &args.slug, today, &verifier);
     save_verifiers(ctx, &verifiers)?;
 
-    store.append(
-        ctx.clock.now(),
-        today,
-        Event::Attach(Attached {
-            slug: args.slug.clone(),
-            engram,
-        }),
-    )?;
+    store.append(ctx.clock.now(), today, Event::Attach(Attached { engram }))?;
 
     let said = format!("{label} attached here · rote took your word for it");
     dialog::settled(ctx, console.as_mut(), today, &heading, &said, Checked::No)
@@ -161,10 +155,14 @@ pub fn attach(ctx: &Context, args: &AttachArgs) -> Result<u8> {
 
 /// `rote rotate`.
 ///
+/// Nothing is proved first. The accident guard is the card's own heading,
+/// which names the engram about to step down; a rotation that names the wrong
+/// lineage has that moment to be noticed, and no other.
+///
 /// # Errors
 ///
-/// When the lineage is unknown, the current secret cannot be proved, the
-/// terminal refuses, or nothing can be written.
+/// When the lineage is unknown, the terminal refuses, or nothing can be
+/// written.
 pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
     let mut store = open_store(ctx)?;
     let ladder = ctx.config.ladder()?;
@@ -178,61 +176,17 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
     let from = dossier.engram;
     let label = corpus.label(&from);
 
-    let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
-    // Resolved before any screen opens: an error after an empty alternate
-    // screen is an error nobody saw.
-    let current = if args.force {
-        None
-    } else {
-        match verifiers.get(&from)? {
-            Some(verifier) => Some(verifier),
-            None => bail!(
-                "{label} is dormant on this machine, so there is nothing to prove against.\n\
-                 rote attach {} if the secret is unchanged; rote rotate --force {} if it is not",
-                args.slug,
-                args.slug
-            ),
-        }
-    };
-
     let today = ctx.today();
     let heading = label.clone();
-    let lines = if args.force { 1 } else { 2 };
-    let mut fed = if args.stdin {
-        dialog::piped(lines)?
-    } else {
-        Vec::new()
-    };
-    fed.reverse();
-    let mut console = dialog::open(args.stdin, ctx)?;
-
-    if let Some(current) = current
-        && let Some(code) = dialog::prove(
-            &current,
-            fed.pop(),
-            console.as_mut(),
-            today,
-            &Asking {
-                title: "rotate",
-                checked: Checked::Yes,
-                heading: &heading,
-                intention: ROTATE_PROVE_INTENTION,
-                cost: "nothing was replaced",
-            },
-            ctx,
-        )?
-    {
-        return Ok(code);
-    }
-
     let asking = Asking {
         title: "rotate",
         checked: Checked::Yes,
         heading: &heading,
-        intention: ROTATE_NEW_INTENTION,
+        intention: ROTATE_INTENTION,
         cost: "nothing was replaced",
     };
-    let Some(secret) = settle(ctx, &mut console, today, &asking, fed.pop())? else {
+    let mut console = dialog::open(args.stdin, ctx)?;
+    let Some(secret) = take_one(&mut console, today, &asking, args.stdin)? else {
         return Ok(INCOMPLETE);
     };
 
@@ -242,7 +196,9 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
 
     // The rotation owes the secret it retires this: keyed by engram, setting the
     // new one leaves the old in place, and a verifier for a secret that has been
-    // rotated away is a live oracle for it.
+    // rotated away is a live oracle for it. Dormant here, the removal is a
+    // no-op.
+    let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
     verifiers.remove(&from);
     verifiers.set(to, &args.slug, today, &verifier);
     save_verifiers(ctx, &verifiers)?;
@@ -252,9 +208,7 @@ pub fn rotate(ctx: &Context, args: &RotateArgs) -> Result<u8> {
         today,
         Event::Rotate(Rotated {
             slug: args.slug.clone(),
-            from,
             to,
-            proved: !args.force,
         }),
     )?;
 
@@ -279,7 +233,11 @@ pub fn retire(ctx: &Context, args: &RetireArgs) -> Result<u8> {
     let lineage = live(&corpus, &args.slug)?;
 
     let mut verifiers = Verifiers::load(&ctx.paths.verifiers())?;
+    let mut removed = 0usize;
     for dossier in &lineage.engrams {
+        if verifiers.holds(&dossier.engram) {
+            removed = removed.saturating_add(1);
+        }
         verifiers.remove(&dossier.engram);
     }
     save_verifiers(ctx, &verifiers)?;
@@ -293,13 +251,39 @@ pub fn retire(ctx: &Context, args: &RetireArgs) -> Result<u8> {
         }),
     )?;
 
-    if !ctx.quiet {
+    if ctx.format == Format::Json {
+        println!(
+            "{}",
+            json::document(&serde_json::json!({
+                "lineage": args.slug.as_str(),
+                "retired": true,
+                "verifiers_removed": removed,
+            }))?
+        );
+    } else if !ctx.quiet {
         println!(
             "{} retired · its history stays, its verifiers do not",
             args.slug
         );
     }
     Ok(CLEAN)
+}
+
+/// One line naming what an attachment would continue.
+fn describe(label: &str, dossier: &Dossier, today: Date) -> String {
+    let mut parts = vec![
+        label.to_owned(),
+        format!("enrolled {}", dossier.minted),
+        format!("rung {}", dossier.rung.get()),
+    ];
+    match dossier.last_review {
+        Some(day) if day != dossier.minted => parts.push(format!(
+            "reviewed {}d ago",
+            crate::ladder::days_between(day, today)
+        )),
+        Some(_) | None => parts.push("never reviewed".to_owned()),
+    }
+    parts.join(" · ")
 }
 
 fn live<'a>(corpus: &'a Corpus, slug: &crate::slug::Slug) -> Result<&'a Lineage> {
@@ -314,19 +298,17 @@ fn live<'a>(corpus: &'a Corpus, slug: &crate::slug::Slug) -> Result<&'a Lineage>
 
 /// Take one secret, from a pipe once or from a terminal twice.
 fn take_one(
-    ctx: &Context,
     console: &mut Option<term::Terminal>,
     today: Date,
     asking: &Asking<'_>,
     stdin: bool,
 ) -> Result<Option<Secret>> {
     let fed = if stdin { dialog::piped(1)?.pop() } else { None };
-    settle(ctx, console, today, asking, fed)
+    settle(console, today, asking, fed)
 }
 
 /// A secret from the pipe if there is one, else a double entry at the terminal.
 fn settle(
-    ctx: &Context,
     console: &mut Option<term::Terminal>,
     today: Date,
     asking: &Asking<'_>,
@@ -348,14 +330,14 @@ fn settle(
     let Some(console) = console.as_mut() else {
         bail!("--stdin wants the secret on its own line");
     };
-    match dialog::twice(console, today, title, checked, heading, intention, ctx)? {
+    match dialog::twice(console, today, title, checked, heading, intention)? {
         Twice::Agreed(secret) => Ok(Some(*secret)),
         Twice::Abandoned => {
             dialog::abandoned(console, today, heading)?;
             Ok(None)
         }
-        Twice::Refused(reason) => {
-            dialog::refused(console, today, heading, reason, cost)?;
+        Twice::Differed => {
+            dialog::refused(console, today, heading, DIFFERED, cost)?;
             Ok(None)
         }
     }

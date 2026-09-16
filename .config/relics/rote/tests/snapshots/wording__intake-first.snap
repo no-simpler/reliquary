@@ -1,17 +1,16 @@
 ---
 source: rote/tests/wording.rs
-expression: "field_render(&rows, 0, None, false, &Field\n{\n    reveal: Reveal::Shown, drawn: shown, clipped: (false, false), column:\n    shown.chars().count(),\n},)"
+expression: "intake(rote::intake::ENROLL_INTENTION, None, &Field::empty(Reveal::Masked))"
 ---
-╭─ attach ──────────────────────────────────────────────────── Sun 13 Sep ─╮
+╭─ enroll ──────────────────────────────────────────────────── Sun 13 Sep ─╮
 │                                                                          │
-│   ▸ escrow-p  attach · dormant here                                      │
+│   escrow-p                                                               │
 │                                                                          │
-│   escrow-p@2 · enrolled 2026-09-14 · rung 5 · reviewed 3d ago            │
-│   type it as you know it — nothing here can check it                     │
+│   the secret this lineage will hold, typed twice                         │
 │   ╭──────────────────────────────────────────────────────────────────╮   │
-│   │ correct horse battery staple                                     │   │
+│   │                                                                  │   │
 │   ╰──────────────────────────────────────────────────────────────────╯   │
 │                                                                          │
-│                                                               ^R  hide   │
+│                                                               ^R  show   │
 │                                                                          │
 ╰──────────────────────────────────────────────────────────────────────────╯

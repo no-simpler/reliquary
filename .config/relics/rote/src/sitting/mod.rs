@@ -2,14 +2,15 @@
 //!
 //! A sitting works through its **turns**. One turn is one engram, and it is
 //! either a **drill** — the secret is asked for and the verifier judges it — or
-//! an **attachment**, where this machine has no verifier and the secret is taken
-//! so that one can be made. An attachment measures nothing and is judged by
-//! nothing; it is how a restore onto a new machine comes back.
+//! **dormant**, where this machine has no verifier and there is nothing to ask.
+//! A dormant turn is a row that is skipped over and named on the way out; the
+//! sitting does not attach, because an attachment is a claim and a drill is a
+//! measurement, and one prompt should not be both.
 //!
-//! The loop is generic over where keys come from, where the card is painted,
-//! where each capture is written and where a verifier is minted, so every path
-//! through it is driven by a scripted list of keys in the tests. Only raw mode,
-//! the alternate screen and the real `event::read()` sit outside that, in `tui`.
+//! The loop is generic over where keys come from, where the card is painted
+//! and where each capture is written, so every path through it is driven by a
+//! scripted list of keys in the tests. Only raw mode, the alternate screen and
+//! the real `event::read()` sit outside that, in `tui`.
 
 pub mod screen;
 
@@ -19,7 +20,7 @@ use relic_core::style::Style;
 
 use crate::corpus::drill::Landing;
 use crate::corpus::record::{EngramId, Outcome};
-use crate::intake::{CONCEDED, DIFFERED, EMPTY, NOT_IT, Pair, Pairing, tried};
+use crate::intake::NOT_IT;
 use crate::ladder::{Ladder, Occasion, Rung, Standing};
 use crate::secret::Secret;
 use crate::slug::Slug;
@@ -46,8 +47,8 @@ pub struct Turn {
 pub enum Task {
     /// Ask for the secret and let the verifier judge it.
     Drill(Box<Drilling>),
-    /// Take the secret so a verifier can be made here.
-    Attach(Box<Attaching>),
+    /// No verifier here, so nothing to ask. The row is skipped over.
+    Dormant,
 }
 
 /// A drill, as the roster planned it.
@@ -68,24 +69,14 @@ pub struct Drilling {
     /// Whether the rung is the top of the ladder.
     pub at_cap: bool,
     /// The verifier. Not an option: **a missing verifier is not a drill**, it is
-    /// an attachment, and the type says so rather than a branch inside the loop.
+    /// a dormant turn, and the type says so rather than a branch inside the loop.
     pub verifier: Verifier,
 }
 
-/// An attachment, as the roster planned it.
-#[derive(Clone, Debug)]
-pub struct Attaching {
-    /// What is being continued, in one line, so a person has a beat to notice
-    /// they are about to attach the wrong thing.
-    pub dossier: String,
-    /// Whether a verifier is already held here and is being replaced.
-    pub replacing: bool,
-}
-
 impl Turn {
-    /// Whether this turn is an attachment.
-    pub fn attaching(&self) -> bool {
-        matches!(self.task, Task::Attach(_))
+    /// Whether this machine holds nothing to drill this turn against.
+    pub fn dormant(&self) -> bool {
+        matches!(self.task, Task::Dormant)
     }
 }
 
@@ -101,9 +92,9 @@ pub enum Mode {
 /// Decide what to ask for.
 ///
 /// `only` narrows a practice sitting to named lineages; empty means all of them.
-/// **An attachment turn appears wherever its lineage appears**, in either mode,
-/// because an engram with no verifier here cannot be drilled at all and the
-/// sitting is how one gets made.
+/// **A dormant turn appears wherever its lineage appears**, in either mode: an
+/// engram with no verifier here cannot be drilled, and a row that says so is
+/// how the sitting names the verb that puts one back.
 pub fn roster(
     corpus: &crate::corpus::Corpus,
     verifiers: &crate::verifier::file::Verifiers,
@@ -123,16 +114,10 @@ pub fn roster(
         };
         let held = verifiers.get(&dossier.engram).ok().flatten();
         let Some(verifier) = held else {
-            let ordinal = lineage.ordinal(&dossier.engram).unwrap_or(1);
             turns.push(Turn {
                 slug: lineage.slug.clone(),
                 engram: dossier.engram,
-                task: Task::Attach(Box::new(Attaching {
-                    dossier: describe(&lineage.label(ordinal), dossier, today),
-                    // Held but unreadable is still held: what is minted here
-                    // replaces it, and the row says so.
-                    replacing: verifiers.holds(&dossier.engram),
-                })),
+                task: Task::Dormant,
             });
             continue;
         };
@@ -159,23 +144,6 @@ pub fn roster(
         });
     }
     turns
-}
-
-/// One line naming what an attachment would continue.
-pub fn describe(label: &str, dossier: &crate::corpus::Dossier, today: Date) -> String {
-    let mut parts = vec![
-        label.to_owned(),
-        format!("enrolled {}", dossier.minted),
-        format!("rung {}", dossier.rung.get()),
-    ];
-    match dossier.last_review {
-        Some(day) if day != dossier.minted => parts.push(format!(
-            "reviewed {}d ago",
-            crate::ladder::days_between(day, today)
-        )),
-        Some(_) | None => parts.push("never reviewed".to_owned()),
-    }
-    parts.join(" · ")
 }
 
 /// One sample, as the sitting saw it.
@@ -210,8 +178,8 @@ pub struct Capture {
 pub struct Outturn {
     /// Every sample, in the order they were typed.
     pub captures: Vec<Capture>,
-    /// The turns that ended in a verifier being minted here.
-    pub attached: Vec<usize>,
+    /// The turns skipped over because this machine holds no verifier for them.
+    pub dormant: Vec<usize>,
     /// Whether the sitting was abandoned rather than finished.
     pub aborted: bool,
     /// The card as it stood at the end.
@@ -226,8 +194,8 @@ impl Outturn {
     pub fn landings(&self, turns: usize) -> Vec<Landing> {
         (0..turns)
             .filter_map(|index| {
-                if self.attached.contains(&index) {
-                    return Some(Landing::Attached);
+                if self.dormant.contains(&index) {
+                    return Some(Landing::Dormant);
                 }
                 let first = self
                     .captures
@@ -254,17 +222,20 @@ impl Outturn {
 /// What the line under the field says once the cold tries are spent.
 const OUT_OF_TRIES: &str = "out of tries";
 
+/// What it says when a drill try was conceded: nothing was offered, so *not
+/// it* would be false.
+const CONCEDED: &str = "conceded";
+
+/// What the line under the field says when a bounded retry has spent a round.
+fn tried(reason: &str, attempt: u8, of: u8) -> String {
+    format!("{reason} · try {} of {of}", attempt.clamp(1, of.max(1)))
+}
+
 /// Where each capture goes the moment it is taken.
 ///
 /// Called before the next prompt is drawn, so a sitting cut short by a closed
 /// window or a signal keeps every reading it had already produced.
 pub type Record<'a> = dyn FnMut(&Capture) -> Result<()> + 'a;
-
-/// Where a verifier is minted, for an attachment.
-///
-/// The verifier is written **before** the record of it, so a failure between the
-/// two leaves a fact with no record rather than a record with no fact.
-pub type Attach<'a> = dyn FnMut(usize, &Secret) -> Result<()> + 'a;
 
 /// How a secret is judged. Passed in rather than reached for, so the loop can be
 /// driven in a test without paying 256 MiB and half a second per key. Told
@@ -283,17 +254,15 @@ pub struct Wiring<'a> {
     pub verify: &'a Verify<'a>,
     /// Where each capture goes.
     pub record: &'a mut Record<'a>,
-    /// Where a verifier is minted.
-    pub attach: &'a mut Attach<'a>,
 }
 
 /// Run the sitting.
 ///
 /// # Errors
 ///
-/// When the terminal cannot be read or written, a capture cannot be recorded, a
-/// verifier cannot be minted, or the verifier fails outright — which is
-/// different from refusing a secret, and is not recorded as a lapse.
+/// When the terminal cannot be read or written, a capture cannot be recorded,
+/// or the verifier fails outright — which is different from refusing a secret,
+/// and is not recorded as a lapse.
 pub fn run(
     turns: &[Turn],
     max_attempts: u8,
@@ -305,7 +274,6 @@ pub fn run(
         console,
         verify,
         record,
-        attach,
     } = wiring;
     Session {
         turns,
@@ -314,7 +282,6 @@ pub fn run(
         console,
         verify,
         record,
-        attach,
         today,
         rows: turns.iter().map(screen::Row::pending).collect(),
         outturn: Outturn::default(),
@@ -329,7 +296,6 @@ struct Session<'a> {
     console: &'a mut dyn Console,
     verify: &'a Verify<'a>,
     record: &'a mut Record<'a>,
-    attach: &'a mut Attach<'a>,
     today: Date,
     rows: Vec<screen::Row>,
     outturn: Outturn,
@@ -363,7 +329,14 @@ impl Session<'_> {
             };
             let stopped = match &turn.task {
                 Task::Drill(drilling) => self.drill(index, drilling)?,
-                Task::Attach(_) => self.attachment(index)?,
+                Task::Dormant => {
+                    // Nothing to ask and nothing to write: the row says so,
+                    // and the closing card names the verb that puts a
+                    // verifier back.
+                    self.set(index, screen::RowState::Dormant);
+                    self.outturn.dormant.push(index);
+                    false
+                }
             };
             if stopped {
                 break;
@@ -542,84 +515,6 @@ impl Session<'_> {
             Outcome::Pass => self.ladder.advanced(drilling.rung),
             Outcome::Fail | Outcome::Blank => Rung::FIRST,
             Outcome::Skip | Outcome::Abort => drilling.rung,
-        }
-    }
-
-    /// Take a secret twice and mint a verifier for an engram this machine is
-    /// dormant on. `true` means the sitting was abandoned.
-    ///
-    /// Nothing here is judged, so nothing here is recorded as a capture, and a
-    /// paste is taken. There is also no lookup on offer: offering one would
-    /// imply that what is typed is being checked against something, and it is
-    /// not.
-    fn attachment(&mut self, index: usize) -> Result<bool> {
-        let mut pair = Pair::new(self.max_attempts);
-        let mut status: Option<String> = None;
-        loop {
-            let state = if pair.holds_one() {
-                screen::RowState::Confirming
-            } else {
-                screen::RowState::Claiming
-            };
-            self.set(index, state);
-            let resting = screen::resting(self.rows.get(index));
-            self.paint(
-                index,
-                resting,
-                status.clone(),
-                false,
-                &Field::resting(false),
-            )?;
-
-            // No lookup, and a paste: there is nothing here to consult a vault
-            // against, and nothing here that a paste could measure away.
-            let entry = match self.read(index, status.as_deref(), false, false)? {
-                Typed::Submitted(entry) => entry,
-                // There is nothing here to concede, so the lookup is not on
-                // offer and a skip simply leaves the engram dormant.
-                Typed::Lookup => continue,
-                Typed::Skipped => {
-                    self.set(index, screen::RowState::Skipped);
-                    return Ok(false);
-                }
-                Typed::Aborted => {
-                    self.set(index, screen::RowState::Aborted);
-                    self.outturn.aborted = true;
-                    return Ok(true);
-                }
-            };
-
-            match pair.offer(entry.secret) {
-                Pairing::Again => status = None,
-                Pairing::Agreed(secret) => {
-                    (self.attach)(index, &secret)?;
-                    drop(secret);
-                    self.outturn.attached.push(index);
-                    self.set(index, screen::RowState::Attached);
-                    return Ok(false);
-                }
-                // Every refusal says which try the next one is, the same way a
-                // drill try and a proof do. A bound nobody can see reads as no
-                // bound at all.
-                Pairing::Differed => {
-                    status = Some(pair.status(DIFFERED));
-                    self.flash(index, status.clone(), false, &Field::resting(false))?;
-                }
-                Pairing::Empty => {
-                    status = Some(pair.status(EMPTY));
-                    self.flash(index, status.clone(), false, &Field::resting(false))?;
-                }
-                Pairing::OutOfRounds(reason) => {
-                    self.set(index, screen::RowState::Differed);
-                    self.flash(
-                        index,
-                        Some(format!("{reason} — nothing was attached")),
-                        false,
-                        &Field::resting(false),
-                    )?;
-                    return Ok(false);
-                }
-            }
         }
     }
 
@@ -818,7 +713,7 @@ mod tests {
     use jiff::civil::date;
     use relic_core::style::Style;
 
-    use super::{Attaching, Capture, Drilling, Outturn, Task, Turn, screen};
+    use super::{Capture, Drilling, Outturn, Task, Turn, screen};
     use crate::corpus::drill::Landing;
     use crate::corpus::record::{EngramId, Outcome};
     use crate::ladder::{Ladder, Occasion, Rung};
@@ -918,14 +813,11 @@ mod tests {
         }
     }
 
-    fn attach_turn(name: &str) -> Turn {
+    fn dormant_turn(name: &str) -> Turn {
         Turn {
             slug: name.parse().unwrap(),
             engram: EngramId::mint().unwrap(),
-            task: Task::Attach(Box::new(Attaching {
-                dossier: format!("{name}@1 · enrolled 2026-09-01 · rung 3"),
-                replacing: false,
-            })),
+            task: Task::Dormant,
         }
     }
 
@@ -947,7 +839,6 @@ mod tests {
     struct Ran {
         outturn: Outturn,
         written: Vec<Capture>,
-        attached: Vec<String>,
         flashes: usize,
         drains: usize,
         /// The card as it last stood, joined into one string.
@@ -960,16 +851,9 @@ mod tests {
         let verify =
             |_: usize, _: &Verifier, secret: &Secret| Ok(secret.expose() == RIGHT.as_bytes());
         let written = std::cell::RefCell::new(Vec::new());
-        let attached = std::cell::RefCell::new(Vec::new());
         let outturn = {
             let mut record = |capture: &Capture| -> Result<()> {
                 written.borrow_mut().push(*capture);
-                Ok(())
-            };
-            let mut attach = |_index: usize, secret: &Secret| -> Result<()> {
-                attached
-                    .borrow_mut()
-                    .push(String::from_utf8_lossy(secret.expose()).into_owned());
                 Ok(())
             };
             super::run(
@@ -981,7 +865,6 @@ mod tests {
                     console: &mut console,
                     verify: &verify,
                     record: &mut record,
-                    attach: &mut attach,
                 },
             )
             .unwrap()
@@ -989,7 +872,6 @@ mod tests {
         Ran {
             outturn,
             written: written.into_inner(),
-            attached: attached.into_inner(),
             flashes: console.flashes,
             drains: console.drains,
             last: console.last.join("\n"),
@@ -1212,7 +1094,6 @@ mod tests {
             Ok(true)
         };
         let mut record = |_: &Capture| -> Result<()> { Ok(()) };
-        let mut attach = |_: usize, _: &Secret| -> Result<()> { Ok(()) };
         super::run(
             &turns,
             3,
@@ -1222,7 +1103,6 @@ mod tests {
                 console: &mut console,
                 verify: &verify,
                 record: &mut record,
-                attach: &mut attach,
             },
         )
         .unwrap();
@@ -1230,83 +1110,30 @@ mod tests {
     }
 
     #[test]
-    fn an_attachment_takes_the_secret_twice_and_writes_no_capture() {
-        let turns = vec![attach_turn("a")];
-        let mut keys = typing(RIGHT, 300);
-        keys.extend(typing(RIGHT, 900));
-        let ran = run(&turns, keys);
-
-        assert!(
-            ran.written.is_empty(),
-            "nothing was judged, so nothing was measured"
-        );
-        assert_eq!(ran.attached, vec![RIGHT.to_owned()]);
-        assert_eq!(ran.outturn.attached, vec![0]);
-        assert_eq!(ran.outturn.landings(1), vec![Landing::Attached]);
-        assert_eq!(ran.outturn.missed(), 0);
-        assert!(matches!(
-            ran.outturn.rows.first().map(|row| row.state),
-            Some(screen::RowState::Attached)
-        ));
-    }
-
-    #[test]
-    fn an_attachment_whose_entries_never_agree_mints_nothing() {
-        let turns = vec![attach_turn("a")];
-        let mut keys = Vec::new();
-        for _ in 0..3 {
-            keys.extend(typing("one", 300));
-            keys.extend(typing("two", 600));
-        }
-        let ran = run(&turns, keys);
-        assert!(ran.attached.is_empty());
-        assert!(ran.outturn.attached.is_empty());
-        assert!(matches!(
-            ran.outturn.rows.first().map(|row| row.state),
-            Some(screen::RowState::Differed)
-        ));
-    }
-
-    #[test]
-    fn an_attachment_refuses_an_empty_entry_rather_than_conceding_to_it() {
-        let turns = vec![attach_turn("a")];
-        let mut keys = vec![(Key::Enter, 200)];
-        keys.extend(typing(RIGHT, 400));
-        keys.extend(typing(RIGHT, 800));
-        let ran = run(&turns, keys);
+    fn a_dormant_lineage_is_a_row_and_never_a_prompt() {
+        // Two turns, one key script: the dormant row asks for nothing, so the
+        // only keys consumed are the drill's. Were a prompt drawn for it, the
+        // typed answer would land there and the drill would go unanswered.
+        let turns = vec![dormant_turn("a"), drill_turn("b", Occasion::Review, false)];
+        let ran = run(&turns, typing(RIGHT, 300));
         assert_eq!(
-            ran.attached,
-            vec![RIGHT.to_owned()],
-            "the empty entry was refused and the pair started over"
+            ran.written.len(),
+            1,
+            "nothing is written for a dormant turn"
         );
-        assert!(ran.flashes > 0);
-    }
-
-    #[test]
-    fn escape_leaves_an_attachment_dormant_with_nothing_written() {
-        let turns = vec![attach_turn("a")];
-        let ran = run(&turns, vec![(Key::Escape, 200)]);
-        assert!(ran.attached.is_empty());
-        assert!(ran.written.is_empty());
-        assert!(matches!(
-            ran.outturn.rows.first().map(|row| row.state),
-            Some(screen::RowState::Skipped)
-        ));
-    }
-
-    #[test]
-    fn an_attachment_and_a_drill_sit_in_one_roster() {
-        let turns = vec![attach_turn("a"), drill_turn("b", Occasion::Review, false)];
-        let mut keys = typing(RIGHT, 300);
-        keys.extend(typing(RIGHT, 900));
-        keys.extend(typing(RIGHT, 1_500));
-        let ran = run(&turns, keys);
-        assert_eq!(ran.attached.len(), 1);
-        assert_eq!(ran.written.len(), 1);
+        assert_eq!(ran.written.first().map(|c| c.turn), Some(1));
+        assert_eq!(ran.outturn.dormant, vec![0]);
         assert_eq!(
             ran.outturn.landings(2),
-            vec![Landing::Attached, Landing::Pass]
+            vec![Landing::Dormant, Landing::Pass]
         );
+        assert_eq!(ran.outturn.missed(), 0);
+        assert!(!ran.outturn.aborted);
+        assert!(matches!(
+            ran.outturn.rows.first().map(|row| row.state),
+            Some(screen::RowState::Dormant)
+        ));
+        assert!(ran.last.contains("dormant"), "{}", ran.last);
     }
 
     #[test]
@@ -1385,21 +1212,6 @@ mod tests {
             Some(Outcome::Skip),
             "what was pasted never reached the field, so nothing was judged"
         );
-    }
-
-    #[test]
-    fn an_attachment_takes_a_paste_because_it_measures_nothing() {
-        let turns = vec![attach_turn("a")];
-        let keys = vec![
-            pasting(RIGHT, 300),
-            (Key::Enter, 400),
-            pasting(RIGHT, 900),
-            (Key::Enter, 1_000),
-        ];
-        let ran = run(&turns, keys);
-        assert_eq!(ran.attached, vec![RIGHT.to_owned()]);
-        assert_eq!(ran.outturn.landings(1), vec![Landing::Attached]);
-        assert!(ran.written.is_empty(), "and it is still no reading at all");
     }
 
     #[test]

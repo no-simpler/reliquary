@@ -776,28 +776,45 @@ pub struct Ask<'a> {
 /// When the terminal cannot be read or written.
 pub fn ask(console: &mut dyn Console, today: jiff::civil::Date, prompt: &Ask<'_>) -> Result<Typed> {
     let style = console.style();
-    let intention = if prompt.resting == card::Tone::Unchecked {
-        Tint::Yellow
-    } else {
-        Tint::Dim
-    };
     let mut build = |refusal: Refusal, tone: card::Tone, field: &Field<'_>| {
-        let mut drawn = Card::new(prompt.title, card::stamp(today), style);
-        drawn.reserve(ASK_SLOTS);
-        drawn.say(prompt.heading, Tint::Bold).gap();
-        // Unconditional, so an empty intention pads its line rather than moving
-        // the field up into it.
-        drawn.say(prompt.intention, intention);
-        drawn.entry(field, tone);
-        drawn.gap();
-        let under = refusal.status().or(prompt.status).unwrap_or("");
-        drawn.split(under, reveal_chip(field.reveal), Tint::Dim);
-        drawn
+        ask_card(prompt, today, style, refusal, tone, field)
     };
     let opening = build(Refusal::None, prompt.resting, &Field::empty(Reveal::Masked));
     console.anchor(opening.height());
     console.paint(&opening)?;
     read_secret(console, false, false, prompt.resting, &mut build)
+}
+
+/// One state of the card [`ask`] draws: the heading, the intention, the field
+/// as it stands, and the line under it.
+///
+/// Pure, so the wording is under snapshot in the suite the way the sitting's
+/// card is.
+#[must_use]
+pub fn ask_card(
+    prompt: &Ask<'_>,
+    today: jiff::civil::Date,
+    style: Style,
+    refusal: Refusal,
+    tone: card::Tone,
+    field: &Field<'_>,
+) -> Card {
+    let intention = if prompt.resting == card::Tone::Unchecked {
+        Tint::Yellow
+    } else {
+        Tint::Dim
+    };
+    let mut drawn = Card::new(prompt.title, card::stamp(today), style);
+    drawn.reserve(ASK_SLOTS);
+    drawn.say(prompt.heading, Tint::Bold).gap();
+    // Unconditional, so an empty intention pads its line rather than moving
+    // the field up into it.
+    drawn.say(prompt.intention, intention);
+    drawn.entry(field, tone);
+    drawn.gap();
+    let under = refusal.status().or(prompt.status).unwrap_or("");
+    drawn.split(under, reveal_chip(field.reveal), Tint::Dim);
+    drawn
 }
 
 /// What the line under the field says about the reveal, where one is offered.

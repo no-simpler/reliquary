@@ -285,14 +285,15 @@ pub enum Event {
 }
 
 impl Event {
-    /// The lineage this event is about. Every event names one.
-    pub fn slug(&self) -> &Slug {
+    /// The engram this event is about, where it is about one. A retirement
+    /// names a lineage and no engram.
+    pub fn engram(&self) -> Option<EngramId> {
         match self {
-            Self::Enroll(e) => &e.slug,
-            Self::Rotate(e) => &e.slug,
-            Self::Attach(e) => &e.slug,
-            Self::Retire(e) => &e.slug,
-            Self::Capture(e) => &e.slug,
+            Self::Enroll(e) => Some(e.engram),
+            Self::Rotate(e) => Some(e.to),
+            Self::Attach(e) => Some(e.engram),
+            Self::Capture(e) => Some(e.engram),
+            Self::Retire(_) => None,
         }
     }
 
@@ -326,13 +327,9 @@ pub struct Enrolled {
 pub struct Rotated {
     /// The lineage.
     pub slug: Slug,
-    /// The engram that steps down. Naming it is what makes a forked lineage
-    /// visible.
-    pub from: EngramId,
-    /// The engram that takes over.
+    /// The engram that takes over. What it supersedes is whatever the lineage
+    /// held, which replay knows and the record need not repeat.
     pub to: EngramId,
-    /// Whether the outgoing secret was proved before the replacement was taken.
-    pub proved: bool,
 }
 
 /// An engram was given a verifier on the machine that wrote this.
@@ -343,9 +340,7 @@ pub struct Rotated {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Attached {
-    /// The lineage.
-    pub slug: Slug,
-    /// The engram a verifier was minted for.
+    /// The engram a verifier was minted for. It names its lineage.
     pub engram: EngramId,
 }
 
@@ -565,14 +560,20 @@ mod tests {
     }
 
     #[test]
-    fn every_event_names_a_lineage_so_one_grepped_line_says_something() {
+    fn every_event_but_a_retirement_names_an_engram() {
+        let engram = EngramId::mint().unwrap();
         let event = Event::Enroll(Enrolled {
             slug: "op-master".parse().unwrap(),
-            engram: EngramId::mint().unwrap(),
+            engram,
             critical: false,
         });
-        assert_eq!(event.slug().as_str(), "op-master");
+        assert_eq!(event.engram(), Some(engram));
         assert_eq!(event.kind(), "enroll");
+        let retired = Event::Retire(super::Retired {
+            slug: "op-master".parse().unwrap(),
+        });
+        assert_eq!(retired.engram(), None);
+        assert_eq!(retired.kind(), "retire");
     }
 
     #[test]

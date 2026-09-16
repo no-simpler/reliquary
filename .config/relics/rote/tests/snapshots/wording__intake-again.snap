@@ -1,13 +1,12 @@
 ---
 source: rote/tests/wording.rs
-expression: "render(&rows, 0, None, false, false)"
+expression: "intake(rote::intake::AGAIN, None, &Field::empty(Reveal::Masked))"
 ---
-╭─ attach ──────────────────────────────────────────────────── Sun 13 Sep ─╮
+╭─ enroll ──────────────────────────────────────────────────── Sun 13 Sep ─╮
 │                                                                          │
-│   ▸ escrow-p  attach · replacing                                         │
+│   escrow-p                                                               │
 │                                                                          │
-│   escrow-p@2 · enrolled 2026-09-14 · rung 5 · reviewed 3d ago            │
-│   type it as you know it — nothing here can check it                     │
+│   again                                                                  │
 │   ╭──────────────────────────────────────────────────────────────────╮   │
 │   │                                                                  │   │
 │   ╰──────────────────────────────────────────────────────────────────╯   │

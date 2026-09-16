@@ -5,10 +5,10 @@
 //! handed. The box, the palette and the field are the shared dialog's and live
 //! in `tui::card`; what is here is the sitting's own layout.
 //!
-//! Every state of a sitting is the same rectangle. The list, the context line,
-//! the intention and the field sit at fixed lines, so what changes between
-//! states changes inside a reserved column or on the line under the field, and
-//! the field itself never moves.
+//! Every state of a sitting is the same rectangle. The list, the intention and
+//! the field sit at fixed lines, so what changes between states changes inside
+//! a reserved column or on the line under the field, and the field itself
+//! never moves.
 
 use jiff::civil::Date;
 use relic_core::style::{Style, Tint};
@@ -17,7 +17,7 @@ use super::{Outturn, Task, Turn};
 use crate::corpus::drill::Landing;
 use crate::ladder::Occasion;
 use crate::slug::Slug;
-use crate::tui::card::{CONTENT, Card, Field, Piece, Tone, fit, fit_to, join};
+use crate::tui::card::{CONTENT, Card, Field, Piece, Tone, fit_to, join};
 
 /// What points at the engram being asked about.
 const MARKER: &str = "▸ ";
@@ -33,8 +33,8 @@ const CHIP: usize = 28;
 /// The column holding one glyph of standing.
 const ICON: usize = 3;
 
-/// Lines a card holds beyond one per turn: air, the context line, the
-/// intention, the three of the field, air, and the line under it.
+/// Lines a card holds beyond one per turn: air, air, the intention, the three
+/// of the field, air, and the line under it.
 pub const SLOTS: usize = 8;
 
 /// Where one turn has got to.
@@ -65,14 +65,8 @@ pub enum RowState {
     Skipped,
     /// The sitting was abandoned here.
     Aborted,
-    /// An attachment, waiting for the first of the pair.
-    Claiming,
-    /// An attachment, waiting for the second.
-    Confirming,
-    /// A verifier was minted here.
-    Attached,
-    /// The two entries never agreed, so nothing was minted.
-    Differed,
+    /// No verifier here, so nothing was asked.
+    Dormant,
 }
 
 /// What a row is for.
@@ -89,13 +83,8 @@ pub enum Kind {
         /// Whether the rung is the top of the ladder.
         at_cap: bool,
     },
-    /// The secret is taken so a verifier can be made here.
-    Attach {
-        /// What is being continued.
-        dossier: String,
-        /// Whether a verifier is already held here.
-        replacing: bool,
-    },
+    /// This machine holds no verifier, so there is nothing to ask.
+    Dormant,
 }
 
 /// One line of the card.
@@ -123,10 +112,7 @@ impl Row {
                     interval_days: drilling.scheduled_interval_days,
                     at_cap: drilling.at_cap,
                 },
-                Task::Attach(attaching) => Kind::Attach {
-                    dossier: attaching.dossier.clone(),
-                    replacing: attaching.replacing,
-                },
+                Task::Dormant => Kind::Dormant,
             },
             state: RowState::Pending,
         }
@@ -205,28 +191,22 @@ impl<'a> Frame<'a> {
 
 /// What a row's prompt rests as when nothing has just been refused.
 ///
-/// An attachment is the one prompt in the binary that can check nothing, so it
-/// is the one that does not rest calm. Every other prompt verifies or measures
-/// what was typed.
+/// Every prompt the sitting draws verifies what was typed, so every one rests
+/// calm. The one prompt that checks nothing is the attachment's, and it is not
+/// drawn here.
 #[must_use]
 pub fn resting(row: Option<&Row>) -> Tone {
     match row.map(|row| &row.kind) {
-        Some(Kind::Attach { .. }) => Tone::Unchecked,
-        Some(Kind::Drill { .. }) | None => Tone::Calm,
+        Some(Kind::Drill { .. } | Kind::Dormant) | None => Tone::Calm,
     }
 }
 
 /// What the card is titled, which says which instrument this is.
 fn title(frame: &Frame<'_>) -> &'static str {
     if frame.outturn.is_some() {
-        return "done";
-    }
-    match frame.active.and_then(|index| frame.rows.get(index)) {
-        // Named on the border, so a reader who arrived here by accident sees
-        // it before reading a word of the prompt — and sees it in a terminal
-        // with no colour at all, where the field's tone says nothing.
-        Some(row) if matches!(row.kind, Kind::Attach { .. }) => "attach",
-        Some(_) | None => "rote",
+        "done"
+    } else {
+        "rote"
     }
 }
 
@@ -258,10 +238,7 @@ pub fn card(frame: &Frame<'_>, field: &Field<'_>, style: Style) -> Card {
     }
 
     if let Some(row) = frame.active.and_then(|index| frame.rows.get(index)) {
-        card.gap();
-        // Unconditional, so a drill's blank context line pads rather than
-        // moving the field up into it.
-        card.say(context(row), Tint::Dim);
+        card.gap().gap();
         card.say(intention(row), intention_tint(row));
         if row.state == RowState::Checking {
             // Submitted, and the verifier is running. The box goes now rather
@@ -381,24 +358,19 @@ fn chip_width(frame: &Frame<'_>, names: usize, style: Style) -> usize {
 /// there another way. Red is a failure. Dim is nothing measured.**
 ///
 /// A green tick on a drill that took three goes, or on one answered with the
-/// vault open, claims a verdict nobody rendered — the same reason an attachment
-/// lands on a yellow `+` and not a tick. The tally below says what went on the
-/// record; the glyph says how the sitting went, and the two now agree about
-/// which of them is which.
+/// vault open, claims a verdict nobody rendered. The tally below says what
+/// went on the record; the glyph says how the sitting went, and the two agree
+/// about which of them is which.
 fn icon(row: &Row) -> (&'static str, Tint) {
     match row.state {
         // The marker already says which row is being asked about, and a row
         // nobody has reached says nothing at all.
-        RowState::Pending | RowState::Active { .. } | RowState::Claiming | RowState::Confirming => {
-            (" ", Tint::Dim)
-        }
+        RowState::Pending | RowState::Active { .. } => (" ", Tint::Dim),
         RowState::Checking => ("·", Tint::Dim),
         RowState::Passed { retries, .. } if retries == 0 && !aided(row) => ("✓", Tint::Green),
         RowState::Passed { .. } => ("✓", Tint::Yellow),
-        RowState::Attached => ("+", Tint::Yellow),
         RowState::Failed { .. } => ("✗", Tint::Red),
-        RowState::Differed => ("–", Tint::Red),
-        RowState::Skipped | RowState::Aborted => ("–", Tint::Dim),
+        RowState::Skipped | RowState::Aborted | RowState::Dormant => ("–", Tint::Dim),
     }
 }
 
@@ -406,7 +378,7 @@ fn icon(row: &Row) -> (&'static str, Tint) {
 fn aided(row: &Row) -> bool {
     match row.kind {
         Kind::Drill { aided, .. } => aided,
-        Kind::Attach { .. } => false,
+        Kind::Dormant => false,
     }
 }
 
@@ -429,16 +401,13 @@ fn detail(row: &Row, style: Style) -> Piece {
         RowState::Failed { attempt } if attempt > 1 => {
             Piece::painted(format!("x{attempt}"), Tint::Dim, style)
         }
-        RowState::Attached => Piece::painted("attached", Tint::Dim, style),
-        RowState::Differed => Piece::painted("differed", Tint::Dim, style),
         RowState::Pending
         | RowState::Active { .. }
         | RowState::Checking
-        | RowState::Claiming
-        | RowState::Confirming
         | RowState::Failed { .. }
         | RowState::Skipped
-        | RowState::Aborted => Piece::plain(String::new()),
+        | RowState::Aborted
+        | RowState::Dormant => Piece::plain(String::new()),
     }
 }
 
@@ -460,21 +429,7 @@ fn chip(row: &Row) -> String {
             }
             text
         }
-        Kind::Attach { replacing, .. } => {
-            if *replacing {
-                "attach · replacing".to_owned()
-            } else {
-                "attach · dormant here".to_owned()
-            }
-        }
-    }
-}
-
-/// What is being continued, for an attachment, and nothing for a drill.
-fn context(row: &Row) -> String {
-    match &row.kind {
-        Kind::Drill { .. } => String::new(),
-        Kind::Attach { dossier, .. } => fit(dossier),
+        Kind::Dormant => "dormant".to_owned(),
     }
 }
 
@@ -497,19 +452,8 @@ fn intention(row: &Row) -> &'static str {
     match &row.kind {
         Kind::Drill { aided: true, .. } => "looked up, so this one measures nothing",
         Kind::Drill { aided: false, .. } => "from memory — submit nothing to concede",
-        Kind::Attach { .. } => match row.state {
-            RowState::Confirming => crate::intake::AGAIN,
-            RowState::Pending
-            | RowState::Active { .. }
-            | RowState::Checking
-            | RowState::Passed { .. }
-            | RowState::Failed { .. }
-            | RowState::Skipped
-            | RowState::Aborted
-            | RowState::Claiming
-            | RowState::Attached
-            | RowState::Differed => crate::intake::ATTACH_INTENTION,
-        },
+        // Never at the prompt, so never said; the row's chip says it instead.
+        Kind::Dormant => "dormant here — nothing to ask",
     }
 }
 
@@ -548,7 +492,7 @@ const ORDER: &[(Landing, &str, &str)] = &[
     (Landing::Miss, "miss", "misses"),
     (Landing::Skipped, "skipped", "skipped"),
     (Landing::Aided, "aided", "aided"),
-    (Landing::Attached, "attached", "attached"),
+    (Landing::Dormant, "dormant", "dormant"),
 ];
 
 #[cfg(test)]
@@ -556,7 +500,7 @@ mod tests {
     use jiff::civil::date;
     use relic_core::style::{Style, Tint};
 
-    use super::{Frame, Kind, Note, Row, RowState, SLOTS, card, fit};
+    use super::{Frame, Kind, Note, Row, RowState, SLOTS, card};
     use crate::corpus::record::Outcome;
     use crate::ladder::{Occasion, Rung};
     use crate::sitting::{Capture, Outturn};
@@ -581,13 +525,10 @@ mod tests {
         }
     }
 
-    fn attach_row(name: &str, state: RowState) -> Row {
+    fn dormant_row(name: &str, state: RowState) -> Row {
         Row {
             slug: name.parse().unwrap(),
-            kind: Kind::Attach {
-                dossier: format!("{name}@2 · enrolled 2026-09-14 · rung 5 · reviewed 3d ago"),
-                replacing: false,
-            },
+            kind: Kind::Dormant,
             state,
         }
     }
@@ -606,10 +547,7 @@ mod tests {
             RowState::Failed { attempt: 2 },
             RowState::Skipped,
             RowState::Aborted,
-            RowState::Claiming,
-            RowState::Confirming,
-            RowState::Attached,
-            RowState::Differed,
+            RowState::Dormant,
         ]
     }
 
@@ -618,7 +556,7 @@ mod tests {
         for state in every_state() {
             out.push(drill_row("escrow-p", Occasion::Review, false, state));
             out.push(drill_row("op-master", Occasion::Practice, true, state));
-            out.push(attach_row("flagship-login", state));
+            out.push(dormant_row("flagship-login", state));
         }
         out
     }
@@ -638,7 +576,7 @@ mod tests {
                 paste_refused: 0,
                 rung_after: Rung::FIRST,
             }],
-            attached: vec![1],
+            dormant: vec![1],
             aborted: false,
             rows: Vec::new(),
         }
@@ -824,41 +762,27 @@ mod tests {
     }
 
     #[test]
-    fn a_long_context_line_is_trimmed_at_a_separator_rather_than_mid_word() {
-        let long = format!(
-            "{}@2 · enrolled 2026-09-14 · rung 5 · reviewed 3d ago",
-            "a".repeat(32)
-        );
-        let trimmed = fit(&long);
-        assert!(trimmed.chars().count() <= CONTENT);
-        assert!(!trimmed.ends_with(' '));
-        assert_eq!(fit("short"), "short");
-    }
-
-    #[test]
-    fn an_attachment_says_what_it_is_continuing_and_offers_no_lookup() {
-        let list = vec![attach_row("escrow-p", RowState::Claiming)];
-        let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
+    fn a_dormant_row_says_so_and_asks_for_nothing() {
+        let list = vec![
+            dormant_row("escrow-p", RowState::Dormant),
+            drill_row(
+                "a",
+                Occasion::Review,
+                false,
+                RowState::Active { attempt: 1 },
+            ),
+        ];
+        let frame = Frame::running(date(2026, 9, 13), &list, Some(1));
         let rendered = card(&frame, &Field::blind(), Style::PLAIN)
             .render()
             .join("\n");
-        assert!(rendered.contains("attach · dormant here"));
-        assert!(rendered.contains("enrolled 2026-09-14"));
-        assert!(rendered.contains("nothing here can check it"));
+        assert!(rendered.contains("escrow-p"));
+        assert!(rendered.contains("dormant"));
         assert!(
-            !rendered.contains("^L"),
-            "there is nothing to look up against"
+            !rendered.contains("nothing here can check it"),
+            "the sitting takes no secret for a dormant row"
         );
-    }
-
-    #[test]
-    fn the_second_half_of_a_pair_asks_again_and_nothing_else() {
-        let list = vec![attach_row("escrow-p", RowState::Confirming)];
-        let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
-        let rendered = card(&frame, &Field::blind(), Style::PLAIN)
-            .render()
-            .join("\n");
-        assert!(rendered.contains("again"));
+        assert_eq!(super::icon(&list[0]), ("–", Tint::Dim));
     }
 
     #[test]
@@ -914,7 +838,7 @@ mod tests {
                     retries: 0,
                 },
             ),
-            attach_row("b", RowState::Attached),
+            dormant_row("b", RowState::Dormant),
         ];
         let done = outturn();
         let rendered = card_with(
@@ -924,7 +848,7 @@ mod tests {
         .render()
         .join("\n");
         assert!(rendered.contains("1 pass"));
-        assert!(rendered.contains("1 attached"));
+        assert!(rendered.contains("1 dormant"));
         assert!(rendered.contains("press any key"));
     }
 
@@ -973,13 +897,10 @@ mod tests {
             RowState::Pending,
             RowState::Active { attempt: 1 },
             RowState::Checking,
-            RowState::Claiming,
-            RowState::Confirming,
-            RowState::Attached,
             RowState::Failed { attempt: 1 },
-            RowState::Differed,
             RowState::Skipped,
             RowState::Aborted,
+            RowState::Dormant,
         ];
         for state in states {
             let (_, tint) = super::icon(&drill_row("a", Occasion::Review, false, state));

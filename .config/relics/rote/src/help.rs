@@ -89,10 +89,9 @@ KEYS
   concede to. There is no lookup there either — offering one would imply that
   what is typed is being checked against something, and it is not.
 
-  Anywhere a secret is typed twice, the two have as many goes at agreeing as a
-  drill has tries, and the line under the field says which go this is. Every
-  refusal spends one, an empty entry included. When they run out the card says
-  what it cost and nothing is written.
+  Anywhere a secret is typed twice, two entries that differ end the command:
+  the card says so, and nothing is written. An empty entry is refused and the
+  half already typed is kept.
 
   When nothing is due, bare rote asks whether you want to practice anyway. That
   is one keystroke and no return: y practices, any other key leaves it.
@@ -214,10 +213,9 @@ STDIN
   One rule: a pipe is asked for each distinct secret exactly once. Double entry
   exists to catch a typo at a keyboard, and a pipe cannot mistype.
 
-    rote enroll --stdin         one line, the new secret
-    rote attach --stdin         one line, the secret this engram holds
-    rote rotate --stdin         two lines, the current secret then the new one
-    rote rotate --force --stdin one line, the new secret
+    rote enroll --stdin  one line, the new secret
+    rote attach --stdin  one line, the secret this engram holds
+    rote rotate --stdin  one line, the new secret
 
   Refused when stdin is a terminal. The threat is an echoing read: a secret
   typed into one lands on the screen and in scrollback.
@@ -235,8 +233,8 @@ EXIT
   2   a sitting was abandoned, or the doctor found something broken
   3   rote refused or could not run
 
-  A sitting that only attached exits 0: nothing was judged either way. Refusing
-  to write because this machine is not the flagship is 3.";
+  A sitting that only skipped dormant lineages exits 0: nothing was judged
+  either way. Refusing to write because this machine is not the flagship is 3.";
 
 #[cfg(test)]
 mod tests {

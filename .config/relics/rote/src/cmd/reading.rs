@@ -49,7 +49,7 @@ pub fn status(ctx: &Context, args: &ScheduleArgs) -> Result<u8> {
             continue;
         }
         for (index, dossier) in lineage.engrams.iter().enumerate() {
-            if !dossier.is_current() && !args.history {
+            if !dossier.is_current() {
                 continue;
             }
             rows.push(ScheduleRow {
@@ -147,8 +147,9 @@ fn status_notes(ctx: &Context, rows: &[ScheduleRow<'_>], verifiers: &Verifiers) 
         }
         if matches!(here_state(row, verifiers), Held::Dormant) {
             notes.push(format!(
-                "{}: dormant here — the next sitting will ask you to attach it",
-                row.label()
+                "{}: dormant here — rote attach {}",
+                row.label(),
+                row.lineage.slug
             ));
         }
         if row.dossier.first_unaided.is_none() {
@@ -193,9 +194,6 @@ fn standing_word(standing: Standing) -> &'static str {
 }
 
 fn next_word(row: &ScheduleRow<'_>, today: Date, ladder: &Ladder) -> String {
-    if !row.current() {
-        return "superseded".to_owned();
-    }
     if row.lineage.retired {
         return "retired".to_owned();
     }
@@ -229,74 +227,47 @@ pub fn stats(ctx: &Context, args: &MeasurementArgs) -> Result<u8> {
     let stats = Stats::gather(&records, &corpus, today, args.days, &ladder);
 
     if ctx.format == Format::Json {
-        println!("{}", json::document(&stats_json(&stats, args.lineage))?);
+        println!("{}", json::document(&stats_json(&stats))?);
         return Ok(CLEAN);
     }
 
-    let table = stats_table(&stats, args.lineage);
-    let notes = stats_notes(&stats, &ladder, args.lineage);
+    let table = stats_table(&stats);
+    let notes = stats_notes(&stats, &ladder);
     let heading = format!("measurement · last {}d", stats.window_days);
     println!("{}", block(ctx, &heading, &table, &notes));
     Ok(CLEAN)
 }
 
-/// The table, in whichever shape was asked for.
-fn stats_table(stats: &Stats, lineage: bool) -> Table {
-    if lineage {
-        let mut table = Table::new(&[
-            "LINEAGE",
-            "ENGRAMS",
-            "DRILLS",
-            "AIDED",
-            "LAPSES",
-            "PUNCTUALITY",
+/// The table: one row per engram, never pooled across a rotation.
+fn stats_table(stats: &Stats) -> Table {
+    let mut table = Table::new(&[
+        "ENGRAM",
+        "AIDED",
+        "RETENTION",
+        "STREAK",
+        "RECALL",
+        "TYPING",
+        "RECENT",
+        "TREND",
+    ]);
+    for engram in &stats.engrams {
+        table.push(vec![
+            engram.label.clone(),
+            engram.aided.to_string(),
+            rate(engram.retention),
+            engram.streak.to_string(),
+            seconds(engram.ttfk_ms),
+            seconds(engram.total_ms),
+            crate::stats::sparkline(&engram.recent_ttfk),
+            trend_text(engram.trend),
         ]);
-        for row in &stats.lineages {
-            table.push(vec![
-                row.slug.to_string(),
-                row.engrams.to_string(),
-                row.drills.to_string(),
-                row.aided.to_string(),
-                row.lapses.to_string(),
-                ratio(row.punctuality.on_time, row.punctuality.total),
-            ]);
-        }
-        table
-    } else {
-        let mut table = Table::new(&[
-            "ENGRAM",
-            "AIDED",
-            "RETENTION",
-            "STREAK",
-            "RECALL",
-            "TYPING",
-            "RECENT",
-            "TREND",
-        ]);
-        for engram in &stats.engrams {
-            table.push(vec![
-                engram.label.clone(),
-                engram.aided.to_string(),
-                rate(engram.retention),
-                engram.streak.to_string(),
-                seconds(engram.ttfk_ms),
-                seconds(engram.total_ms),
-                crate::stats::sparkline(&engram.recent_ttfk),
-                trend_text(engram.trend),
-            ]);
-        }
-        table
     }
+    table
 }
 
 /// What sits under the table: the headline figures, the bands, the lapses.
-fn stats_notes(stats: &Stats, ladder: &Ladder, lineage: bool) -> Vec<String> {
+fn stats_notes(stats: &Stats, ladder: &Ladder) -> Vec<String> {
     let mut notes = Vec::new();
-    if lineage {
-        notes.push(
-            "a rotation resets the memory, so only what survives one is rolled up here".to_owned(),
-        );
-    }
     if stats.retention.total == 0 && stats.practice.total == 0 && stats.aided.total == 0 {
         notes.push(format!(
             "nothing recorded in the last {}d",
@@ -337,12 +308,10 @@ fn stats_notes(stats: &Stats, ladder: &Ladder, lineage: bool) -> Vec<String> {
             ));
         }
     }
-    if !lineage {
-        notes.push(format!(
-            "streak counts unaided passes at {}d or longer, back from the last drill",
-            ladder.cap_days()
-        ));
-    }
+    notes.push(format!(
+        "streak counts unaided passes at {}d or longer, back from the last drill",
+        ladder.cap_days()
+    ));
     let bands: Vec<String> = stats
         .buckets
         .iter()
@@ -369,8 +338,8 @@ fn stats_notes(stats: &Stats, ladder: &Ladder, lineage: bool) -> Vec<String> {
     notes
 }
 
-fn stats_json(stats: &Stats, lineage: bool) -> serde_json::Value {
-    let mut document = serde_json::json!({
+fn stats_json(stats: &Stats) -> serde_json::Value {
+    serde_json::json!({
         "window_days": stats.window_days,
         "retention": {"passes": stats.retention.passes, "total": stats.retention.total},
         "practice": {"passes": stats.practice.passes, "total": stats.practice.total},
@@ -392,50 +361,19 @@ fn stats_json(stats: &Stats, lineage: bool) -> serde_json::Value {
             "effective_interval_days": lapse.effective,
             "beyond_schedule": lapse.beyond_schedule(),
         })).collect::<Vec<_>>(),
-    });
-    let listed = if lineage {
-        serde_json::json!(
-            stats
-                .lineages
-                .iter()
-                .map(|row| serde_json::json!({
-                    "lineage": row.slug.as_str(),
-                    "engrams": row.engrams,
-                    "drills": row.drills,
-                    "aided": row.aided,
-                    "lapses": row.lapses,
-                    "on_time": row.punctuality.on_time,
-                    "reviews": row.punctuality.total,
-                }))
-                .collect::<Vec<_>>()
-        )
-    } else {
-        serde_json::json!(
-            stats
-                .engrams
-                .iter()
-                .map(|row| serde_json::json!({
-                    "lineage": row.slug.as_str(),
-                    "engram": row.engram.to_string(),
-                    "label": row.label,
-                    "passes": row.retention.passes,
-                    "total": row.retention.total,
-                    "aided": row.aided,
-                    "streak": row.streak,
-                    "ttfk_ms": row.ttfk_ms,
-                    "total_ms": row.total_ms,
-                    "trend": trend_text(row.trend),
-                }))
-                .collect::<Vec<_>>()
-        )
-    };
-    if let Some(object) = document.as_object_mut() {
-        object.insert(
-            if lineage { "lineages" } else { "engrams" }.to_owned(),
-            listed,
-        );
-    }
-    document
+        "engrams": stats.engrams.iter().map(|row| serde_json::json!({
+            "lineage": row.slug.as_str(),
+            "engram": row.engram.to_string(),
+            "label": row.label,
+            "passes": row.retention.passes,
+            "total": row.retention.total,
+            "aided": row.aided,
+            "streak": row.streak,
+            "ttfk_ms": row.ttfk_ms,
+            "total_ms": row.total_ms,
+            "trend": trend_text(row.trend),
+        })).collect::<Vec<_>>(),
+    })
 }
 
 fn trend_text(trend: Trend) -> String {
@@ -478,7 +416,7 @@ pub fn log(ctx: &Context, args: &LogArgs) -> Result<u8> {
             Some(record) => args
                 .lineage
                 .as_ref()
-                .is_none_or(|slug| record.event.slug() == slug),
+                .is_none_or(|slug| about(&corpus, &record.event, slug)),
             None => args.lineage.is_none(),
         })
         .collect();
@@ -524,6 +462,18 @@ pub fn log(ctx: &Context, args: &LogArgs) -> Result<u8> {
     Ok(CLEAN)
 }
 
+/// Whether an event is about this lineage: by the engram it names, resolved
+/// through the corpus, or by the slug where it names no engram.
+fn about(corpus: &Corpus, event: &Event, slug: &crate::slug::Slug) -> bool {
+    match (event.engram(), event) {
+        (Some(engram), _) => corpus
+            .owner(&engram)
+            .is_some_and(|lineage| lineage.slug == *slug),
+        (None, Event::Retire(retired)) => retired.slug == *slug,
+        (None, _) => false,
+    }
+}
+
 fn engram_label(corpus: &Corpus, event: &Event) -> String {
     match event {
         Event::Enroll(e) => corpus.label(&e.engram),
@@ -543,19 +493,22 @@ fn event_text(event: &Event, corpus: &Corpus) -> String {
                 "opened".to_owned()
             }
         }
-        Event::Rotate(rotated) => format!(
-            "supersedes {}{}",
-            corpus.label(&rotated.from),
-            if rotated.proved {
-                ""
-            } else {
-                " · the old one was not proved"
-            }
-        ),
+        Event::Rotate(rotated) => match superseded(corpus, &rotated.to) {
+            Some(previous) => format!("supersedes {previous}"),
+            None => "the ladder starts over".to_owned(),
+        },
         Event::Attach(_) => "a verifier was made here · nothing was checked".to_owned(),
         Event::Retire(_) => "off the schedule".to_owned(),
         Event::Capture(capture) => capture_text(capture),
     }
+}
+
+/// The label of the engram a rotation stepped down: the one before it in its
+/// lineage, which replay knows and the record does not carry.
+fn superseded(corpus: &Corpus, to: &crate::corpus::record::EngramId) -> Option<String> {
+    let lineage = corpus.owner(to)?;
+    let previous = lineage.ordinal(to)?.checked_sub(1)?;
+    (previous >= 1).then(|| lineage.label(previous))
 }
 
 fn capture_text(capture: &Captured) -> String {

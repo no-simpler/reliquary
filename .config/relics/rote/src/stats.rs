@@ -139,23 +139,6 @@ pub struct EngramStats {
     pub streak: u32,
 }
 
-/// What survives a rotation, rolled up over a whole lineage.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LineageStats {
-    /// The lineage.
-    pub slug: Slug,
-    /// How many engrams it has held.
-    pub engrams: usize,
-    /// Drills taken across all of them.
-    pub drills: u32,
-    /// Aided drills across all of them.
-    pub aided: u32,
-    /// Lapses across all of them.
-    pub lapses: u32,
-    /// How late its reviews ran.
-    pub punctuality: Punctuality,
-}
-
 /// A first-sample failure on a drill the schedule asked for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Lapse {
@@ -218,8 +201,6 @@ pub struct Stats {
     pub buckets: Vec<Bucket>,
     /// Per engram.
     pub engrams: Vec<EngramStats>,
-    /// What rolls up per lineage.
-    pub lineages: Vec<LineageStats>,
     /// Every first-sample failure that measured, most recent first.
     pub lapses: Vec<Lapse>,
     /// How late reviews ran.
@@ -251,7 +232,6 @@ impl Stats {
                 })
                 .collect(),
             engrams: Vec::new(),
-            lineages: Vec::new(),
             lapses: Vec::new(),
             punctuality: Punctuality::default(),
         };
@@ -302,7 +282,6 @@ impl Stats {
         stats.punctuality.median_lateness = median(&mut lateness);
         stats.lapses.reverse();
         stats.engrams = per_engram(&measured, corpus, today, window, ladder);
-        stats.lineages = per_lineage(&measured, corpus, today, window);
         stats
     }
 }
@@ -522,63 +501,6 @@ fn streak(mine: &[&Measured<'_>], ladder: &Ladder) -> u32 {
     count
 }
 
-fn per_lineage(
-    measured: &[Measured<'_>],
-    corpus: &Corpus,
-    today: Date,
-    window: u32,
-) -> Vec<LineageStats> {
-    corpus
-        .lineages()
-        .map(|lineage| {
-            let mine: Vec<&Measured<'_>> = measured
-                .iter()
-                .filter(|item| *item.drill.slug == lineage.slug)
-                .filter(|item| in_window(item.drill.day, today, window))
-                .collect();
-
-            let mut aided = 0u32;
-            let mut lapses = 0u32;
-            let mut punctuality = Punctuality::default();
-            let mut lateness: Vec<u64> = Vec::new();
-            for item in &mine {
-                let Some(first) = item.drill.first() else {
-                    continue;
-                };
-                if item.drill.aided {
-                    aided = aided.saturating_add(1);
-                    continue;
-                }
-                if item.drill.occasion == Occasion::Review
-                    && let Some(passed) = scored(first.outcome)
-                {
-                    let late = item
-                        .since_anchor
-                        .saturating_sub(first.scheduled_interval_days);
-                    lateness.push(u64::from(late));
-                    punctuality.total = punctuality.total.saturating_add(1);
-                    if late <= 1 {
-                        punctuality.on_time = punctuality.on_time.saturating_add(1);
-                    }
-                    if !passed {
-                        lapses = lapses.saturating_add(1);
-                    }
-                }
-            }
-            punctuality.median_lateness = median(&mut lateness);
-
-            LineageStats {
-                slug: lineage.slug.clone(),
-                engrams: lineage.engrams.len(),
-                drills: u32::try_from(mine.len()).unwrap_or(u32::MAX),
-                aided,
-                lapses,
-                punctuality,
-            }
-        })
-        .collect()
-}
-
 /// Compare the last window of timings against the one before it.
 ///
 /// Fewer than [`TREND_FLOOR`] readings either side is [`Trend::Unknown`] rather
@@ -780,13 +702,7 @@ mod tests {
         let mut build = Build::new(date(2026, 8, 1));
         build.drill(date(2026, 8, 31), Occasion::Review, false, Outcome::Pass);
         let engram = build.engram;
-        build.push(
-            date(2026, 9, 5),
-            Event::Attach(Attached {
-                slug: "a".parse().unwrap(),
-                engram,
-            }),
-        );
+        build.push(date(2026, 9, 5), Event::Attach(Attached { engram }));
         build.drill(date(2026, 9, 6), Occasion::Review, false, Outcome::Pass);
         let stats = build.gather(date(2026, 9, 6));
         assert_eq!(
@@ -840,15 +756,12 @@ mod tests {
     fn a_rotation_splits_the_measurement_in_two() {
         let mut build = Build::new(date(2026, 9, 1));
         build.drill(date(2026, 9, 2), Occasion::Review, false, Outcome::Pass);
-        let first = build.engram;
         let second = EngramId::mint().unwrap();
         build.push(
             date(2026, 9, 3),
             Event::Rotate(crate::corpus::record::Rotated {
                 slug: "a".parse().unwrap(),
-                from: first,
                 to: second,
-                proved: true,
             }),
         );
         build.engram = second;
@@ -862,11 +775,6 @@ mod tests {
             .map(|engram| engram.label.as_str())
             .collect();
         assert!(labels.contains(&"a@1") && labels.contains(&"a@2"));
-
-        let rolled = stats.lineages.first().unwrap();
-        assert_eq!(rolled.engrams, 2);
-        assert_eq!(rolled.drills, 2);
-        assert_eq!(rolled.lapses, 1);
     }
 
     #[test]
@@ -910,9 +818,6 @@ mod tests {
         assert_eq!(stats.punctuality.on_time, 1);
         assert_eq!(stats.punctuality.total, 2);
         assert_eq!(stats.punctuality.median_lateness, Some(0));
-        let rolled = stats.lineages.first().unwrap();
-        assert_eq!(rolled.punctuality.total, 2);
-        assert_eq!(rolled.punctuality.on_time, 1);
     }
 
     #[test]

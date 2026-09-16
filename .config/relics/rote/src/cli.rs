@@ -88,7 +88,8 @@ pub enum Command {
     /// verified: rote takes your word that the secret is unchanged.
     Attach(AttachArgs),
 
-    /// Supersede a lineage's engram with a new secret. Its ladder starts over.
+    /// Supersede a lineage's engram with a new secret, typed twice. Its ladder
+    /// starts over.
     Rotate(RotateArgs),
 
     /// Take a lineage off the schedule. Its history stays; its verifiers do not.
@@ -120,10 +121,6 @@ pub struct ScheduleArgs {
     /// Include retired lineages.
     #[arg(long)]
     pub all: bool,
-
-    /// Include engrams that have been superseded.
-    #[arg(long)]
-    pub history: bool,
 }
 
 /// Arguments for the measurement.
@@ -132,10 +129,6 @@ pub struct MeasurementArgs {
     /// How many days the headline figures cover.
     #[arg(long, value_name = "N", default_value_t = crate::stats::WINDOW_DAYS)]
     pub days: u32,
-
-    /// Roll up per lineage, which shows only what survives a rotation.
-    #[arg(long)]
-    pub lineage: bool,
 }
 
 /// Arguments for the record listing.
@@ -199,12 +192,7 @@ pub struct RotateArgs {
     #[arg(value_name = "LINEAGE")]
     pub slug: Slug,
 
-    /// Replace without proving the current secret. The record says it was not
-    /// proved.
-    #[arg(long)]
-    pub force: bool,
-
-    /// Read from a pipe: the current secret, then the new one, one per line.
+    /// Read the new secret from a pipe, one line.
     #[arg(long)]
     pub stdin: bool,
 }

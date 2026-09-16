@@ -38,9 +38,6 @@ pub struct Dossier {
     pub minted: Date,
     /// The day it stepped down, if it has. `None` means it is the current one.
     pub superseded: Option<Date>,
-    /// Whether the rotation that minted it proved the outgoing secret first.
-    /// `None` for the engram that opened the lineage.
-    pub proved: Option<bool>,
     /// Where it sits on the ladder.
     pub rung: Rung,
     /// The day the schedule counts from: the last review, else the mint.
@@ -63,12 +60,11 @@ pub struct Dossier {
 }
 
 impl Dossier {
-    fn minted(engram: EngramId, day: Date, at: Timestamp, proved: Option<bool>) -> Self {
+    fn minted(engram: EngramId, day: Date, at: Timestamp) -> Self {
         Self {
             engram,
             minted: day,
             superseded: None,
-            proved,
             rung: Rung::FIRST,
             anchor: day,
             last_exposed: day,
@@ -119,21 +115,6 @@ impl Dossier {
         self.last_exposed = self.last_exposed.max(day);
         self.last_exposed_at = self.last_exposed_at.max(at);
     }
-}
-
-/// One rotation, read off a lineage.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Cutover {
-    /// The engram that stepped down.
-    pub from: EngramId,
-    /// The engram that took over.
-    pub to: EngramId,
-    /// When.
-    pub day: Date,
-    /// Whether the outgoing secret was proved first.
-    pub proved: bool,
-    /// How many days the outgoing engram held the lineage.
-    pub held_days: u32,
 }
 
 /// One slug's whole life: an ordered series of engrams.
@@ -202,30 +183,12 @@ impl Lineage {
     /// most one current engram by construction — whatever a merge of two
     /// chains hands replay, an enrolment over a live lineage or a rotation
     /// naming a predecessor this one never saw included.
-    fn make_current(&mut self, engram: EngramId, day: Date, at: Timestamp, proved: Option<bool>) {
+    fn make_current(&mut self, engram: EngramId, day: Date, at: Timestamp) {
         for dossier in &mut self.engrams {
             dossier.superseded.get_or_insert(day);
         }
         self.retired = false;
-        self.engrams.push(Dossier::minted(engram, day, at, proved));
-    }
-
-    /// Every rotation this lineage has been through.
-    pub fn cutovers(&self) -> Vec<Cutover> {
-        let mut out = Vec::new();
-        for pair in self.engrams.windows(2) {
-            let (Some(from), Some(to)) = (pair.first(), pair.last()) else {
-                continue;
-            };
-            out.push(Cutover {
-                from: from.engram,
-                to: to.engram,
-                day: to.minted,
-                proved: to.proved.unwrap_or(false),
-                held_days: ladder::days_between(from.minted, to.minted),
-            });
-        }
-        out
+        self.engrams.push(Dossier::minted(engram, day, at));
     }
 }
 
@@ -309,7 +272,7 @@ impl Corpus {
                     return;
                 }
                 lineage.critical = event.critical;
-                lineage.make_current(event.engram, record.day, record.at, None);
+                lineage.make_current(event.engram, record.day, record.at);
                 self.by_engram.insert(event.engram, event.slug.clone());
             }
             Event::Rotate(event) => {
@@ -319,7 +282,7 @@ impl Corpus {
                 if lineage.holds(&event.to) {
                     return;
                 }
-                lineage.make_current(event.to, record.day, record.at, Some(event.proved));
+                lineage.make_current(event.to, record.day, record.at);
                 self.by_engram.insert(event.to, event.slug.clone());
             }
             Event::Attach(event) => {
@@ -641,9 +604,7 @@ mod tests {
                 date(2026, 9, 9),
                 Event::Rotate(Rotated {
                     slug: slug("a"),
-                    from: first,
                     to: second,
-                    proved: true,
                 }),
             ),
         ]);
@@ -663,11 +624,7 @@ mod tests {
 
         let incoming = lineage.dossier(&second).unwrap();
         assert_eq!(incoming.rung, Rung::FIRST);
-        assert_eq!(incoming.proved, Some(true));
-
-        let cutovers = lineage.cutovers();
-        assert_eq!(cutovers.len(), 1);
-        assert_eq!(cutovers.first().map(|c| c.held_days), Some(8));
+        assert_eq!(incoming.minted, date(2026, 9, 9));
     }
 
     #[test]
@@ -680,9 +637,7 @@ mod tests {
                 date(2026, 9, 2),
                 Event::Rotate(Rotated {
                     slug: slug("a"),
-                    from: first,
                     to: second,
-                    proved: true,
                 }),
             ),
             captured(
@@ -721,13 +676,7 @@ mod tests {
         ];
         let before = replay(&history);
         let mut with = history;
-        with.push(line(
-            date(2026, 9, 20),
-            Event::Attach(Attached {
-                slug: slug("a"),
-                engram,
-            }),
-        ));
+        with.push(line(date(2026, 9, 20), Event::Attach(Attached { engram })));
         let after = replay(&with);
 
         let one = before.lineage(&slug("a")).unwrap().current().unwrap();
@@ -931,14 +880,12 @@ mod tests {
             enrolled(date(2026, 9, 1), "a", first, false),
             // A second machine enrolling over a live lineage.
             enrolled(date(2026, 9, 5), "a", second, true),
-            // And rotating from a predecessor this replay never saw.
+            // And rotating over whatever it held.
             line(
                 date(2026, 9, 9),
                 Event::Rotate(Rotated {
                     slug: slug("a"),
-                    from: EngramId::mint().unwrap(),
                     to: third,
-                    proved: false,
                 }),
             ),
         ]);

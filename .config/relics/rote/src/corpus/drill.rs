@@ -83,8 +83,8 @@ pub enum Landing {
     /// The answer was looked up before anything was typed, so it measured
     /// nothing either way.
     Aided,
-    /// A verifier was minted here. Nothing was judged.
-    Attached,
+    /// No verifier here, so nothing was asked. The row was skipped over.
+    Dormant,
 }
 
 impl Landing {
@@ -133,7 +133,7 @@ impl Landing {
             Self::Miss => "miss",
             Self::Skipped => "skipped",
             Self::Aided => "aided",
-            Self::Attached => "attached",
+            Self::Dormant => "dormant",
         }
     }
 
@@ -145,7 +145,7 @@ impl Landing {
             Self::Miss => "missed",
             Self::Skipped => "skipped",
             Self::Aided => "aided",
-            Self::Attached => "attached",
+            Self::Dormant => "dormant",
         }
     }
 }
@@ -365,7 +365,7 @@ mod tests {
             Landing::Miss,
             Landing::Skipped,
             Landing::Aided,
-            Landing::Attached,
+            Landing::Dormant,
         ] {
             assert!(!landing.word().is_empty());
             assert!(!landing.alone().is_empty());

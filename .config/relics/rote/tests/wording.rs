@@ -13,7 +13,8 @@ use rote::ladder::{Occasion, Rung};
 use rote::sitting::screen::{Frame, Kind, Note, Row, RowState, card};
 use rote::sitting::{Capture, Outturn};
 use rote::slug::Slug;
-use rote::tui::card::{Field, Reveal};
+use rote::tui::card::{Field, Reveal, Tone};
+use rote::tui::{Ask, Refusal, ask_card};
 
 fn drill(slug: Slug, occasion: Occasion, aided: bool, state: RowState) -> Row {
     Row {
@@ -28,14 +29,11 @@ fn drill(slug: Slug, occasion: Occasion, aided: bool, state: RowState) -> Row {
     }
 }
 
-fn attach(slug: Slug, state: RowState, replacing: bool) -> Row {
+fn dormant(slug: Slug) -> Row {
     Row {
-        kind: Kind::Attach {
-            dossier: format!("{slug}@2 · enrolled 2026-09-14 · rung 5 · reviewed 3d ago"),
-            replacing,
-        },
         slug,
-        state,
+        kind: Kind::Dormant,
+        state: RowState::Dormant,
     }
 }
 
@@ -122,41 +120,44 @@ fn an_aided_drill_says_it_measures_nothing() {
     insta::assert_snapshot!("drill-aided", render(&rows, 0, None, false, false));
 }
 
-#[test]
-fn an_attachment_names_what_it_is_continuing() {
-    let rows = vec![attach(name("escrow-p"), RowState::Claiming, false)];
-    insta::assert_snapshot!("attach-claiming", render(&rows, 0, None, false, false));
+/// The one card every intake draws, in the state asked for.
+fn intake(intention: &str, status: Option<&str>, field: &Field<'_>) -> String {
+    let prompt = Ask {
+        title: "enroll",
+        resting: Tone::Calm,
+        heading: "escrow-p",
+        intention,
+        status,
+    };
+    ask_card(
+        &prompt,
+        date(2026, 9, 13),
+        Style::PLAIN,
+        Refusal::None,
+        Tone::Calm,
+        field,
+    )
+    .render()
+    .join("\n")
 }
 
 #[test]
-fn the_second_half_of_an_attachment_asks_again() {
-    let rows = vec![attach(name("escrow-p"), RowState::Confirming, false)];
-    insta::assert_snapshot!("attach-confirming", render(&rows, 0, None, false, false));
-}
-
-#[test]
-fn an_attachment_that_differed_says_which_try_the_next_one_is() {
-    // Every bounded retry in the binary is worded by the one composer, so a
-    // loop cannot come to look endless by being said differently from its
-    // neighbours.
-    let rows = vec![attach(name("escrow-p"), RowState::Differed, false)];
-    let said = rote::intake::tried(rote::intake::DIFFERED, 2, 3);
+fn an_intake_says_what_it_is_for_and_offers_the_reveal() {
     insta::assert_snapshot!(
-        "attach-differed",
-        render(&rows, 0, Some(&said), false, false)
+        "intake-first",
+        intake(
+            rote::intake::ENROLL_INTENTION,
+            None,
+            &Field::empty(Reveal::Masked)
+        )
     );
 }
 
 #[test]
-fn a_retry_that_ran_out_says_what_it_cost_and_not_just_why() {
-    // The reason has been under the field for every round it took to get here.
-    // On its own it is one more of them; the card that stops has to say that it
-    // stopped.
-    let rows = vec![attach(name("escrow-p"), RowState::Differed, false)];
-    let said = format!("{} — nothing was attached", rote::intake::DIFFERED);
+fn the_confirmation_half_of_an_intake_asks_again_and_nothing_else() {
     insta::assert_snapshot!(
-        "attach-gave-up",
-        render(&rows, 0, Some(&said), false, false)
+        "intake-again",
+        intake(rote::intake::AGAIN, None, &Field::empty(Reveal::Masked))
     );
 }
 
@@ -164,15 +165,12 @@ fn a_retry_that_ran_out_says_what_it_cost_and_not_just_why() {
 fn a_revealed_field_shows_the_characters_and_says_how_to_put_them_back() {
     // The one moment this tool puts a secret on a screen. Typed, not pasted, so
     // the snapshot says what a person sees at the moment they ask to see it.
-    let rows = vec![attach(name("escrow-p"), RowState::Claiming, false)];
     let shown = "correct horse battery staple";
     insta::assert_snapshot!(
-        "attach-revealed",
-        field_render(
-            &rows,
-            0,
+        "intake-revealed",
+        intake(
+            rote::intake::ENROLL_INTENTION,
             None,
-            false,
             &Field {
                 reveal: Reveal::Shown,
                 drawn: shown,
@@ -181,12 +179,6 @@ fn a_revealed_field_shows_the_characters_and_says_how_to_put_them_back() {
             },
         )
     );
-}
-
-#[test]
-fn an_attachment_that_replaces_one_says_that_instead() {
-    let rows = vec![attach(name("escrow-p"), RowState::Claiming, true)];
-    insta::assert_snapshot!("attach-replacing", render(&rows, 0, None, false, false));
 }
 
 /// One sample, as the closing card saw it.
@@ -216,7 +208,7 @@ fn note(label: &str, said: &str) -> Note {
 fn closing(rows: &[Row], captures: Vec<Capture>, notes: &[Note]) -> String {
     let outturn = Outturn {
         captures,
-        attached: Vec::new(),
+        dormant: Vec::new(),
         aborted: false,
         rows: Vec::new(),
     };
@@ -279,15 +271,14 @@ fn the_widest_sitting_the_binary_can_produce_still_fits_the_box() {
             retries: 4,
         },
         RowState::Failed { attempt: 3 },
-        RowState::Attached,
-        RowState::Differed,
         RowState::Skipped,
         RowState::Aborted,
     ];
-    let rows: Vec<Row> = states
+    let mut rows: Vec<Row> = states
         .into_iter()
         .map(|state| drill(name(&long), Occasion::Review, false, state))
         .collect();
+    rows.push(dormant(name(&long)));
     let captures: Vec<Capture> = [
         Outcome::Pass,
         Outcome::Fail,
@@ -301,10 +292,7 @@ fn the_widest_sitting_the_binary_can_produce_still_fits_the_box() {
     .collect();
     let label = format!("{long}@12");
     let notes = vec![
-        note(
-            &label,
-            "attached — rote took your word for it, and checked nothing",
-        ),
+        note(&label, &format!("dormant here — rote attach {long}")),
         note(
             &label,
             "an aided capture was refused — the vault and the verifier hold \

@@ -5,7 +5,7 @@
 //! the first and turns echo on beneath the next prompt.
 //!
 //! The policy for taking a secret twice is not here — it is in `intake`, pure,
-//! because the sitting needs the same policy and draws a different card.
+//! so a second card can be drawn over it without a second copy of the rule.
 
 use anyhow::{Context as _, Result, bail};
 use jiff::civil::Date;
@@ -13,10 +13,9 @@ use relic_core::style::Tint;
 
 use super::Context;
 use crate::exit::{CLEAN, INCOMPLETE};
-use crate::intake::{DIFFERED, NOT_CURRENT, Pair, Pairing};
+use crate::intake::{EMPTY, Pair, Pairing};
 use crate::secret::Secret;
 use crate::tui::{self, term};
-use crate::verifier::Verifier;
 
 /// The screen a secret is typed on, or nothing when this is a pipe.
 ///
@@ -100,10 +99,10 @@ pub struct Asking<'a> {
     pub heading: &'a str,
     /// What this prompt is for.
     pub intention: &'a str,
-    /// What giving up here costs, said on the card that gives up.
+    /// What a mismatch costs, said on the card that stops on one.
     ///
-    /// The reason has been on the screen for every round it took to get here.
-    /// Without this the last card is indistinguishable from one more of them.
+    /// The reason is the half a person can already see; the cost is the half
+    /// the card exists to say: the command stopped, and it wrote nothing.
     pub cost: &'static str,
 }
 
@@ -113,12 +112,15 @@ pub enum Twice {
     Agreed(Box<Secret>),
     /// The dialog was walked away from.
     Abandoned,
-    /// The rounds ran out, and this is what spent the last one.
-    Refused(&'static str),
+    /// The two entries differed. Nothing is held, and nothing is written.
+    Differed,
 }
 
-/// Ask for a secret twice until the two agree, for as many rounds as the drill
-/// allows tries.
+/// Ask for a secret twice. The two agree, or the second differs and the
+/// dialog is over.
+///
+/// An empty entry is refused under the field and the same half is asked for
+/// again, with whatever was already typed still in hand.
 ///
 /// # Errors
 ///
@@ -130,101 +132,25 @@ pub fn twice(
     checked: Checked,
     heading: &str,
     intention: &str,
-    ctx: &Context,
 ) -> Result<Twice> {
-    let mut pair = Pair::new(ctx.config.max_attempts());
-    let mut status: Option<String> = None;
+    let mut pair = Pair::new();
+    let mut status: Option<&str> = None;
     loop {
         let asking = if pair.holds_one() {
             crate::intake::AGAIN
         } else {
             intention
         };
-        let Some(offered) = typed(
-            console,
-            today,
-            title,
-            checked,
-            heading,
-            asking,
-            status.as_deref(),
-        )?
-        else {
+        let Some(offered) = typed(console, today, title, checked, heading, asking, status)? else {
             return Ok(Twice::Abandoned);
         };
-        // Every refusal says which try the next one is. A bound nobody can see
-        // reads as no bound at all, which is what makes a person retype the
-        // same pair until they give up on the command rather than on the pair.
         match pair.offer(offered) {
             Pairing::Again => status = None,
             Pairing::Agreed(secret) => return Ok(Twice::Agreed(secret)),
-            Pairing::Differed => status = Some(pair.status(DIFFERED)),
-            Pairing::Empty => status = Some(pair.status(crate::intake::EMPTY)),
-            Pairing::OutOfRounds(reason) => return Ok(Twice::Refused(reason)),
+            Pairing::Differed => return Ok(Twice::Differed),
+            Pairing::Empty => status = Some(EMPTY),
         }
     }
-}
-
-/// Prove the current secret before a rotation replaces it.
-///
-/// Without it a verifier could be replaced by one somebody else knows, and the
-/// reading would still say memorised. `Some(code)` means the rotation stopped
-/// here and that is the status to leave on.
-///
-/// # Errors
-///
-/// When the terminal cannot be read or written, or a pipe offered the wrong
-/// secret.
-pub fn prove(
-    current: &Verifier,
-    piped: Option<Secret>,
-    console: Option<&mut term::Terminal>,
-    today: Date,
-    asking: &Asking<'_>,
-    ctx: &Context,
-) -> Result<Option<u8>> {
-    let Asking {
-        title,
-        heading,
-        intention,
-        cost,
-        ..
-    } = *asking;
-    if let Some(offered) = piped {
-        return if current.accepts(&offered)? {
-            Ok(None)
-        } else {
-            bail!("{NOT_CURRENT}, so nothing was replaced")
-        };
-    }
-    let Some(console) = console else {
-        bail!("--stdin wants the current secret first, then the new one");
-    };
-    let tries = ctx.config.max_attempts();
-    for attempt in 1..=tries {
-        let status = (attempt > 1).then(|| crate::intake::tried(NOT_CURRENT, attempt, tries));
-        let Some(offered) = typed(
-            console,
-            today,
-            title,
-            // A proof is checked against the verifier it is proving, which is
-            // the whole point of asking for one.
-            Checked::Yes,
-            heading,
-            intention,
-            status.as_deref(),
-        )?
-        else {
-            return abandoned(console, today, heading).map(Some);
-        };
-        let held = working(Some(console), today, asking, || {
-            Ok(current.accepts(&offered)?)
-        })?;
-        if held {
-            return Ok(None);
-        }
-    }
-    refused(console, today, heading, NOT_CURRENT, cost).map(Some)
 }
 
 /// Close a dialog that was walked away from.
@@ -253,10 +179,9 @@ pub fn refused(
     reason: &str,
     cost: &str,
 ) -> Result<u8> {
-    // The reason has been on the screen for every round it took to get here, so
-    // on its own it reads as one more of them. What this card is for is the
-    // half that has not been said: the command has stopped, and it wrote
-    // nothing.
+    // The reason is the half a person has already read — the two entries
+    // differ. What this card is for is the half that has not been said: the
+    // command has stopped, and it wrote nothing.
     //
     // Where the line cannot hold both, that is also which one survives — the
     // same rule the hint under a field follows, and for the same reason.
@@ -277,7 +202,7 @@ pub fn refused(
 /// design, so closing it in green would claim a verdict nobody rendered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Checked {
-    /// The secret was proved, or freshly minted from two matching entries.
+    /// The secret was freshly minted from two matching entries.
     Yes,
     /// Nothing here could check it, and nothing did.
     No,

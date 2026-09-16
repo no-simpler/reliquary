@@ -13,7 +13,7 @@ use crate::cli::PracticeArgs;
 use crate::corpus::Corpus;
 use crate::corpus::record::{Captured, Event, SittingId};
 use crate::exit::{CLEAN, INCOMPLETE, LAPSE};
-use crate::intake::{make_verifier, refreshed};
+use crate::intake::refreshed;
 use crate::ladder::{Ladder, Standing};
 use crate::sitting::{self, Mode, Turn, screen};
 use crate::store::Store;
@@ -181,7 +181,7 @@ fn work(
         None => term::Terminal::enter(ctx.style)?,
     };
 
-    // Three closures reach the same chain and the same verifier file, so each
+    // Two closures reach the same chain and the same verifier file, so each
     // handle is shared rather than borrowed twice. The cells are local to the
     // sitting and never escape it.
     let store = std::cell::RefCell::new(store);
@@ -233,27 +233,6 @@ fn work(
             )
         };
 
-        // The verifier is written before the record of it, so a failure between
-        // the two leaves a fact with no record rather than a record with no
-        // fact.
-        let mut attach = |index: usize, secret: &crate::secret::Secret| -> Result<()> {
-            let Some(turn) = turns.get(index) else {
-                return Ok(());
-            };
-            let verifier = make_verifier(secret)?;
-            let mut held = held.borrow_mut();
-            held.set(turn.engram, &turn.slug, today, &verifier);
-            save_verifiers(ctx, &held)?;
-            store.borrow_mut().append(
-                at(),
-                today,
-                Event::Attach(crate::corpus::record::Attached {
-                    slug: turn.slug.clone(),
-                    engram: turn.engram,
-                }),
-            )
-        };
-
         sitting::run(
             turns,
             ctx.config.max_attempts(),
@@ -263,14 +242,12 @@ fn work(
                 console: &mut console,
                 verify: &verify,
                 record: &mut record,
-                attach: &mut attach,
             },
         )?
     };
 
     let store = store.into_inner();
-    let held = held.into_inner();
-    close(ctx, opening, turns, &outturn, store, &held, console)
+    close(ctx, opening, turns, &outturn, store, console)
 }
 
 /// One typed sample as the record spells it: what the sitting saw, and what the
@@ -310,7 +287,6 @@ fn close(
     turns: &[Turn],
     outturn: &sitting::Outturn,
     store: &Store,
-    held: &Verifiers,
     mut console: term::Terminal,
 ) -> Result<u8> {
     let Opening {
@@ -320,7 +296,7 @@ fn close(
         ..
     } = *opening;
     let after = Corpus::replay(store.chains().records(), ladder);
-    let notes = closing_notes(turns, before, &after, held);
+    let notes = closing_notes(turns, before, &after);
     let closing = screen::card(
         &screen::Frame::done(today, &outturn.rows, outturn, &notes),
         &crate::tui::card::Field::blind(),
@@ -340,19 +316,16 @@ fn close(
 }
 
 /// What belongs under the closing card: a reading of the corpus *after* the
-/// sitting, which the sitting itself cannot know.
+/// sitting, which the sitting itself cannot know, and the verb for each row
+/// the sitting could not ask about.
 ///
 /// Drift is read as an **edge** rather than a state. The standing claim about
 /// whether the vault and the verifier agree is `doctor`'s alone; what belongs
 /// here is the moment it changed, which is the moment a person is looking. An
 /// edge names a moment, so it cannot go stale the way a second copy of a
-/// standing claim does.
-fn closing_notes(
-    turns: &[Turn],
-    before: &Corpus,
-    after: &Corpus,
-    held: &Verifiers,
-) -> Vec<screen::Note> {
+/// standing claim does. A dormant row is named on the day it is skipped for
+/// the same reason: the person is looking now.
+fn closing_notes(turns: &[Turn], before: &Corpus, after: &Corpus) -> Vec<screen::Note> {
     let mut notes = Vec::new();
     let drifted = |corpus: &Corpus, turn: &Turn| -> bool {
         corpus
@@ -372,10 +345,8 @@ fn closing_notes(
             label: label.clone(),
             said: said.to_owned(),
         };
-        if turn.attaching() && held.holds(&turn.engram) {
-            notes.push(say(
-                "attached — rote took your word for it, and checked nothing",
-            ));
+        if turn.dormant() {
+            notes.push(say(&format!("dormant here — rote attach {}", turn.slug)));
         }
         match (drifted(before, turn), drifted(after, turn)) {
             (false, true) => notes.push(say(

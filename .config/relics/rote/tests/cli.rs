@@ -172,7 +172,7 @@ fn enrolling_a_retired_lineage_points_at_the_verb_that_reopens_it() {
         .write_stdin("x\n")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("rote rotate --force"));
+        .stderr(predicate::str::contains("rote rotate a puts it back"));
 }
 
 #[test]
@@ -292,11 +292,14 @@ fn attaching_clears_the_reminder_it_was_raised_by() {
 // ── rotation and retirement ──────────────────────────────────────────────────
 
 #[test]
-fn rotating_proves_the_current_secret_and_forgets_it_afterwards() {
+fn rotating_reads_one_line_from_a_pipe() {
+    // No proof: the pipe carries the new secret and nothing else. The verifier
+    // for the secret rotated away goes with it, because keyed by engram it
+    // would otherwise stay behind as a live oracle.
     let mut rote = Rote::new();
     let first = rote.enroll(day(2026, 9, 1), "escrow-p", false);
     rote.cmd(&["rotate", "escrow-p", "--stdin"])
-        .write_stdin(format!("{}\nsomething new\n", support::SECRET))
+        .write_stdin("something new\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("escrow-p@2 rotated"));
@@ -306,41 +309,42 @@ fn rotating_proves_the_current_secret_and_forgets_it_afterwards() {
         !held.contains(&first.to_string()),
         "a verifier for a secret that has been rotated away is a live oracle for it"
     );
+    let chain = std::fs::read_to_string(rote.chain()).unwrap();
+    assert!(chain.contains("\"kind\":\"rotate\""));
+    assert!(
+        !chain.contains("proved"),
+        "nothing was proved, so nothing says so"
+    );
 }
 
 #[test]
-fn rotating_refuses_a_secret_that_is_not_the_current_one() {
-    let mut rote = Rote::new();
-    rote.enroll(day(2026, 9, 1), "a", false);
-    rote.cmd(&["rotate", "a", "--stdin"])
-        .write_stdin("not it\nsomething new\n")
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("not the current secret"));
-}
-
-#[test]
-fn rotating_a_dormant_engram_names_attach_as_the_thing_you_probably_meant() {
+fn rotating_a_dormant_engram_needs_nothing_to_prove_against() {
     let mut rote = Rote::new();
     rote.enroll_dormant(day(2026, 9, 1), "escrow-p");
     rote.cmd(&["rotate", "escrow-p", "--stdin"])
-        .write_stdin("x\ny\n")
+        .write_stdin("something new\n")
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("nothing to prove against"))
-        .stderr(predicate::str::contains("rote attach escrow-p"));
+        .success()
+        .stdout(predicate::str::contains("escrow-p@2 rotated"));
+    rote.cmd(&["status", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"here\": \"attached\""));
 }
 
 #[test]
-fn forcing_a_rotation_records_that_the_old_secret_was_not_proved() {
+fn rotating_a_retired_lineage_puts_it_back_on_the_schedule() {
     let mut rote = Rote::new();
-    rote.enroll_dormant(day(2026, 9, 1), "a");
-    rote.cmd(&["rotate", "a", "--force", "--stdin"])
-        .write_stdin("a new one\n")
+    rote.enroll(day(2026, 9, 1), "a", false);
+    rote.retire(day(2026, 9, 2), "a");
+    rote.cmd(&["rotate", "a", "--stdin"])
+        .write_stdin("something new\n")
         .assert()
         .success();
-    let chain = std::fs::read_to_string(rote.chain()).unwrap();
-    assert!(chain.contains("\"proved\":false"));
+    rote.cmd(&["status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("a@2"));
 }
 
 #[test]
@@ -361,6 +365,23 @@ fn retiring_keeps_the_history_and_drops_every_verifier() {
         .assert()
         .success()
         .stdout(predicate::str::contains("a@1"));
+}
+
+#[test]
+fn retire_answers_json() {
+    let mut rote = Rote::new();
+    rote.enroll(day(2026, 9, 1), "a", false);
+    let out = rote
+        .cmd(&["retire", "a", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let document: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(document["lineage"], "a");
+    assert_eq!(document["retired"], true);
+    assert_eq!(document["verifiers_removed"], 1);
 }
 
 // ── the readings ─────────────────────────────────────────────────────────────
@@ -384,20 +405,15 @@ fn due_is_the_short_way_to_the_schedule() {
 }
 
 #[test]
-fn history_shows_superseded_engrams_and_the_default_does_not() {
+fn status_shows_only_the_current_engram_of_a_lineage() {
     let mut rote = Rote::new();
-    let first = rote.enroll(day(2026, 9, 1), "a", false);
-    rote.rotate(day(2026, 9, 2), "a", first, true);
+    rote.enroll(day(2026, 9, 1), "a", false);
+    rote.rotate(day(2026, 9, 2), "a");
     rote.cmd(&["status"])
         .assert()
         .success()
         .stdout(predicate::str::contains("a@2"))
         .stdout(predicate::str::contains("a@1").not());
-    rote.cmd(&["status", "--history"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("a@1"))
-        .stdout(predicate::str::contains("superseded"));
 }
 
 #[test]
@@ -405,7 +421,7 @@ fn stats_are_per_engram_and_never_pooled_across_a_rotation() {
     let mut rote = Rote::new();
     let first = rote.enroll(day(2026, 9, 1), "a", false);
     rote.capture(day(2026, 9, 2), "a", first, Drilled::passed());
-    let second = rote.rotate(day(2026, 9, 3), "a", first, true);
+    let second = rote.rotate(day(2026, 9, 3), "a");
     rote.capture(day(2026, 9, 4), "a", second, Drilled::missed());
     rote.cmd(&["stats"])
         .assert()
@@ -413,19 +429,6 @@ fn stats_are_per_engram_and_never_pooled_across_a_rotation() {
         .stdout(predicate::str::contains("a@1"))
         .stdout(predicate::str::contains("a@2"))
         .stdout(predicate::str::contains("STREAK"));
-}
-
-#[test]
-fn the_lineage_rollup_carries_only_what_survives_a_rotation() {
-    let mut rote = Rote::new();
-    let first = rote.enroll(day(2026, 9, 1), "a", false);
-    rote.rotate(day(2026, 9, 2), "a", first, true);
-    rote.cmd(&["stats", "--lineage"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("LINEAGE"))
-        .stdout(predicate::str::contains("ENGRAMS"))
-        .stdout(predicate::str::contains("RETENTION").not());
 }
 
 #[test]
@@ -595,7 +598,7 @@ fn the_doctor_speaks_the_protocol_assay_collects() {
 fn a_verifier_for_a_superseded_engram_is_broken_rather_than_merely_untidy() {
     let mut rote = Rote::new();
     let first = rote.enroll(day(2026, 9, 1), "a", false);
-    rote.rotate(day(2026, 9, 2), "a", first, true);
+    rote.rotate(day(2026, 9, 2), "a");
     // The rotation forgot it; put it back, which is what a hand-edited file or a
     // half-finished rotation leaves behind.
     rote.hold(first, "a", day(2026, 9, 1));

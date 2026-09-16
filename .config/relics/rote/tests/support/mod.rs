@@ -214,16 +214,14 @@ impl Rote {
         engram
     }
 
-    /// Supersede one engram with the next.
-    pub fn rotate(&mut self, day: Date, name: &str, from: EngramId, proved: bool) -> EngramId {
+    /// Supersede whatever a lineage holds with a fresh engram.
+    pub fn rotate(&mut self, day: Date, name: &str) -> EngramId {
         let to = EngramId::mint().expect("an engram");
         self.append(
             day,
             Event::Rotate(Rotated {
                 slug: slug(name),
-                from,
                 to,
-                proved,
             }),
         );
         self.hold(to, name, day);
@@ -232,13 +230,7 @@ impl Rote {
 
     /// Record that a verifier was made here.
     pub fn attach(&mut self, day: Date, name: &str, engram: EngramId) {
-        self.append(
-            day,
-            Event::Attach(Attached {
-                slug: slug(name),
-                engram,
-            }),
-        );
+        self.append(day, Event::Attach(Attached { engram }));
         self.hold(engram, name, day);
     }
 
@@ -478,7 +470,7 @@ impl World {
             let engram = world.engram(&machine, *lineage);
             let slug = Self::name(*lineage).parse().expect("a slug");
             match step {
-                Step::Attach => world.push(&machine, Event::Attach(Attached { slug, engram })),
+                Step::Attach => world.push(&machine, Event::Attach(Attached { engram })),
                 Step::Enroll => {
                     let again = EngramId::mint().expect("an engram");
                     world.current.insert(*lineage, again);
@@ -496,12 +488,7 @@ impl World {
                     world.current.insert(*lineage, to);
                     world.push(
                         &machine,
-                        Event::Rotate(rote::corpus::record::Rotated {
-                            slug,
-                            from: engram,
-                            to,
-                            proved: true,
-                        }),
+                        Event::Rotate(rote::corpus::record::Rotated { slug, to }),
                     );
                 }
                 Step::Drill {
