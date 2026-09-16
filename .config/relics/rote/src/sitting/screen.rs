@@ -27,7 +27,7 @@ const MARKER: &str = "▸ ";
 /// chip together outgrow the box, and the chip is the only column here made of
 /// droppable facts — so it is the one that gives. [`chip_width`] spends what is
 /// left after the columns that cannot.
-const CHIP: usize = 28;
+const CHIP: usize = 32;
 
 /// The column holding one glyph of standing.
 const ICON: usize = 3;
@@ -413,18 +413,20 @@ fn detail(row: &Row, style: Style) -> Piece {
 /// What the row is for, spelled the way `status` and `log` spell it.
 fn chip(row: &Row) -> String {
     match &row.kind {
-        // Once the answer has been seen the interval and the cap are somebody
-        // else's business: the chip says what was declared and nothing else.
-        Kind::Drill { aided: true, .. } => "aided".to_owned(),
+        // Aided is an adjective on the drill: it rides beside the occasion,
+        // which the cold capture already settled, and replaces nothing.
         Kind::Drill {
             occasion,
             interval_days,
             at_cap,
-            aided: false,
+            aided,
         } => {
             let mut text = format!("{} · {interval_days}d", occasion.word());
             if *at_cap {
                 text.push_str(" · at cap");
+            }
+            if *aided {
+                text.push_str(" · aided");
             }
             text
         }
@@ -844,8 +846,8 @@ mod tests {
             .join("\n");
         assert!(rendered.contains("looked up"));
         assert!(
-            rendered.contains("aided") && !rendered.contains("30d"),
-            "once looked up there is no interval of its own to report"
+            rendered.contains("review · 30d · at cap · aided"),
+            "aided rides beside the occasion and replaces nothing"
         );
     }
 

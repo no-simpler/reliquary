@@ -4,8 +4,8 @@ expression: "closing(&rows, drills, vec![1], &notes)"
 ---
 ╭─ done ────────────────────────────────────────────────────── Sun 13 Sep ─╮
 │                                                                          │
-│     escrow-p  review · 30d · at cap       ✓  0.9s                        │
-│     warmup-p  dormant                     –                              │
+│     escrow-p  review · 30d · at cap           ✓  0.9s                    │
+│     warmup-p  dormant                         –                          │
 │                                                                          │
 │   recorded  1 pass · 1 dormant                                           │
 │   warmup-p@1  dormant here — rote attach warmup-p                        │
