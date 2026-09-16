@@ -249,7 +249,7 @@ pub fn card(frame: &Frame<'_>, field: &Field<'_>, style: Style) -> Card {
             card.waiting(crate::tui::WORKING);
         } else {
             // What the field shows is the entry loop's to decide and this
-            // card's to draw: blind where a memory is being measured, and one
+            // card's to draw: hidden where a memory is being measured, and one
             // glyph per character everywhere else.
             card.entry(field, frame.tone);
         }
@@ -534,7 +534,7 @@ mod tests {
     /// A card over a field nothing has been typed into, which is what every
     /// assertion about the layout wants.
     fn card_with(frame: &Frame<'_>, style: Style) -> Card {
-        card(frame, &Field::blind(), style)
+        card(frame, &Field::hidden(), style)
     }
 
     fn drill_row(name: &str, occasion: Occasion, aided: bool, state: RowState) -> Row {
@@ -626,7 +626,7 @@ mod tests {
                 for lookup in [false, true] {
                     for status in ["not it · follow-up 2", widest] {
                         for field in [
-                            Field::blind(),
+                            Field::hidden(),
                             Field::empty(Reveal::Masked),
                             Field {
                                 reveal: Reveal::Shown,
@@ -658,7 +658,7 @@ mod tests {
             card(&frame, field, Style::PLAIN).render().join("\n")
         };
         assert!(
-            !drawn(&Field::blind()).contains("^R"),
+            !drawn(&Field::hidden()).contains("^R"),
             "a cold prompt names no reveal"
         );
         assert!(drawn(&Field::empty(Reveal::Masked)).contains("^R  show"));
@@ -692,7 +692,7 @@ mod tests {
         let mut heights = Vec::new();
         for active in 0..list.len() {
             let frame = Frame::running(date(2026, 9, 13), &list, Some(active));
-            heights.push(card(&frame, &Field::blind(), Style::PLAIN).height());
+            heights.push(card(&frame, &Field::hidden(), Style::PLAIN).height());
         }
         let done = outturn();
         let notes = vec![Note {
@@ -719,7 +719,7 @@ mod tests {
         let mut lines = Vec::new();
         for active in 0..list.len() {
             let frame = Frame::running(date(2026, 9, 13), &list, Some(active));
-            let rendered = card(&frame, &Field::blind(), Style::PLAIN).render();
+            let rendered = card(&frame, &Field::hidden(), Style::PLAIN).render();
             lines.push(field_line(&rendered));
         }
         assert!(lines.iter().all(|line| *line == lines[0]), "{lines:?}");
@@ -756,7 +756,7 @@ mod tests {
             RowState::Checking,
         )];
         let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
-        let drawn = card(&frame, &Field::blind(), Style::PLAIN);
+        let drawn = card(&frame, &Field::hidden(), Style::PLAIN);
         assert!(drawn.caret().is_none(), "no cursor where nothing is typed");
         let rendered = drawn.render();
         assert!(
@@ -784,7 +784,7 @@ mod tests {
         for row in rows() {
             let list = vec![row];
             let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
-            for line in card(&frame, &Field::blind(), Style::PLAIN).render() {
+            for line in card(&frame, &Field::hidden(), Style::PLAIN).render() {
                 assert!(!line.contains('…'), "{line}");
             }
         }
@@ -797,7 +797,7 @@ mod tests {
             drill_row("a", Occasion::Review, false, RowState::Cold),
         ];
         let frame = Frame::running(date(2026, 9, 13), &list, Some(1));
-        let rendered = card(&frame, &Field::blind(), Style::PLAIN)
+        let rendered = card(&frame, &Field::hidden(), Style::PLAIN)
             .render()
             .join("\n");
         assert!(rendered.contains("escrow-p"));
@@ -813,7 +813,7 @@ mod tests {
     fn a_drill_states_the_discipline_where_it_applies() {
         let list = vec![drill_row("a", Occasion::Review, false, RowState::Cold)];
         let frame = Frame::running(date(2026, 9, 13), &list, Some(0));
-        let rendered = card(&frame, &Field::blind(), Style::PLAIN)
+        let rendered = card(&frame, &Field::hidden(), Style::PLAIN)
             .render()
             .join("\n");
         assert!(rendered.contains("from memory"));
@@ -852,7 +852,7 @@ mod tests {
     #[test]
     fn an_empty_roster_says_so_rather_than_drawing_a_blank_box() {
         let frame = Frame::running(date(2026, 9, 13), &[], None);
-        let rendered = card(&frame, &Field::blind(), Style::PLAIN)
+        let rendered = card(&frame, &Field::hidden(), Style::PLAIN)
             .render()
             .join("\n");
         assert!(rendered.contains("nothing to drill"));
@@ -929,13 +929,13 @@ mod tests {
 
     #[test]
     fn no_frame_ever_carries_what_was_typed() {
-        // The field is blind, so nothing a person types can reach a rendered
+        // The field is hidden, so nothing a person types can reach a rendered
         // line. The sitting passes a count of zero and the card never sees the
         // buffer at all; this pins that the wiring stays that way.
         let list = rows();
         for active in 0..list.len() {
             let frame = Frame::running(date(2026, 9, 13), &list, Some(active));
-            for line in card(&frame, &Field::blind(), Style::PLAIN).render() {
+            for line in card(&frame, &Field::hidden(), Style::PLAIN).render() {
                 assert!(!line.contains("hunter2"), "{line}");
             }
         }

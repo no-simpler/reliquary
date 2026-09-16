@@ -28,17 +28,24 @@ const LADDER: &str = "\
 THE LADDER
 
   Expanding intervals, 1, 1, 2, 4, 7, 14, 30 days, held at a month. When the
-  schedule asks, an unaided first pass moves up a rung and a first miss returns
-  to the foot, which keeps a shaky secret at daily intervals without a separate
-  learning mode. The shape is from Bonneau and Schechter, USENIX Security 2014,
-  who held 56-bit secrets at roughly 88% unaided recall on a schedule of this
-  kind. The intervals are configurable; the shape is the default and not a rule.
+  schedule asks, a cold pass moves up a rung; a fail returns to the foot, which
+  keeps a shaky secret at daily intervals without a separate learning mode. The
+  shape is from Bonneau and Schechter, USENIX Security 2014, who held 56-bit
+  secrets at roughly 88% unaided recall on a schedule of this kind. The
+  intervals are configurable; the shape is the default and not a rule.
 
-  Only a review moves the rung. A practice is a drill nobody asked for, and it
-  leaves the schedule where it was: it cannot carry an engram up toward the cap,
-  and it cannot knock one back to the foot either. It still stands on the record
-  like any other capture, so a practice that was unaided and passed is what can
-  first make an engram one that has stood alone.
+  Three lines are the whole of the reconciliation. A cold pass on a day the
+  engram is due climbs a rung and anchors the schedule to that day. A cold pass
+  on any other day moves nothing: a drill nobody asked for cannot carry an
+  engram up toward the cap. A fail on any day returns the engram to the foot,
+  because forgetting is forgetting whichever day it was found out on.
+
+  A drill on a day the engram is due is a review; a drill on any other day is a
+  practice. Which it was is never declared and never stored. Replay reads it
+  off the engram's standing on the day, from the ladder and the drills before,
+  so a drill on a due engram is a review whoever asked for it — and a change to
+  the ladder re-derives the whole history rather than leaving two schedules in
+  one file.
 
   The cap is not a claim about memory. It is how stale the evidence is allowed
   to get: at a month you are never more than a month from finding out whether
@@ -62,17 +69,19 @@ IRREGULARITY
   often than proposed, less often, or not at all for a fortnight are all
   ordinary, and all three stay measurable.
 
-  Three intervals are recorded. The scheduled one is what the ladder asked for.
-  The actual one is how long it had been since the schedule was last served. The
-  effective one is how long it had been since the secret was in front of a
-  person at all, by any route, and that is the honest retention interval: extra
-  practice cannot dress a one-day recall up as a month-long one, and a fortnight
-  away arrives as long-interval evidence rather than as a gap.
+  Three figures stand beside every drill, and none of them is written. The
+  scheduled interval is what the ladder asked for at the rung the engram stood
+  on. The lateness is how far past its due day a review came, and it is read
+  over reviews only, because a practice was never due. The gap is how long it
+  had been since the secret was in front of a person at all, by any route, and
+  that is the honest retention interval: extra practice cannot dress a one-day
+  recall up as a month-long one, and a fortnight away arrives as long-interval
+  evidence rather than as a hole in the record.
 
-  Those figures are recomputed from the whole record rather than read back off
-  the line that carries them. A machine writes what it could see at the time,
-  and two machines that wrote without having seen each other saw different
-  things.
+  All three are read at replay, from the merged corpus, rather than off the
+  line that carries the drill. A machine that writes what it could see at the
+  time writes one machine's view, and two machines that wrote without having
+  seen each other saw different things.
 
   A week away from the drill is therefore where long-interval readings come
   from, and they are banded with everything else in rote stats.";
@@ -89,83 +98,79 @@ CUSTODY
   and it verifies only what it can. You could make the record say anything you
   liked. You are trusted not to, and at worst to do it by mistake.
 
-  A cold prompt gives back nothing about what was typed. The cold drill try is
-  the one prompt that measures a memory, and everything else follows from that
-  one line: it refuses a paste, it stays blind, it offers no reveal and it moves
-  no caret. A count of characters is partial recognition feedback handed back in
-  the middle of a retrieval, and showing the answer before it is submitted is
-  the whole of one. Neither may reach the prompt that is measuring. Submitting
-  nothing concedes: that is a failure of recall and is recorded as one, which is
-  more honest than typing something to get past the prompt. After a miss the
-  lookup is offered, and an entry taken that way is aided: recorded in full,
-  kept out of every figure that claims to measure a memory. The first week is
-  aided almost throughout, and that is the shape of a first week rather than a
-  run of failures.
+  A cold capture gives back nothing about what was typed. It is the one prompt
+  that measures a memory, and everything else follows from that one line: it
+  refuses a paste, it draws nothing, it offers no reveal and it moves no caret.
+  A count of characters is partial recognition feedback handed back in the
+  middle of a retrieval, and showing the answer before it is submitted is the
+  whole of one. Neither may reach the prompt that is measuring. Submitting
+  nothing is a fail: that is a failure of recall and is recorded as one, which
+  is more honest than typing something to get past the prompt.
+
+  After a cold fail the drill goes on as follow-ups, masked and unbounded, and
+  they measure nothing: the fail is already on the record. They exist for
+  peace of mind — did I forget it, or did I mistype it — and because the
+  corrective answer after an error is where the retention effect lives
+  (Pashler et al. 2005), which is what makes the lookup worth offering at all.
+  ctrl-l in a follow-up declares the drill aided and polices nothing: the chip
+  says so, the key is withdrawn, and rote cannot see a vault typing into the
+  window either way. A follow-up that passes is recovered, and the fail stands
+  in every figure that claims to measure a memory. A first week is mostly
+  fails recovered in a follow-up, and that is the shape of a first week
+  rather than a run of failures.
 
   Every other prompt masks what is typed, one glyph a character, and ctrl-r
   shows the characters themselves until you press it again. NIST SP 800-63B-4
   asks verifiers to offer exactly that, and for the reason these prompts exist:
-  a secret typed blind into an enrollment is a verifier for something nobody
-  knows, and nothing later can tell you so. A mask leaks a length, which the
-  login screen on this machine leaks too. Word boundaries it does not, and
-  never will: seven word lengths is most of a diceware phrase's search space,
-  which is also why the word-wise keys work only once the characters are
-  already showing. A jump that travels the width of a word discloses the width
-  of a word.
+  a secret typed unseen into an enrollment is a verifier for something nobody
+  knows, and nothing later can tell you so. That is also why every intake is a
+  double entry, and why two entries that differ write nothing and end the
+  command. A mask leaks a length, which the login screen on this machine leaks
+  too. Word boundaries it does not, and never will: seven word lengths is most
+  of a diceware phrase's search space, which is also why the word-wise keys
+  work only once the characters are already showing. A jump that travels the
+  width of a word discloses the width of a word.
 
   A reveal is never on by itself and never survives the prompt that opened it,
   and it goes back on its own when the window loses focus or thirty seconds
   pass with nothing typed. What it cannot do is decide who else is looking at
   the screen, or whether the session is being recorded. That part is yours.
 
-  A cold try is the one prompt that refuses a paste. The aided entry after
-  ctrl-l accepts one, so does an attachment, and so does every prompt in enroll,
-  attach and rotate. The line is measurement and not scripting: an answer pasted
-  into a cold try is a re-study rather than a retrieval, and retrieval is what
-  strengthens a memory (Roediger and Karpicke 2006). So a paste there would
-  weaken the very memory it claimed to test and write a pass that stands for
-  none, after which the item most in need of drilling is the one the schedule
-  asks for least.
+  A cold capture is the one prompt that refuses a paste. A follow-up accepts
+  one, and so does every intake. The line is measurement and not scripting: an
+  answer pasted into a cold capture is a re-study rather than a retrieval, and
+  retrieval is what strengthens a memory (Roediger and Karpicke 2006). So a
+  paste there would weaken the very memory it claimed to test and write a pass
+  that stands for none, after which the item most in need of drilling is the
+  one the schedule asks for least.
 
   That refusal is a commitment device against your own hurry, and it is nothing
   more. Bracketed paste is advisory: the terminal is asked to mark a paste and
   there is no way to learn whether it agreed, so wherever it does not, a paste
   arrives as typing and is taken. Nor does refusing one prevent a lookup — it
   moves it to a vault typing into the window, which rote cannot see at all.
-  Pastes accepted and pastes refused are recorded as exactly that, and neither
-  is a count of lookups.
-
-  An aided entry earns its keep twice. Typing what the vault shows and being
-  told wrong is the one routine signal that the vault item and the verifier hold
-  different secrets, which is otherwise undetectable.
-
-  Every prompt that can refuse you counts, and says the count. A drill try, a
-  proof and a double entry all get the same number of goes and all say which go
-  this is, because a bound nobody can see reads as no bound at all — and a
-  person who cannot see one stops trusting the command rather than the answer.
-  Every refusal spends one, an empty entry included: a refusal that costs
-  nothing is a loop with no end in it, whatever the others cost. When the goes
-  run out the card says so, and says what it cost, which is the one thing the
-  rounds before it never said.
 
   Three verbs take a secret, and the difference between them is the whole point.
 
   enroll opens a lineage with its first engram.
 
-  rotate proves the current secret, supersedes its engram, and starts a new one
-  at the foot. A different secret, a different memory.
+  rotate takes a new secret, typed twice, supersedes the engram, and starts a
+  new one at the foot. It proves nothing about the old secret: a different
+  secret, a different memory, and nothing here to check the new one against.
+  The card names the engram about to step down before it asks, and that is the
+  whole of the guard.
 
   attach makes a verifier on this machine for the engram that is already
   current, and leaves its record untouched. The same secret, a machine that lost
   its copy — which is what a restored flagship looks like, since a verifier is
-  never backed up.
+  never backed up. Before it asks, it names what it is about to continue, so
+  attaching the wrong lineage has a moment to be noticed.
 
   rote cannot tell an attach from a rotate by looking at what was typed. It
   holds nothing to check a claim against, so an attach has no failure mode for
   the wrong secret: it records which claim was made and verifies neither. That
   is a better trade than the alternative, where losing a laptop costs the whole
-  record of a memory you still hold. Before it asks, it names what it is about
-  to continue, so attaching the wrong lineage has a moment to be noticed.
+  record of a memory you still hold.
 
   The lineage name matches the 1Password item title by convention and not by
   integration. Nothing is stored, nothing goes out of sync, no vault reference

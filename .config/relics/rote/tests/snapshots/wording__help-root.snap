@@ -20,7 +20,7 @@ Commands:
   attach       Make a verifier here for an engram this machine is dormant on. Nothing is verified: rote takes your word that the secret is unchanged
   rotate       Supersede a lineage's engram with a new secret, typed twice. Its ladder starts over
   retire       Take a lineage off the schedule. Its history stays; its verifiers do not
-  doctor       Report the state of the drill, for assay and for coop
+  doctor       Report what is wrong with the drill, for assay. Reads and never writes
   banner       One line for the shell, or nothing. Reads the record and never writes
   help         Reference: flags, records, exit codes
   guide        Doctrine: what this is for, and why it is shaped this way

@@ -325,7 +325,7 @@ impl Session<'_> {
         // card rather than kept as a second constant that could drift from it.
         let opening = screen::card(
             &screen::Frame::running(self.today, &self.rows, Some(0)),
-            &Field::blind(),
+            &Field::hidden(),
             Style::PLAIN,
         );
         self.console.anchor(opening.height());
@@ -357,7 +357,7 @@ impl Session<'_> {
     /// sitting was abandoned.
     fn drill(&mut self, index: usize, engram: EngramId, drilling: &Drilling) -> Result<bool> {
         // A cold capture is the one prompt in the tool that measures a memory,
-        // and everything follows from that: it refuses a paste, stays blind,
+        // and everything follows from that: it refuses a paste, draws nothing,
         // offers no reveal and moves no caret.
         self.set(index, screen::RowState::Cold);
         self.paint(index, Tone::Calm, None, false, &Field::resting(true))?;
@@ -498,7 +498,7 @@ impl Session<'_> {
         self.set(index, screen::RowState::Checking);
         // Checking: the box and its caret are taken down and no key does
         // anything.
-        let card = self.frame(index, Tone::Calm, status, lookup, &Field::blind());
+        let card = self.frame(index, Tone::Calm, status, lookup, &Field::hidden());
         let verify = &self.verify;
         let accepted = crate::tui::while_working(self.console, &card, || {
             verify(index, &drilling.verifier, secret)

@@ -311,8 +311,10 @@ offline-attackable confirmation oracle, and it is regenerable by re-enrolment, s
 `~/.local/state/rote/` and never enters a backup. `rote` inaugurates `~/Trove` as a directory; the
 POSTURE spec's later lanes make a repository of it.
 
-Wired to two things beyond `$PATH`. `rote banner` is the drill nag, declared as a `coop` source,
-and it reads only a derived cache and fails silent. Its `--format json` shape is what `coop` reads.
+Wired to two things beyond `$PATH`. `rote banner` is the drill nag, declared as a `coop` source;
+it rebuilds its answer read-only from the record on every call and fails silent, and `coop` keys
+the call on the stamp `rote` touches after every write. Its `--format json` shape is what `coop`
+reads.
 And `rote doctor --format json` is the **first public-lane speaker** of `relic-core`'s finding
 protocol, so `assay`'s registry station collects drill staleness into `yadm doctor` with no new
 station. The two thresholds differ on purpose: the banner fires the day a drill comes due, `doctor`

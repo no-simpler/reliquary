@@ -5,7 +5,7 @@ expression: body
 EXIT
 
   0   nothing to report. Everything due was answered, or nothing was due
-  1   something was missed, or the doctor found something soft
+  1   a drill failed cold, or the doctor found something soft
   2   a sitting was abandoned, or the doctor found something broken
   3   rote refused or could not run
 

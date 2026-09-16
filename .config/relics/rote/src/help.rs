@@ -37,23 +37,31 @@ KEYS
   Everywhere a secret is typed:
 
     enter       submit what is typed
-    escape      pass this prompt over
+    escape      leave this prompt
     backspace   remove the character before the caret. Also ctrl-h
     ctrl-u      remove everything before the caret
     ctrl-c      abandon
     ctrl-d      abandon, when nothing is typed
 
-  A cold drill try is the one prompt that measures a memory, and it gives back
-  nothing about what was typed. The field stays blind — no count, no caret, no
-  reveal — a paste is refused, and the keys above are the only ones that do
-  anything at all. Submitting nothing concedes. ctrl-d abandons there whatever
-  is typed, because there is no caret to delete at. ctrl-l goes and looks it up,
-  then takes the entry as an aided one, and is offered once a cold try is
-  already on record.
+  A drill opens with a cold capture, the one prompt that measures a memory, and
+  it gives back nothing about what was typed. The field draws nothing — no
+  count, no caret, no reveal — a paste is refused, and the keys above are the
+  only ones that do anything at all. Submitting nothing is a fail. ctrl-d
+  abandons there whatever is typed, because there is no caret to delete at.
+  Escape at a cold capture leaves the turn with nothing written; ctrl-c ends
+  the sitting there, and that turn is not recorded.
 
-  Every other prompt — the aided entry after ctrl-l, an attachment, and every
-  prompt in enroll, attach and rotate — masks what is typed, one glyph a
-  character, takes a paste, and adds:
+  A cold pass ends the drill. A cold fail opens the follow-ups: the same secret
+  asked for again, as often as you like, measured by nothing. A follow-up that
+  passes ends the drill, recovered; one that fails asks again; escape ends the
+  drill as the fail it already is; ctrl-c ends the sitting with the drill
+  written. ctrl-l in a follow-up declares the drill aided — the chip says so
+  and the key is withdrawn — and polices nothing: rote cannot see a vault
+  typing into the window, and a paste is not a lookup.
+
+  Every other prompt — a follow-up, and the intake in enroll, attach and
+  rotate — masks what is typed, one glyph a character, takes a paste, and
+  adds:
 
     ctrl-r          show the characters themselves, or stop showing them
     left right      move one character. Also ctrl-b and ctrl-f
@@ -84,43 +92,44 @@ KEYS
   unmarked field is the whole of what was typed and nothing else ever looks
   like one.
 
-  At an attachment prompt, where a verifier is being made rather than checked,
-  an empty entry is refused rather than conceded: there is nothing here to
-  concede to. There is no lookup there either — offering one would imply that
-  what is typed is being checked against something, and it is not.
+  An intake is a double entry: the secret typed once, then again as the
+  confirmation. Two entries that differ end the command — the card says so,
+  nothing is written, and the command is run again. An empty entry is refused
+  and the half already typed is kept. Escape leaves with nothing written.
+  There is no lookup at an intake: offering one would imply that what is
+  typed is being checked against something, and it is not.
 
-  Anywhere a secret is typed twice, two entries that differ end the command:
-  the card says so, and nothing is written. An empty entry is refused and the
-  half already typed is kept.
-
-  When nothing is due, bare rote asks whether you want to practice anyway. That
-  is one keystroke and no return: y practices, any other key leaves it.
-
-  Pastes accepted and pastes refused are both recorded against the sample, and
-  neither is a count of lookups. What that refusal is and is not is in rote
-  guide custody.";
+  When nothing is due, bare rote asks whether you want to drill everything
+  anyway. That is one keystroke and no return: y drills, any other key leaves
+  it.";
 
 const INTERVALS: &str = "\
 INTERVALS
 
   The ladder is 1, 1, 2, 4, 7, 14, 30 days by default, held at the last of them.
-  An unaided first pass on a due drill moves up a rung; a first miss returns to
-  the foot. Set your own with the ladder key in the config.
+  Set your own with the ladder key in the config.
 
-  Three intervals are recorded against every sample.
+  Three lines reconcile a drill with the schedule:
 
-    scheduled   what the ladder asked for
-    actual      days since the schedule was last served
-    effective   days since the secret was in front of a person at all
+    a cold pass on a day the engram is due    up a rung, anchored to that day
+    a cold pass on any other day              nothing moves
+    a fail on any day                         back to the foot, anchored
 
-  Every figure in rote stats is computed from the whole record rather than read
-  back off the line that carries it, so two machines that wrote without having
-  seen each other cannot each claim a full interval for one real gap.
+  A drill on a day the engram is due is a review; a drill on any other day is a
+  practice. Which it was is read off the engram's standing on the day, at
+  replay, and never declared.
 
-  The streak in rote stats counts unaided passes at the cap interval or longer,
-  back from the most recent drill. A pass at a shorter interval is not evidence
-  either way and is stepped over; a miss ends the run. It is reported and never
-  judged.";
+  The rung, what the ladder asked for, how late a review came, and the gap
+  since the secret was last in front of a person are all computed at replay
+  from the ladder and the drills before, and none of them is written. A change
+  to the ladder therefore re-derives the whole history, and two machines that
+  wrote without having seen each other cannot each claim a full interval for
+  one real gap.
+
+  The streak in rote stats counts cold passes at the cap interval or longer,
+  back from the most recent drill. A pass at a shorter gap is not evidence
+  either way and is stepped over; a fail ends the run, recovered or not. It is
+  reported and never judged.";
 
 const RECORDS: &str = "\
 RECORDS
@@ -133,11 +142,11 @@ RECORDS
   Five kinds of event: enroll, rotate, attach, retire, drill.
 
   A drill is one engram asked for from memory once. It records the engram, the
-  outcome of the cold capture, time to its first keystroke, how many follow-ups
-  were typed after a fail, whether one of them passed, and whether the answer
-  was looked up along the way.
+  outcome of the cold capture, the time to its first keystroke, how many
+  follow-ups were typed after a fail, whether one of them passed, and whether
+  the drill was aided.
 
-  Two outcomes: pass and fail. Nothing was offered is a fail. What a follow-up
+  Two outcomes: pass and fail. Submitting nothing is a fail. What a follow-up
   did is recorded beside the outcome and changes it in no figure.
 
   The occasion, the rung and every interval are derived at replay from the
@@ -169,7 +178,7 @@ FILES
   is what a restore onto a new machine looks like, and rote attach is how it
   comes back.
 
-  Config keys: root, state, rollover-hour, max-attempts, ladder.
+  Config keys: root, state, rollover-hour, ladder.
 
   Environment: ROTE_ROOT, ROTE_STATE, ROTE_CONFIG, ROTE_UI, ROTE_HOST,
   ROTE_FLAGSHIP, ROTE_MACHINE, ROTE_NOW.";
@@ -180,13 +189,14 @@ MACHINES
   A machine has an identity and a label. The identity is derived from the
   platform's own hardware identifier, hashed and truncated, so it is stable
   across a reinstall and there is no file holding it that could be copied onto a
-  second computer. The label is the hostname, which is mutable and is never an
-  identity. Both are recorded on every line.
+  second computer. It is the name of the chain the machine writes, and nothing
+  else records it. The label is the hostname, which is mutable and is never an
+  identity; it is written on every line.
 
   Each machine writes its own chain. An append-only hash chain is not a
   mergeable structure, so two machines never share one file: the corpus is the
-  merge of all of them, ordered by instant, then machine, then position. A
-  flagship handover is a new file rather than a fork in an old one.
+  merge of all of them, ordered by instant, then machine, then position in the
+  file. A flagship handover is a new file rather than a fork in an old one.
 
   Only the flagship writes. The marker is a file rote reads and never creates.
   An empty marker authorises whoever holds it; a marker with a machine identity
@@ -222,7 +232,7 @@ const EXIT: &str = "\
 EXIT
 
   0   nothing to report. Everything due was answered, or nothing was due
-  1   something was missed, or the doctor found something soft
+  1   a drill failed cold, or the doctor found something soft
   2   a sitting was abandoned, or the doctor found something broken
   3   rote refused or could not run
 

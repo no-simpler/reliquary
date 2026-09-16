@@ -231,7 +231,7 @@ fn close(
     let notes = closing_notes(turns, opening.corpus);
     let closing = screen::card(
         &screen::Frame::done(opening.today, &outturn.rows, outturn, &notes),
-        &crate::tui::card::Field::blind(),
+        &crate::tui::card::Field::hidden(),
         ctx.style,
     );
     console.paint(&closing)?;

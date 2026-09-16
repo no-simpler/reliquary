@@ -15,8 +15,9 @@
 //!
 //! **Every date here is monotone non-decreasing.** The merge orders by instant
 //! while the schedule reads civil days, so a second machine in another zone can
-//! hand replay a record whose day precedes its predecessor's. Assigning blindly
-//! would walk an anchor backwards and make every interval after it nonsense.
+//! hand replay a record whose day precedes its predecessor's. Assigning it
+//! unchecked would walk an anchor backwards and make every interval after it
+//! nonsense.
 
 pub mod chain;
 pub mod drill;

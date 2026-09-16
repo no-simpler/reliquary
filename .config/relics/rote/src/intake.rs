@@ -4,7 +4,7 @@
 //! the card it is drawn on is another, so a second caller draws its own card
 //! over the same [`Pair`] rather than growing a second copy of the rule.
 //!
-//! **Double entry exists to catch a typo at a keyboard.** A blind field gives no
+//! **Double entry exists to catch a typo at a keyboard.** A masked field gives no
 //! other way to find a slip. Two entries that differ write nothing: the pair is
 //! dropped, the card says so, and the command exits — there is no third go,
 //! because a bound is a thing to see and to count and this tool now does

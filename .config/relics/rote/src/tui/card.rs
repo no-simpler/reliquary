@@ -124,7 +124,7 @@ pub fn join(pieces: &[Piece]) -> Piece {
 
 /// How much of a secret being typed is drawn.
 ///
-/// Blind is the default and the safe one: a field that has not been told
+/// Hidden is the default and the safe one: a field that has not been told
 /// otherwise shows nothing. Per-character masking leaks only a total length,
 /// which the login screen on this machine leaks too. Word-boundary masking is
 /// never defensible: seven word lengths is most of a diceware phrase's search
@@ -133,7 +133,7 @@ pub fn join(pieces: &[Piece]) -> Piece {
 pub enum Reveal {
     /// Nothing about the buffer reaches the screen.
     #[default]
-    Blind,
+    Hidden,
     /// One glyph per character, and nothing of what they are.
     Masked,
     /// The characters themselves. The one moment this tool puts a secret on a
@@ -162,7 +162,7 @@ pub struct Field<'a> {
 
 impl Field<'_> {
     /// A field with nothing in it, for every card that is not being typed into.
-    pub fn blind() -> Self {
+    pub fn hidden() -> Self {
         Self::default()
     }
 
@@ -180,7 +180,7 @@ impl Field<'_> {
     /// A reveal never survives a prompt, so outside the entry loop the only
     /// question is whether a memory is being measured here.
     pub fn resting(cold: bool) -> Self {
-        Self::empty(if cold { Reveal::Blind } else { Reveal::Masked })
+        Self::empty(if cold { Reveal::Hidden } else { Reveal::Masked })
     }
 }
 
@@ -641,12 +641,12 @@ mod tests {
     #[test]
     fn the_field_says_nothing_about_what_was_typed() {
         let mut empty = card();
-        empty.entry(&Field::blind(), Tone::Calm);
+        empty.entry(&Field::hidden(), Tone::Calm);
         for typed in [1_usize, 7, 64, 4096] {
             let mut drawn = card();
-            // Blind carries no drawn text and no column, whatever is in the
+            // Hidden carries no drawn text and no column, whatever is in the
             // buffer behind it. Nothing here can vary with what was typed.
-            drawn.entry(&field(Reveal::Blind, "", 0), Tone::Calm);
+            drawn.entry(&field(Reveal::Hidden, "", 0), Tone::Calm);
             assert_eq!(
                 drawn.render(),
                 empty.render(),
@@ -701,7 +701,7 @@ mod tests {
         let mut drawn = card();
         drawn
             .say("a label", Tint::Dim)
-            .entry(&Field::blind(), Tone::Calm);
+            .entry(&Field::hidden(), Tone::Calm);
         let (row, column) = drawn.caret().expect("a field takes the cursor");
         let lines = drawn.render();
         let line: Vec<char> = lines[row].chars().collect();
@@ -790,11 +790,11 @@ mod tests {
     #[test]
     fn an_alarmed_field_differs_only_in_colour() {
         let mut calm = card();
-        calm.entry(&Field::blind(), Tone::Calm);
+        calm.entry(&Field::hidden(), Tone::Calm);
         let mut alarm = Card::new("rote", "Thu 10 Sep", Style::COLOUR);
-        alarm.entry(&Field::blind(), Tone::Alarm);
+        alarm.entry(&Field::hidden(), Tone::Alarm);
         let mut painted_calm = Card::new("rote", "Thu 10 Sep", Style::COLOUR);
-        painted_calm.entry(&Field::blind(), Tone::Calm);
+        painted_calm.entry(&Field::hidden(), Tone::Calm);
         assert_eq!(calm.caret(), alarm.caret());
         assert_eq!(
             alarm.render().len(),

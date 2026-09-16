@@ -43,7 +43,7 @@ fn name(text: &str) -> Slug {
 }
 
 /// One frame as a person actually meets it, which means under the field that
-/// prompt actually draws: blind where a memory is being measured, masked
+/// prompt actually draws: hidden where a memory is being measured, masked
 /// everywhere else.
 fn render(rows: &[Row], active: usize, status: Option<&str>, lookup: bool, cold: bool) -> String {
     field_render(rows, active, status, lookup, &Field::resting(cold))
@@ -197,7 +197,7 @@ fn closing(
         rows: Vec::new(),
     };
     let frame = Frame::done(date(2026, 9, 13), rows, &outturn, notes);
-    card(&frame, &Field::blind(), Style::PLAIN)
+    card(&frame, &Field::hidden(), Style::PLAIN)
         .render()
         .join("\n")
 }

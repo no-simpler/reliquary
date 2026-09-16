@@ -75,7 +75,7 @@ pub enum Key {
     Interrupt,
     /// A bracketed paste arrived, carrying what it carried. Whether the text
     /// reaches the field is the prompt's to say: it is taken wherever nothing
-    /// is being measured, and refused at a cold try, which is the one prompt
+    /// is being measured, and refused at a cold capture, which is the one prompt
     /// that is. Held so that dropping it wipes it.
     Paste(Pasted),
 }
@@ -329,7 +329,7 @@ fn render_field<'a>(
     use zeroize::Zeroize as _;
 
     into.zeroize();
-    if reveal == Reveal::Blind {
+    if reveal == Reveal::Hidden {
         *offset = 0;
         return Field {
             reveal,
@@ -466,7 +466,7 @@ impl Editing<'_> {
     }
 
     /// Remove everything before the caret, as readline's `unix-line-discard`
-    /// does. A blind prompt has no caret and the insertion point is the end, so
+    /// does. A cold capture has no caret and the insertion point is the end, so
     /// there it is still start the entry over.
     fn kill_to_start(&mut self) -> Did {
         let to = if self.cold {
@@ -626,7 +626,7 @@ impl Editing<'_> {
 ///
 /// `lookup` says whether the vault is on offer here. `cold` says whether a
 /// memory is being measured, and everything else follows from it: a cold prompt
-/// refuses a paste, stays blind, offers no reveal and moves no caret. A cold
+/// refuses a paste, draws nothing, offers no reveal and moves no caret. A cold
 /// prompt gives back nothing about what was typed.
 ///
 /// # Errors
@@ -643,7 +643,7 @@ pub fn read_secret(
     let mut drawn = scratch();
     let mut caret = 0usize;
     let mut offset = 0usize;
-    // Never sticky: every prompt, every retry and each half of a double entry
+    // Never sticky: every prompt, every follow-up and each half of a double entry
     // starts concealed, because this is a local and not a setting.
     let mut revealed = false;
     let mut ttfk: Option<u64> = None;
@@ -679,7 +679,7 @@ pub fn read_secret(
             Wake::Ended | Wake::Key(Key::Interrupt) => return Ok(Typed::Aborted),
             Wake::Key(Key::Lookup) if lookup => return Ok(Typed::Lookup),
             // At a cold prompt there is no caret to delete forward at, so this
-            // is unconditionally the end of input, which is what every blind
+            // is unconditionally the end of input, which is what every hidden
             // password prompt in the world does with it.
             Wake::Key(Key::EndOfInput) if cold || secret.is_empty() => return Ok(Typed::Aborted),
             Wake::Key(key) => {
@@ -718,7 +718,7 @@ pub fn read_secret(
                 if took_down {
                     standing = Refusal::None;
                 }
-                // A blind field shows nothing, so an ordinary keystroke changes
+                // A hidden field shows nothing, so an ordinary keystroke changes
                 // nothing on the screen and there is nothing to redraw.
                 if !cold || took_down {
                     let field = render_field(&secret, reveal, caret, &mut offset, &mut drawn);
@@ -733,7 +733,7 @@ pub fn read_secret(
 /// How much of the buffer this prompt draws, in this moment.
 fn rendering(cold: bool, revealed: bool) -> Reveal {
     match (cold, revealed) {
-        (true, _) => Reveal::Blind,
+        (true, _) => Reveal::Hidden,
         (false, false) => Reveal::Masked,
         (false, true) => Reveal::Shown,
     }
@@ -825,7 +825,7 @@ pub fn ask_card(
 #[must_use]
 pub fn reveal_chip(reveal: Reveal) -> &'static str {
     match reveal {
-        Reveal::Blind => "",
+        Reveal::Hidden => "",
         Reveal::Masked => "^R  show",
         Reveal::Shown => "^R  hide",
     }
@@ -1127,18 +1127,18 @@ mod tests {
         assert_eq!(
             entry.secret.expose(),
             b"ab",
-            "nothing may edit a blind field"
+            "nothing may edit a hidden field"
         );
         assert_eq!(flashes, 0);
-        assert!(seen.is_empty(), "a blind field has nothing to redraw");
+        assert!(seen.is_empty(), "a hidden field has nothing to redraw");
     }
 
     #[test]
-    fn a_blind_field_never_draws_a_glyph_however_much_is_in_it() {
+    fn a_hidden_field_never_draws_a_glyph_however_much_is_in_it() {
         for text in ["", "a", "correct horse battery staple", &"x".repeat(200)] {
             let secret = secret_of(text);
             assert_eq!(
-                drawn(&secret, Reveal::Blind, secret.chars()),
+                drawn(&secret, Reveal::Hidden, secret.chars()),
                 (String::new(), 0, (false, false)),
                 "{}",
                 text.len()
@@ -1310,7 +1310,7 @@ mod tests {
         ]);
         let entry = submitted(read(script, false).0);
         assert_eq!(entry.secret.expose(), b"c");
-        // Blind has no caret, so backward to the start is the whole entry.
+        // A cold capture has no caret, so backward to the start is the whole entry.
         let cold = keys(vec![
             Key::Char('a'),
             Key::Char('b'),
@@ -1621,7 +1621,7 @@ mod tests {
             true,
         );
         // Refused, said in alarm, said again in calm, and taken down by the
-        // first character that lands. The second draws nothing: a blind field
+        // first character that lands. The second draws nothing: a hidden field
         // has nothing left to take down.
         assert_eq!(
             refusals(&seen),
@@ -1746,7 +1746,7 @@ mod tests {
 
     #[test]
     fn the_reveal_chip_names_the_key_only_where_it_works() {
-        assert_eq!(super::reveal_chip(Reveal::Blind), "");
+        assert_eq!(super::reveal_chip(Reveal::Hidden), "");
         assert_eq!(super::reveal_chip(Reveal::Masked), "^R  show");
         assert_eq!(super::reveal_chip(Reveal::Shown), "^R  hide");
     }
@@ -1759,6 +1759,6 @@ mod tests {
 
     #[test]
     fn a_field_that_fits_is_never_marked_at_the_moment_of_submission() {
-        let _ = Field::blind();
+        let _ = Field::hidden();
     }
 }

@@ -20,7 +20,7 @@ FILES
   is what a restore onto a new machine looks like, and rote attach is how it
   comes back.
 
-  Config keys: root, state, rollover-hour, max-attempts, ladder.
+  Config keys: root, state, rollover-hour, ladder.
 
   Environment: ROTE_ROOT, ROTE_STATE, ROTE_CONFIG, ROTE_UI, ROTE_HOST,
   ROTE_FLAGSHIP, ROTE_MACHINE, ROTE_NOW.

@@ -92,7 +92,7 @@ pub enum Command {
     /// Take a lineage off the schedule. Its history stays; its verifiers do not.
     Retire(RetireArgs),
 
-    /// Report the state of the drill, for assay and for coop.
+    /// Report what is wrong with the drill, for assay. Reads and never writes.
     Doctor,
 
     /// One line for the shell, or nothing. Reads the record and never writes.

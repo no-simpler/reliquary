@@ -1,7 +1,7 @@
 //! crossterm: raw mode, the alternate screen, placement, and restoration.
 //!
 //! A sitting runs on the **alternate screen** and leaves nothing in scrollback.
-//! Blind input already keeps typed bytes off the display; what the alternate
+//! A hidden field already keeps typed bytes off the display; what the alternate
 //! screen additionally removes is a standing record of which slugs exist and
 //! which were failed.
 //!

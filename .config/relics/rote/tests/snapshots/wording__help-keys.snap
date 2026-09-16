@@ -7,23 +7,31 @@ KEYS
   Everywhere a secret is typed:
 
     enter       submit what is typed
-    escape      pass this prompt over
+    escape      leave this prompt
     backspace   remove the character before the caret. Also ctrl-h
     ctrl-u      remove everything before the caret
     ctrl-c      abandon
     ctrl-d      abandon, when nothing is typed
 
-  A cold drill try is the one prompt that measures a memory, and it gives back
-  nothing about what was typed. The field stays blind — no count, no caret, no
-  reveal — a paste is refused, and the keys above are the only ones that do
-  anything at all. Submitting nothing concedes. ctrl-d abandons there whatever
-  is typed, because there is no caret to delete at. ctrl-l goes and looks it up,
-  then takes the entry as an aided one, and is offered once a cold try is
-  already on record.
+  A drill opens with a cold capture, the one prompt that measures a memory, and
+  it gives back nothing about what was typed. The field draws nothing — no
+  count, no caret, no reveal — a paste is refused, and the keys above are the
+  only ones that do anything at all. Submitting nothing is a fail. ctrl-d
+  abandons there whatever is typed, because there is no caret to delete at.
+  Escape at a cold capture leaves the turn with nothing written; ctrl-c ends
+  the sitting there, and that turn is not recorded.
 
-  Every other prompt — the aided entry after ctrl-l, an attachment, and every
-  prompt in enroll, attach and rotate — masks what is typed, one glyph a
-  character, takes a paste, and adds:
+  A cold pass ends the drill. A cold fail opens the follow-ups: the same secret
+  asked for again, as often as you like, measured by nothing. A follow-up that
+  passes ends the drill, recovered; one that fails asks again; escape ends the
+  drill as the fail it already is; ctrl-c ends the sitting with the drill
+  written. ctrl-l in a follow-up declares the drill aided — the chip says so
+  and the key is withdrawn — and polices nothing: rote cannot see a vault
+  typing into the window, and a paste is not a lookup.
+
+  Every other prompt — a follow-up, and the intake in enroll, attach and
+  rotate — masks what is typed, one glyph a character, takes a paste, and
+  adds:
 
     ctrl-r          show the characters themselves, or stop showing them
     left right      move one character. Also ctrl-b and ctrl-f
@@ -54,18 +62,13 @@ KEYS
   unmarked field is the whole of what was typed and nothing else ever looks
   like one.
 
-  At an attachment prompt, where a verifier is being made rather than checked,
-  an empty entry is refused rather than conceded: there is nothing here to
-  concede to. There is no lookup there either — offering one would imply that
-  what is typed is being checked against something, and it is not.
+  An intake is a double entry: the secret typed once, then again as the
+  confirmation. Two entries that differ end the command — the card says so,
+  nothing is written, and the command is run again. An empty entry is refused
+  and the half already typed is kept. Escape leaves with nothing written.
+  There is no lookup at an intake: offering one would imply that what is
+  typed is being checked against something, and it is not.
 
-  Anywhere a secret is typed twice, two entries that differ end the command:
-  the card says so, and nothing is written. An empty entry is refused and the
-  half already typed is kept.
-
-  When nothing is due, bare rote asks whether you want to practice anyway. That
-  is one keystroke and no return: y practices, any other key leaves it.
-
-  Pastes accepted and pastes refused are both recorded against the sample, and
-  neither is a count of lookups. What that refusal is and is not is in rote
-  guide custody.
+  When nothing is due, bare rote asks whether you want to drill everything
+  anyway. That is one keystroke and no return: y drills, any other key leaves
+  it.

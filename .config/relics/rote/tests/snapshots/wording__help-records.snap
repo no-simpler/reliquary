@@ -12,11 +12,11 @@ RECORDS
   Five kinds of event: enroll, rotate, attach, retire, drill.
 
   A drill is one engram asked for from memory once. It records the engram, the
-  outcome of the cold capture, time to its first keystroke, how many follow-ups
-  were typed after a fail, whether one of them passed, and whether the answer
-  was looked up along the way.
+  outcome of the cold capture, the time to its first keystroke, how many
+  follow-ups were typed after a fail, whether one of them passed, and whether
+  the drill was aided.
 
-  Two outcomes: pass and fail. Nothing was offered is a fail. What a follow-up
+  Two outcomes: pass and fail. Submitting nothing is a fail. What a follow-up
   did is recorded beside the outcome and changes it in no figure.
 
   The occasion, the rung and every interval are derived at replay from the

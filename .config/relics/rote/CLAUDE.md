@@ -26,25 +26,28 @@ threshold, the dossier when it does not — and is not also reported by `doctor`
 
 A **defect** is not a reading, and the rule inverts for one: a state with a
 remedy has exactly one home and it is always `doctor`, because that is the only
-surface `assay` collects into `yadm doctor`. `aided_mismatch` is the worked
-example. `doctor` states it and names the fix; the sitting announces the
-**edge**, in both directions, at the moment it moves — an event names a moment,
-so it cannot go stale the way a second copy of a standing claim does. `stats`
-carries the historical count and attaches no consequence to it, which is how the
-two came to contradict each other: a refusal followed by a pass clears the
-dossier and leaves a ninety-day count still asserting the disagreement.
+surface `assay` collects into `yadm doctor`. Dormancy is the worked example.
+`doctor` states it, one finding per lineage, and names the fix — `rote attach
+<lineage>`; the sitting names the same verb on the day it skips the row, because
+that is the day the person is looking, and an event names a moment, so it cannot
+go stale the way a second copy of a standing claim does; `status` shows the
+lineage dormant and attaches no consequence to it. Three surfaces, one verb,
+and none of them a verdict.
 
 ## Prose rules for everything the binary prints
 
 - **No backticks.** Help, guide, notes and errors are read in a terminal.
 - **Canonical vocabulary**, one word per concept across the flag, the record field
   and the prose: *corpus*, *chain*, *lineage*, *slug*, *engram*, *dossier*,
-  *sitting*, *turn*, *drill*, *attachment*, *capture*, *rung*, *occasion*, *aided*,
-  *streak*, *machine*, *hostname*, *attached*, *dormant*, *review*, *practice*,
-  *lapse*, *cold*.
-- **`aided` is an adjective on a capture, never a third occasion.** The occasion
-  says whether the schedule asked; aided says whether the memory was measured.
-  Collapsing them is what made an aided review lose its due-ness.
+  *sitting*, *turn*, *drill*, *intake*, *cold*, *capture*, *follow-up*,
+  *recovered*, *aided*, *pass*, *fail*, *rung*, *ladder*, *occasion*, *review*,
+  *practice*, *streak*, *machine*, *hostname*, *attached*, *dormant*. Retired, and
+  not to come back: *try*, *attempt*, *miss*, *lapse*, *blind*, *cache*.
+- **`aided` is an adjective on a drill**, latched by `ctrl-l` in a follow-up and
+  never a third occasion or a property of a capture. The occasion says whether
+  the schedule asked, and it is derived from the engram's standing on the day;
+  aided says the answer was seen after the cold capture had already been judged.
+  Collapsing them is what once made an aided review lose its due-ness.
 - Full stops end sentences and fragments; bare listings take none.
 - Refer to command help as `rote help <command>`, never `rote <command> --help`.
 - Columns run in order of increasing variability, so the widest cell is last and is
@@ -56,16 +59,16 @@ dossier and leaves a ninety-day count still asserting the disagreement.
 lib.rs            the crate, so the suite builds records with the real types
 cli.rs            clap derive; doc comments are the help text
 cmd/mod.rs        the context, dispatch, and what every command shares
-cmd/sitting.rs    the daily call, the practice offer, and practice
+cmd/sitting.rs    the daily call, the drill-everything offer, and drilling by name
 cmd/enroll.rs     enroll, attach, rotate, retire
-cmd/dialog.rs     the terminal side those four share
+cmd/dialog.rs     the terminal side the three that take a secret share
 cmd/reading.rs    status, stats, log, machines
 cmd/health.rs     doctor and banner
 config.rs         ~/.config/rote/config.toml, or its defaults
 corpus/mod.rs     the projection: lineages, engrams, dossiers
 corpus/record.rs  the record types, the identities, the hash chain, total parsing
 corpus/chain.rs   one file per machine, the filename grammar, the merge
-corpus/drill.rs   the derived grouping over captures, and where one landed
+corpus/drill.rs   the drill as replay reads it: occasion, scheduled days, gap — derived
 doctor.rs         findings in relic_core's vocabulary, and their human shape
 exit.rs           the four exit codes
 intake.rs         the double-entry policy, the prompt wording, the re-mint rule — pure
@@ -76,8 +79,8 @@ secret.rs         the typed value, its editing by caret, and what holds one
 sitting/mod.rs    the roster, and the loop that works through it
 sitting/screen.rs the sitting's own layout, as a pure function from frame to card
 slug.rs           a validated lineage name
-stats.rs          retention, latency, punctuality, the streak — pure
-store.rs          the three homes, the clock, locking, appending
+stats.rs          retention, latency, lateness, the streak, every fail — pure
+store.rs          the three homes, the clock, locking, appending, the stamp
 tui/mod.rs        the traits, the entry loop, the key intents, render_field
 tui/card.rs       the box and the one entry line; colour is relic_core::style
 tui/term.rs       crossterm: raw mode, the alternate screen, placement, restoration
@@ -109,7 +112,7 @@ the flagship.
 An engram with no verifier here is therefore a **first-class state**, not a
 corruption: it is what a restore onto a new machine looks like, and `attach` is how
 it comes back. Never add a fallback that invents one — the sitting does not invent
-a verifier, it asks for one.
+a verifier and does not ask for one either; it skips the row and names the verb.
 
 **Attachment is machine-local, and the two halves may disagree.** The corpus
 records attach *events*, permanently and as a visible seam; the machine's state dir
@@ -154,10 +157,12 @@ Things a future edit must not undo.
   functions in the entry loop: a word length is the one thing about a passphrase
   this tool may never disclose, and the module that holds the value is the wrong
   place to teach how to find one.
-- **Every capture is written the moment it is taken.** The sitting loop hands each
-  one to a record callback before the next prompt is drawn, so a closed window or a
-  signal keeps every reading it had already produced. The closing card is drawn
-  from the corpus after the last write, not before it.
+- **A drill is written once, when it ends.** One record carries the cold capture's
+  outcome and everything that followed it, and the sitting loop hands it to the
+  record callback before the next prompt is drawn, so a closed window or a signal
+  keeps every drill that had already ended. A drill cut off mid-tail by a hard
+  kill is lost, and that is accepted: a record written at the cold capture and
+  patched afterwards would be a record rewritten.
 - **The verifier is written before the record of it.** A failure between the two
   then leaves a fact with no record — the legitimate disagreement — rather than a
   record with no fact, which is the direction that lies.
@@ -165,13 +170,15 @@ Things a future edit must not undo.
   the future-schema refusal both live there, because every caller opens the store
   in order to write and the refusal must arrive before any command has touched the
   verifier file.
-- **A cold prompt gives back nothing about what was typed.** The cold drill try
-  is the one prompt that measures a memory, and four behaviours are consequences
-  of that one property rather than four settings: it refuses a paste, it stays
-  blind, it offers no reveal and it moves no caret. A character count is partial
+- **A cold capture gives back nothing about what was typed.** It is the one
+  prompt that measures a memory, and four behaviours are consequences of that
+  one property rather than four settings: it refuses a paste, it draws nothing,
+  it offers no reveal and it moves no caret. A character count is partial
   recognition feedback delivered mid-retrieval and a reveal is the whole of one,
   so neither may reach the prompt that is measuring. `read_secret` takes `cold`
-  and derives the rest; nothing else may grow a second switch.
+  and derives the rest; nothing else may grow a second switch. A follow-up is
+  not cold: it is masked, takes a paste and moves a caret, because it measures
+  nothing.
 - **No secret ever reaches argv, the environment, the clipboard, a formatter, a
   log line or an error.** The screen is the one exception and it is deliberate:
   every non-cold prompt masks per character and `ctrl-r` shows the characters
@@ -198,16 +205,16 @@ Things a future edit must not undo.
   check can see the command line, so the pipe's discipline — a vault at the other
   end, never an echo — is stated in `rote help stdin` and nowhere enforced. The
   sitting accepts no stdin at all.
-- **`rotate` proves the current secret; `attach` proves nothing and says so at the
-  prompt.** Without the proof a verifier could be replaced by one somebody else
-  knows and the reading would still say memorised. `attach` is the honest opposite:
-  it holds nothing to check against, so it records the claim and verifies neither —
-  and it names the dossier it is about to continue first, which is an accident
-  guard rather than a check.
+- **No intake proves anything.** `enroll`, `attach` and `rotate` share one prompt
+  class: a double entry, masked, that mints a verifier and checks nothing against
+  the record. `rotate` takes the new secret and asks for nothing about the old
+  one; `attach` says at the prompt that it cannot check what is typed. The
+  accident guard is the card's own naming line — the engram about to step down,
+  the dossier about to be continued — and it is a guard rather than a check.
 - **A rotation removes the outgoing verifier.** Keyed by engram, setting the new one
   leaves the old in place, and a verifier for a secret that has been rotated away
   is a live oracle for it. `doctor` grades one Broken.
-- **A secret proved against a verifier below the cost floor re-mints it.** The one
+- **A secret a below-floor verifier accepts re-mints that verifier.** The one
   moment the plaintext is in hand is the one moment a stale verifier can be brought
   up to cost without asking for anything; `intake::refreshed` is the policy and the
   sitting's `verify` wiring is its only caller. A stored cost above
@@ -224,22 +231,21 @@ Things a future edit must not undo.
   cannot be drawn would still be reading keystrokes into a secret nobody can see, so
   `Terminal::enter` refuses first. Bare `rote` with nothing due treats a cramped
   terminal like a non-interactive one and says what is waiting.
-- **Bracketed paste is enabled so a cold try can refuse one.** Every other prompt
-  takes a paste, because measurement is the whole of the line and nothing else
-  here measures. The refusal is a commitment device and not a control: DECSET
+- **Bracketed paste is enabled so a cold capture can refuse one.** Every other
+  prompt takes a paste, because measurement is the whole of the line and nothing
+  else here measures. The refusal is a commitment device and not a control: DECSET
   2004 is advisory, a terminal that ignores it delivers a paste as ordinary
-  typing, and a vault typing into the window is invisible either way. So
-  `paste_accepted` and `paste_refused` are counts of pastes and never counts of
-  lookups, and nothing may describe them as the second. A paste too long for the
-  field enters none of itself and counts as refused, so the two partition every
-  paste a prompt saw.
-- **The lookup is only ever offered after a capture is recorded, and never at an
-  attachment prompt.** There is no standalone verb for an aided entry and there
-  should not be: one would let the vault be consulted before anything is written,
-  and the cold attempt — the whole reading — would go unrecorded. `--aided` is the
-  declaration for a sitting that already went that way, not a shortcut past it. At
-  an attachment prompt offering it would imply that what is typed is being checked
-  against something.
+  typing, and a vault typing into the window is invisible either way. A paste too
+  long for the field enters none of itself.
+- **`ctrl-l` is offered only in a follow-up, and it declares.** The cold capture
+  has already been judged by the time the key exists, so the whole reading is on
+  the record before the vault can be consulted; a follow-up measures nothing, so
+  there is nothing left in it to protect. The key latches `aided` onto the drill,
+  the chip says so, the key is withdrawn, and that is all it does: it checks
+  nothing, a paste is not a lookup, and a vault typing into the window is not seen.
+  No flag declares a sitting aided and no standalone verb takes an aided entry,
+  and there should be neither. It is never offered at an intake, where offering
+  it would imply that what is typed is being checked against something.
 - **Four commands are dialogs and the rest are not.** `enroll`, `attach`, `rotate`
   and the sitting have to be typed at; everything else answers `--format json` and
   is a script's to call. A dialog opens the alternate screen, holds its outcome
@@ -247,9 +253,12 @@ Things a future edit must not undo.
   dialog and never opens one. The paths that say one thing and ask nothing stay
   inline: a screen that opens to say *nothing* and then demands a keypress is
   hostile on the most frequent path there is.
-- **Bare `rote` asks for what is due and nothing else, and offers practice on one
-  keystroke when nothing is.** Deciding what to add beyond what is due is the
-  schedule deciding again; asking costs one key and no return.
+- **Bare `rote` asks for what is due and nothing else, and offers to drill
+  everything anyway on one keystroke when nothing is.** Deciding what to add
+  beyond what is due is the schedule deciding again; asking costs one key and no
+  return. `rote drill [LINEAGE...]` is the named way in, due or not, every active
+  lineage when none is named — and it runs the same sitting, so the occasion is
+  still read off the standing and never off which command was typed.
 - **One entry loop, one field, one place a secret becomes glyphs.**
   `tui::read_secret` is the only loop that accepts a typed secret, `Card::entry`
   the only thing that draws one, and `tui::render_field` the only function that
@@ -287,52 +296,38 @@ Things a future edit must not undo.
   re-read it. What the refusal *said* stays under the field until the next
   keystroke, with no ceiling: starting to type is the reader saying they have
   read it or that it no longer matters, and no timer can know that. A standing
-  status — the try count — is not a refusal and shows through again once the
-  refusal is taken down; it increments in the slot it already occupied. Once the cold tries are spent the
-  field stays, saying *out of tries*, with the lookup still on offer: a typed
-  answer is flashed and refused rather than judged, escape leaves. The one moment a
-  person most needs the vault is after the third miss, and it is also the entry
-  that checks the vault against the verifier.
-- **A double entry that differs asks again, for as many rounds as the drill allows
-  tries**, and a proof that fails does the same. The policy lives in `intake`, pure,
-  because the sitting needs it too and draws a different card. A blind field gives
-  no other way to find the slip, and a command that exits on it makes the person
-  retype everything from the start. At an attachment prompt an empty entry is
-  **refused rather than conceded**: there is nothing there to concede to.
-- **A bounded retry says which try this is, every refusal spends one, and the
-  card that gives up says what it cost.** Three claims, and the loop is only
-  bounded in practice when all three hold. A bound nobody can see is
-  indistinguishable from no bound, so a person retypes until they give up on the
-  command rather than on the pair; one refusal that costs nothing — an empty
-  entry was the one — makes the loop unbounded however much the others cost; and
-  a last card that repeats the reason is a last card that reads as one more
-  round, because the reason is the half already on the screen. `intake::tried`
-  is the **one composer** for the count, shared by the drill try, the proof and
-  both double entries, so a fourth retry cannot grow its own wording. Where the
-  closing line cannot hold reason and cost together it keeps the cost:
-  `tui::OUTCOME_ROOM` is the budget and the caller does the dropping, the same
-  rule the hint under a field follows.
-- **A lapse is the ladder going back to the foot, and nothing else is one.**
-  Practice moves no schedule, so a first-sample failure there is a *miss*, and
-  `stats` counts it as one. The card, `stats` and `rote guide ladder` say the same
-  thing or one of them is wrong. `Outturn::landings` buckets each turn once and the
+  status — the follow-up count — is not a refusal and shows through again once
+  the refusal is taken down; it increments in the slot it already occupied. There
+  is no last follow-up: escape ends the drill as the fail it already is, and the
+  card never has to say what a bound cost because there is none.
+- **A double entry that differs writes nothing and exits.** The policy lives in
+  `intake`, pure, so a second card can be drawn over it without a second copy of
+  the rule. The closing card says the two entries differ and what that cost —
+  nothing was enrolled, attached or replaced — and the exit is `INCOMPLETE`;
+  running the command again is the retry. Where the closing line cannot hold
+  reason and cost together it keeps the cost: `tui::OUTCOME_ROOM` is the budget
+  and the caller does the dropping, the same rule the hint under a field follows.
+  An empty entry is **refused rather than taken**, with the half already typed
+  still in hand: there is nothing there to concede to.
+- **A fail is the ladder going back to the foot, on any day.** Practice moves no
+  schedule upward, but a fail there is still a fail: `corpus::apply_drill`, the
+  card, `stats` and `rote guide ladder` say the same thing or one of them is
+  wrong. `Outturn::landings` buckets each turn once by its cold capture and the
   buckets are disjoint, so the closing count adds up to what was in front of a
   person. A lone turn is described rather than counted. **A lookup re-labels its
-  whole drill**, so the chip says aided — but the cold miss it opened with is still
+  whole drill**, so the chip says aided — but the cold fail it opened with is still
   what was measured, and the closing line says so. Hiding that would be the tool
   deciding what a week looks like.
 - **A glyph carries what a glyph can.** One column of standing per row, and words
-  only for what the glyph cannot say. **Green is only ever a clean pass —
-  unaided, first try. Yellow is everything that got there another way. Red is a
-  failure. Dim is nothing measured.** An attachment lands on `+` in yellow and
-  not a green tick: something was added and nothing was judged, and a drill
-  recovered with the vault or on the third go is the same claim. `screen::icon`
-  and `dialog::Checked` are the only two places that decide it, so no screen
-  decides it for itself. The closing tally names its own subject, because it
-  buckets each turn by its *first* capture and would otherwise read as a
-  contradiction of the row above it. Nothing on a card
-  spells out a key that a person already knows — enter submits, escape leaves — so
-  the only key named is ctrl-l, and only where it is on offer.
+  only for what the glyph cannot say. **Green is only ever a cold pass. Yellow is
+  a drill recovered in a follow-up, with the vault or without it. Red is a fail.
+  Dim is nothing measured.** `screen::icon` and `dialog::Checked` are the only two
+  places that decide it, so no screen decides it for itself; the attach dialog
+  closes in yellow for the same reason, because nothing there was checked. The
+  closing tally names its own subject, because it buckets each turn by its cold
+  capture and would otherwise read as a contradiction of the row above it.
+  Nothing on a card spells out a key that a person already knows — enter submits,
+  escape leaves — so the only key named is ctrl-l, and only where it is on offer.
 - **`Card::waiting` takes the caret down with the box.** Under masking the caret
   column *is* the length, so a caret left behind would park the terminal's cursor
   on a column that discloses what was just submitted, on the one card that sits
@@ -371,20 +366,24 @@ Things a future edit must not undo.
   others do not: an RAII guard, a panic hook, and a `signal-hook` thread. A
   default-disposition `SIGTERM` runs no destructor, and a terminal left in raw mode
   with echo off shows nothing of what is typed into it next.
-- **Replay reads `rung_after`; `stats` computes everything else.** The rung a record
-  carries is what the tool decided at the time, which makes history immune to a
-  later change in the ladder — and the ladder is configurable now, so that matters
-  more. Everything with a threshold in it is computed from the merged corpus
-  instead, because a counter maintained across a merge counts one real interval
-  twice. `rung_before`, and the two measured intervals, are **witnesses**: replay
-  never reads them, and `doctor` compares them against merged order to find a
-  divergence.
+- **Replay derives the rung, the anchor and the occasion; the record stores none
+  of them.** A drill carries its outcome, the cold capture's latency and what
+  followed, and `corpus::apply_drill` reads the occasion off the standing *before*
+  the dossier moves. A change to the ladder therefore re-derives the whole history,
+  which is the feature, and `doctor` has no recorded interval to compare against
+  merged order because nothing was written that could disagree with it.
+  Everything with a threshold in it — the streak above all — is computed in
+  `stats` over `corpus.drills()`, because a counter maintained across a merge
+  counts one real interval twice.
 - **A malformed line is kept, never dropped**, and a record from a newer schema is a
   loud refusal to write rather than a partial read. That doctrine is about lines,
   not files: a file in the chains directory that is not a chain is **excluded**,
   because reading a conflict copy would double every event in the corpus.
 - **Never merge a chain; sequence chains.** One machine writes one file. The corpus
-  is the merge of all of them ordered by instant, then machine, then position.
+  is the merge of all of them ordered by instant, then machine, then position —
+  where the machine is the one the filename names and the position is the line's
+  index in that file, malformed lines included. Neither is written into a record;
+  the file is the authority for both.
 - **Every date in a dossier is monotone non-decreasing under replay.** The merge
   orders by instant while the schedule reads civil days, so a machine in another
   zone can hand replay a record whose day precedes its predecessor's.
@@ -392,16 +391,16 @@ Things a future edit must not undo.
   asserts the first of every binary it collects, on a two-second budget, so nothing
   in that path hashes. A fact that `status` or `stats` already states is not also a
   finding.
-- **`banner` never resolves the machine identity**, which costs a subprocess. It
-  runs before every shell prompt through `coop`, so the steady state is one
-  `stat` and one small read. It rebuilds the cache when the cache has stopped
-  answering for what is on disk, by the same read-only path `status` and
-  `doctor` take — no flagship gate, no hashing — which is once per change rather
-  than once per prompt. **A reminder must not depend on state destroyed by the
-  event it exists to announce**: the cache lives in the machine-local tree a
-  restore does not bring back, and the state a restore leaves — every lineage
-  dormant — is the one the attachment verb exists for. `Cache::witness` is what
-  makes absence answerable rather than silent.
+- **`banner` never resolves the machine identity**, which costs a subprocess, and
+  it keeps nothing between calls. It rebuilds its answer read-only on every call,
+  by the same path `status` and `doctor` take — no flagship gate, no hashing —
+  and anything it cannot read is nothing to say. What keeps that off every shell
+  prompt is `coop`: the stamp at `Paths::stamp()` is touched after
+  every write `rote` makes, and `coop` keys the call on it and on the day
+  rollover, so the answer is recomputed once per change rather than once per
+  prompt. **A reminder must not depend on state destroyed by the event it exists
+  to announce**: reading the corpus and the verifier file afresh is what makes the
+  state a restore leaves — every lineage dormant — answerable rather than silent.
 - **Every test sets `ROTE_ROOT` and `ROTE_STATE`.** They are seams, along with
   `ROTE_CONFIG`, `ROTE_UI`, `ROTE_HOST`, `ROTE_FLAGSHIP`, `ROTE_MACHINE` and
   `ROTE_NOW`. `ROTE_FLAGSHIP` and `ROTE_MACHINE` are seams rather than files
@@ -447,9 +446,9 @@ including its prefixes, and it is two checks because a reveal is a legitimate
 frame: the token must be **absent across a whole run in which `ctrl-r` is never
 pressed**, and **present exactly once after one `ctrl-r`**. The first is the
 regression check, the second is the feature. Use tokens that cannot collide with
-the card's own words; `new` and `one` both appear in it. The **attachment card is
-the second thing worth driving that way**, because it is the second place a typed
-secret becomes a verifier.
+the card's own words; `new` and `one` both appear in it. The **intake card is the
+second thing worth driving that way**, because it is the second place a typed
+secret becomes a verifier — and, like a follow-up, it offers the reveal.
 
 ## Measured, so it is not re-derived
 
