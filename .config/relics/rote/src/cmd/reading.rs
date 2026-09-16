@@ -596,13 +596,14 @@ fn capture_text(capture: &Captured) -> String {
 pub fn machines(ctx: &Context) -> Result<u8> {
     let chains = read_chains(ctx)?;
     let mine = ctx.machine().ok();
-    let records = chains.records();
+    let placed = chains.placed();
 
     let mut rows = Vec::new();
     for machine in chains.machines() {
-        let theirs: Vec<&&crate::corpus::record::Record> = records
+        let theirs: Vec<&crate::corpus::record::Record> = placed
             .iter()
-            .filter(|record| record.machine == *machine)
+            .filter(|found| found.machine == *machine)
+            .filter_map(|found| found.line.record())
             .collect();
         let host = theirs
             .last()

@@ -22,6 +22,7 @@ use std::sync::OnceLock;
 
 use assert_cmd::Command;
 use camino::Utf8PathBuf;
+use jiff::Timestamp;
 use jiff::civil::Date;
 use proptest::prelude::*;
 use rote::corpus::Corpus;
@@ -64,7 +65,6 @@ pub struct Rote {
     pub config: Utf8PathBuf,
     pub machine: MachineId,
     prev: Digest,
-    seq: u64,
 }
 
 impl Rote {
@@ -88,7 +88,6 @@ impl Rote {
             config: base.join("config.toml"),
             machine: MachineId::of(seed),
             prev: Digest::GENESIS,
-            seq: 0,
             _dir: dir,
         };
         std::fs::create_dir_all(rote.chains()).expect("the chains dir");
@@ -109,7 +108,6 @@ impl Rote {
             config: other.config.clone(),
             machine: MachineId::of(seed),
             prev: Digest::GENESIS,
-            seq: 0,
         }
     }
 
@@ -174,15 +172,12 @@ impl Rote {
                 .expect("a zoned day")
                 .timestamp(),
             day,
-            machine: self.machine.clone(),
             host: "Scratch".to_owned(),
-            seq: self.seq,
             prev: self.prev,
             event,
         };
         let line = render(&record).expect("a line");
         self.prev = Digest::of(&line);
-        self.seq = self.seq.saturating_add(1);
         let path = self.chain();
         let mut text = std::fs::read_to_string(&path).unwrap_or_default();
         text.push_str(&line);
@@ -384,9 +379,26 @@ pub fn steps() -> impl Strategy<Value = Vec<(u8, u8, Step)>> {
     proptest::collection::vec((0u8..2, 0u8..2, step), 0..24)
 }
 
+/// One generated record, with what the chain file would say about it: which
+/// machine's file it sits in and its line index there. Neither is written into
+/// the record, so the fixture carries them beside it.
+#[derive(Clone, Debug)]
+pub struct Seeded {
+    pub machine: MachineId,
+    pub position: usize,
+    pub record: Record,
+}
+
+impl Seeded {
+    /// The merge key, as `chain::Placed::order` derives it.
+    pub fn key(&self) -> (Timestamp, &MachineId, usize) {
+        (self.record.at, &self.machine, self.position)
+    }
+}
+
 pub struct World {
-    records: Vec<Record>,
-    seq: BTreeMap<MachineId, u64>,
+    records: Vec<Seeded>,
+    written: BTreeMap<MachineId, usize>,
     prev: BTreeMap<MachineId, Digest>,
     current: BTreeMap<u8, EngramId>,
     day: Date,
@@ -396,7 +408,7 @@ impl World {
     pub fn new() -> Self {
         Self {
             records: Vec::new(),
-            seq: BTreeMap::new(),
+            written: BTreeMap::new(),
             prev: BTreeMap::new(),
             current: BTreeMap::new(),
             day: day(2026, 1, 1),
@@ -408,7 +420,7 @@ impl World {
     }
 
     fn push(&mut self, machine: &MachineId, event: Event) {
-        let seq = self.seq.entry(machine.clone()).or_insert(0);
+        let position = self.written.entry(machine.clone()).or_insert(0);
         let at = self
             .day
             .to_zoned(jiff::tz::TimeZone::UTC)
@@ -418,18 +430,20 @@ impl World {
             v: SCHEMA,
             at,
             day: self.day,
-            machine: machine.clone(),
             host: "Scratch".to_owned(),
-            seq: *seq,
             prev: self.prev.get(machine).copied().unwrap_or(Digest::GENESIS),
             event,
         };
-        *seq = seq.saturating_add(1);
+        self.records.push(Seeded {
+            machine: machine.clone(),
+            position: *position,
+            record: record.clone(),
+        });
+        *position = position.saturating_add(1);
         self.prev.insert(
             machine.clone(),
             Digest::of(&rote::corpus::record::render(&record).expect("a line")),
         );
-        self.records.push(record);
         self.day = self
             .day
             .checked_add(jiff::Span::new().days(1))
@@ -453,7 +467,7 @@ impl World {
         engram
     }
 
-    pub fn build(script: &[(u8, u8, Step)]) -> Vec<Record> {
+    pub fn build(script: &[(u8, u8, Step)]) -> Vec<Seeded> {
         let mut world = Self::new();
         let machines: Vec<MachineId> = (0..2).map(|n| MachineId::of(&format!("m{n}"))).collect();
         for (which, lineage, step) in script {
@@ -530,11 +544,12 @@ impl World {
     }
 }
 
-/// The merge order, as the corpus applies it.
-pub fn merged(records: &[Record]) -> Vec<&Record> {
-    let mut out: Vec<&Record> = records.iter().collect();
-    out.sort_by(|a, b| a.order().cmp(&b.order()));
-    out
+/// The merge order, as the corpus applies it: instant, then machine, then the
+/// line's position in that machine's file.
+pub fn merged(records: &[Seeded]) -> Vec<&Record> {
+    let mut out: Vec<&Seeded> = records.iter().collect();
+    out.sort_by(|a, b| a.key().cmp(&b.key()));
+    out.into_iter().map(|seeded| &seeded.record).collect()
 }
 
 /// A reading small enough to compare, and wide enough to catch a difference.

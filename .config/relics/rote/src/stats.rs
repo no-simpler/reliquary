@@ -658,7 +658,6 @@ mod tests {
         Attached, Captured, Digest, EngramId, Enrolled, Event, Outcome, Record, SCHEMA, SittingId,
     };
     use crate::ladder::{Ladder, Occasion};
-    use crate::machine::MachineId;
 
     struct Build {
         records: Vec<Record>,
@@ -684,14 +683,11 @@ mod tests {
         }
 
         fn push(&mut self, day: Date, event: Event) {
-            let seq = u64::try_from(self.records.len()).unwrap();
             self.records.push(Record {
                 v: SCHEMA,
                 at: day.to_zoned(jiff::tz::TimeZone::UTC).unwrap().timestamp(),
                 day,
-                machine: MachineId::of("test"),
                 host: "Mac".to_owned(),
-                seq,
                 prev: Digest::GENESIS,
                 event,
             });

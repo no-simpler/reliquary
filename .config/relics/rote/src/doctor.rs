@@ -213,7 +213,6 @@ fn chain_findings(health: &Health<'_>) -> Vec<Finding> {
     let mut future = Vec::new();
     let mut malformed = Vec::new();
     let mut broken = Vec::new();
-    let mut gaps = Vec::new();
     let mut foreign = Vec::new();
 
     for issue in &health.chains.issues {
@@ -225,17 +224,6 @@ fn chain_findings(health: &Health<'_>) -> Vec<Finding> {
                 malformed.push(format!("{machine} line {line}  {why}"));
             }
             Issue::ChainBreak { machine, line } => broken.push(format!("{machine} line {line}")),
-            Issue::SeqBreak {
-                machine,
-                line,
-                expected,
-                found,
-            } => gaps.push(format!(
-                "{machine} line {line}  expected {expected}, found {found}"
-            )),
-            Issue::MachineMismatch { file, claimed } => {
-                foreign.push(format!("{file}  claims {claimed}"));
-            }
             Issue::Foreign { file } => foreign.push(file.clone()),
         }
     }
@@ -277,13 +265,6 @@ fn chain_findings(health: &Health<'_>) -> Vec<Finding> {
                 .fixed_by(FixHint::lossy(
                     "move it out of the chains directory, or delete it if it is a copy",
                 )),
-        );
-    }
-    if !gaps.is_empty() {
-        findings.push(
-            corpus_station()
-                .soft(summary("a chain's positions do not run in order"))
-                .detailed_with(Detail::new(gaps.join("\n"))),
         );
     }
     findings
@@ -330,8 +311,10 @@ fn divergence(health: &Health<'_>) -> Vec<Finding> {
 /// Two machines writing on one drill day, which double-counts retention.
 fn concurrency(health: &Health<'_>) -> Vec<Finding> {
     let mut days: BTreeMap<Date, BTreeSet<&MachineId>> = BTreeMap::new();
-    for record in health.chains.records() {
-        days.entry(record.day).or_default().insert(&record.machine);
+    for placed in health.chains.placed() {
+        if let Some(record) = placed.line.record() {
+            days.entry(record.day).or_default().insert(&placed.machine);
+        }
     }
     let shared: Vec<String> = days
         .into_iter()

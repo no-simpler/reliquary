@@ -68,12 +68,16 @@
     "rust-analyzer-lsp@claude-plugins-official": true
   },
   "effortLevel": "xhigh",
+  "modelSettings": {
+    "claude-fable-5-1": {
+      "effortLevel": "high"
+    }
+  },
   "awaySummaryEnabled": false,
   "tui": "fullscreen",
   "skipWorkflowUsageWarning": true,
   "remoteControlAtStartup": true,
   "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
-  "voiceEnabled": true,
-  "model": "claude-fable-5-1[1m]"
+  "voiceEnabled": true
 }

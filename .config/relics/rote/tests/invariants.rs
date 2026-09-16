@@ -8,9 +8,9 @@ mod support;
 
 use proptest::prelude::*;
 use rote::corpus::Corpus;
-use rote::corpus::record::{Event, Record};
+use rote::corpus::record::Event;
 use rote::ladder::Ladder;
-use support::{World, merged, shape, steps};
+use support::{Seeded, World, merged, shape, steps};
 
 proptest! {
     /// Whatever order the records arrive in, the corpus is the same one.
@@ -32,11 +32,12 @@ proptest! {
     }
 
     /// No two records share a merge key, so the order is total rather than
-    /// merely mostly-total.
+    /// merely mostly-total. The key is nothing a record carries: the file names
+    /// the machine and the line index is the position.
     #[test]
     fn the_merge_key_separates_every_record(script in steps()) {
         let records = World::build(&script);
-        let mut keys: Vec<_> = records.iter().map(rote::corpus::record::Record::order).collect();
+        let mut keys: Vec<_> = records.iter().map(Seeded::key).collect();
         let before = keys.len();
         keys.sort();
         keys.dedup();
@@ -51,9 +52,9 @@ proptest! {
         let ladder = Ladder::default();
         let with = Corpus::replay(merged(&records), &ladder);
 
-        let without: Vec<Record> = records
+        let without: Vec<Seeded> = records
             .iter()
-            .filter(|record| !matches!(record.event, Event::Attach(_)))
+            .filter(|seeded| !matches!(seeded.record.event, Event::Attach(_)))
             .cloned()
             .collect();
         let without = Corpus::replay(merged(&without), &ladder);

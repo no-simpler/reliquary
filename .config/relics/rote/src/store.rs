@@ -321,14 +321,12 @@ impl Store {
                 "the corpus holds a record written by a newer rote, so this one will not add to it"
             ));
         }
-        let (prev, seq) = self.chains.head(&self.machine);
+        let prev = self.chains.head(&self.machine);
         let record = Record {
             v: SCHEMA,
             at: at.round(jiff::Unit::Second).unwrap_or(at),
             day,
-            machine: self.machine.clone(),
             host: self.host.clone(),
-            seq,
             prev,
             event,
         };
@@ -487,7 +485,7 @@ mod tests {
 
     use super::{Cache, Clock, Env, Paths, Store, Witness, ensure_dir};
     use crate::config::Config;
-    use crate::corpus::record::{EngramId, Enrolled, Event, SCHEMA};
+    use crate::corpus::record::{Digest, EngramId, Enrolled, Event, SCHEMA};
     use crate::machine::MachineId;
 
     fn tree() -> (tempfile::TempDir, Paths, MachineId) {
@@ -575,8 +573,8 @@ mod tests {
         assert!(chains.issues.is_empty(), "{:?}", chains.issues);
         let records = chains.records();
         assert_eq!(records.len(), 2);
-        assert_eq!(records.first().map(|r| r.seq), Some(0));
-        assert_eq!(records.last().map(|r| r.seq), Some(1));
+        assert_eq!(records.first().map(|r| r.prev), Some(Digest::GENESIS));
+        assert_ne!(records.last().map(|r| r.prev), Some(Digest::GENESIS));
         assert_eq!(records.first().map(|r| r.v), Some(SCHEMA));
     }
 

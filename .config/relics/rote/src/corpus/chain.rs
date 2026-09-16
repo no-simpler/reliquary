@@ -3,8 +3,10 @@
 //! **Never merge a chain; sequence chains.** A hash chain is not a mergeable
 //! structure, so two machines never share one file. Each writes its own, and the
 //! corpus is the deterministic merge of all of them ordered by `(at, machine,
-//! seq)`. A flagship handover is then a new file rather than a fork in an old
-//! one.
+//! position)`, where the machine is the one the filename names and the position
+//! is the line's index in that file. Neither is written into a record: the file
+//! is the authority for both. A flagship handover is then a new file rather than
+//! a fork in an old one.
 //!
 //! The filename grammar is load-bearing rather than cosmetic. A conflict copy
 //! left beside a chain — `<id> (1).jsonl` from a file sync, `<id>.jsonl.orig`
@@ -48,24 +50,13 @@ pub enum Issue {
         /// What the parser said.
         why: String,
     },
-    /// A line whose `prev` does not match the line before it.
+    /// A line whose `prev` does not match the line before it. On line one the
+    /// line before it is genesis, so a chain whose head was cut shows here.
     ChainBreak {
         /// Whose chain.
         machine: MachineId,
         /// One-based line number.
         line: usize,
-    },
-    /// A line whose position does not follow the one before it, which is how a
-    /// truncated head becomes visible.
-    SeqBreak {
-        /// Whose chain.
-        machine: MachineId,
-        /// One-based line number.
-        line: usize,
-        /// The position the chain was at.
-        expected: u64,
-        /// The position the line claims.
-        found: u64,
     },
     /// A line from a schema this binary does not know.
     FromTheFuture {
@@ -76,14 +67,6 @@ pub enum Issue {
         /// The schema it claims.
         v: u32,
     },
-    /// A record that names a machine other than the file it sits in. The
-    /// filename is the authority.
-    MachineMismatch {
-        /// The file.
-        file: String,
-        /// What the record claims.
-        claimed: MachineId,
-    },
     /// A file in the chains directory that is not a chain. Its records are
     /// excluded, because reading a conflict copy would double the corpus.
     Foreign {
@@ -92,37 +75,30 @@ pub enum Issue {
     },
 }
 
-impl Issue {
-    /// Whether this leaves the corpus unreadable rather than merely suspect.
-    pub fn breaks_the_record(&self) -> bool {
-        match self {
-            Self::Malformed { .. }
-            | Self::ChainBreak { .. }
-            | Self::FromTheFuture { .. }
-            | Self::MachineMismatch { .. }
-            | Self::Foreign { .. } => true,
-            Self::SeqBreak { .. } => false,
-        }
-    }
-}
-
 /// One line, with what it takes to place it in the merge.
 #[derive(Clone, Debug)]
 pub struct Placed {
     /// The line.
     pub line: Line,
-    /// Whose chain it came from.
+    /// Whose chain it came from: the machine the filename names.
     pub machine: MachineId,
     /// When, for the merge. A malformed line inherits the instant of the last
     /// parsed line before it, so it sorts where it actually lives.
     pub at: Timestamp,
-    /// Position, for the merge.
-    pub seq: u64,
+    /// The line's index in its file, from zero, malformed lines included. The
+    /// tiebreak when two records share a second, which the rounding of `at`
+    /// makes common inside a sitting.
+    pub position: usize,
 }
 
 impl Placed {
-    fn order(&self) -> (Timestamp, &MachineId, u64) {
-        (self.at, &self.machine, self.seq)
+    /// The merge order across chains.
+    ///
+    /// `at` is the physical truth; `machine` breaks a cross-machine tie
+    /// arbitrarily but deterministically; `position` breaks an intra-machine
+    /// one.
+    fn order(&self) -> (Timestamp, &MachineId, usize) {
+        (self.at, &self.machine, self.position)
     }
 }
 
@@ -132,7 +108,6 @@ pub struct Chain {
     machine: MachineId,
     placed: Vec<Placed>,
     tail: Digest,
-    next_seq: u64,
 }
 
 impl Chain {
@@ -142,17 +117,14 @@ impl Chain {
             machine: machine.clone(),
             placed: Vec::new(),
             tail: Digest::GENESIS,
-            next_seq: 0,
         };
         let mut expected_prev = Digest::GENESIS;
-        let mut expected_seq = 0u64;
         let mut last_at: Option<Timestamp> = None;
 
         for (index, raw) in text.lines().filter(|l| !l.trim().is_empty()).enumerate() {
             let number = index.saturating_add(1);
             let line = Line::read(raw);
             let mut at = last_at.unwrap_or(Timestamp::UNIX_EPOCH);
-            let mut seq = expected_seq;
             match &line {
                 Line::Parsed(record) => {
                     if record.v > SCHEMA {
@@ -168,24 +140,8 @@ impl Chain {
                             line: number,
                         });
                     }
-                    if record.seq != expected_seq {
-                        issues.push(Issue::SeqBreak {
-                            machine: machine.clone(),
-                            line: number,
-                            expected: expected_seq,
-                            found: record.seq,
-                        });
-                    }
-                    if record.machine != *machine {
-                        issues.push(Issue::MachineMismatch {
-                            file: file_name(machine),
-                            claimed: record.machine.clone(),
-                        });
-                    }
                     at = record.at;
-                    seq = record.seq;
                     last_at = Some(record.at);
-                    expected_seq = record.seq.saturating_add(1);
                 }
                 Line::Malformed { why, .. } => {
                     issues.push(Issue::Malformed {
@@ -193,17 +149,15 @@ impl Chain {
                         line: number,
                         why: why.clone(),
                     });
-                    expected_seq = expected_seq.saturating_add(1);
                 }
             }
             expected_prev = Digest::of(raw);
             chain.tail = expected_prev;
-            chain.next_seq = expected_seq;
             chain.placed.push(Placed {
                 line,
                 machine: machine.clone(),
                 at,
-                seq,
+                position: index,
             });
         }
         chain
@@ -219,11 +173,6 @@ impl Chain {
         self.tail
     }
 
-    /// The position the next record takes.
-    pub fn next_seq(&self) -> u64 {
-        self.next_seq
-    }
-
     /// How many lines it holds, parsed or not.
     pub fn len(&self) -> usize {
         self.placed.len()
@@ -237,12 +186,12 @@ impl Chain {
     /// Note a line that has just been written.
     fn accept(&mut self, raw: &str, record: &Record) {
         self.tail = Digest::of(raw);
-        self.next_seq = record.seq.saturating_add(1);
+        let position = self.placed.len();
         self.placed.push(Placed {
             line: Line::Parsed(Box::new(record.clone())),
             machine: self.machine.clone(),
             at: record.at,
-            seq: record.seq,
+            position,
         });
     }
 }
@@ -345,16 +294,13 @@ impl Chains {
                 machine: machine.clone(),
                 placed: Vec::new(),
                 tail: Digest::GENESIS,
-                next_seq: 0,
             })
             .accept(raw, record);
     }
 
-    /// What the next record on this machine must carry.
-    pub fn head(&self, machine: &MachineId) -> (Digest, u64) {
-        self.get(machine).map_or((Digest::GENESIS, 0), |chain| {
-            (chain.tail(), chain.next_seq())
-        })
+    /// The digest the next record on this machine must carry as `prev`.
+    pub fn head(&self, machine: &MachineId) -> Digest {
+        self.get(machine).map_or(Digest::GENESIS, Chain::tail)
     }
 }
 
@@ -366,14 +312,12 @@ mod tests {
     use crate::corpus::record::{Digest, EngramId, Enrolled, Event, Record, SCHEMA, render};
     use crate::machine::MachineId;
 
-    fn record(machine: &MachineId, seq: u64, prev: Digest, day: Date, name: &str) -> Record {
+    fn record(prev: Digest, day: Date, name: &str) -> Record {
         Record {
             v: SCHEMA,
             at: day.to_zoned(jiff::tz::TimeZone::UTC).unwrap().timestamp(),
             day,
-            machine: machine.clone(),
             host: "Mac".to_owned(),
-            seq,
             prev,
             event: Event::Enroll(Enrolled {
                 slug: name.parse().unwrap(),
@@ -384,13 +328,12 @@ mod tests {
     }
 
     /// Build a well-formed chain body from names, one record per name.
-    fn body(machine: &MachineId, names: &[&str]) -> String {
+    fn body(names: &[&str]) -> String {
         let mut text = String::new();
         let mut prev = Digest::GENESIS;
-        for (index, name) in names.iter().enumerate() {
+        for name in names {
             let day = date(2026, 9, 10);
-            let seq = u64::try_from(index).unwrap();
-            let line = render(&record(machine, seq, prev, day, name)).unwrap();
+            let line = render(&record(prev, day, name)).unwrap();
             prev = Digest::of(&line);
             text.push_str(&line);
             text.push('\n');
@@ -418,60 +361,46 @@ mod tests {
     fn a_well_formed_chain_reports_nothing() {
         let machine = MachineId::of("a");
         let mut issues = Vec::new();
-        let chain = Chain::parse(&machine, &body(&machine, &["a", "b"]), &mut issues);
+        let chain = Chain::parse(&machine, &body(&["a", "b"]), &mut issues);
         assert!(issues.is_empty(), "{issues:?}");
         assert_eq!(chain.len(), 2);
-        assert_eq!(chain.next_seq(), 2);
         assert_ne!(chain.tail(), Digest::GENESIS);
     }
 
     #[test]
-    fn editing_a_line_breaks_its_position_and_every_digest_after_it() {
+    fn editing_a_line_breaks_every_digest_after_it() {
         let machine = MachineId::of("a");
-        let text = body(&machine, &["a", "b", "c"]);
+        let text = body(&["a", "b", "c"]);
         let edited: Vec<String> = text
             .lines()
             .enumerate()
             .map(|(index, line)| {
                 if index == 1 {
-                    line.replace("\"seq\":1", "\"seq\":7")
+                    line.replace("\"critical\":false", "\"critical\":true")
                 } else {
                     line.to_owned()
                 }
             })
             .collect();
+        assert_ne!(edited.join("\n"), text.trim_end(), "the edit took");
 
         let mut issues = Vec::new();
         Chain::parse(&machine, &edited.join("\n"), &mut issues);
-        assert!(
-            issues
-                .iter()
-                .any(|i| matches!(i, Issue::SeqBreak { line: 2, .. })),
-            "the edited line's own position no longer follows"
-        );
-        assert!(
-            issues
-                .iter()
-                .any(|i| matches!(i, Issue::ChainBreak { line: 3, .. })),
-            "and the line after it no longer chains"
+        assert_eq!(
+            issues,
+            vec![Issue::ChainBreak { machine, line: 3 }],
+            "the edited line still chains to the one before it; the one after it does not"
         );
     }
 
     #[test]
-    fn a_truncated_head_shows_up_as_a_position_that_does_not_start_at_zero() {
+    fn a_truncated_head_shows_up_as_a_break_on_line_one() {
         let machine = MachineId::of("a");
-        let text = body(&machine, &["a", "b", "c"]);
+        let text = body(&["a", "b", "c"]);
         let kept: Vec<&str> = text.lines().skip(1).collect();
         let mut issues = Vec::new();
         Chain::parse(&machine, &kept.join("\n"), &mut issues);
-        assert!(issues.iter().any(|i| matches!(
-            i,
-            Issue::SeqBreak {
-                expected: 0,
-                found: 1,
-                ..
-            }
-        )));
+        assert_eq!(issues, vec![Issue::ChainBreak { machine, line: 1 }]);
     }
 
     #[test]
@@ -488,7 +417,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = camino::Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
         let machine = MachineId::of("a");
-        let text = body(&machine, &["a", "b"]);
+        let text = body(&["a", "b"]);
         std::fs::write(root.join(file_name(&machine)), &text).unwrap();
         std::fs::write(root.join(format!("{machine}.jsonl.orig")), &text).unwrap();
         std::fs::write(root.join(".DS_Store"), "junk").unwrap();
@@ -512,43 +441,26 @@ mod tests {
     }
 
     #[test]
-    fn a_record_that_names_another_machine_than_its_file_is_reported() {
-        let mine = MachineId::of("a");
-        let theirs = MachineId::of("b");
-        let mut issues = Vec::new();
-        Chain::parse(&mine, &body(&theirs, &["a"]), &mut issues);
-        assert!(
-            issues
-                .iter()
-                .any(|i| matches!(i, Issue::MachineMismatch { .. }))
-        );
-    }
-
-    #[test]
     fn the_merge_orders_by_instant_then_machine_then_position() {
         let dir = tempfile::tempdir().unwrap();
         let root = camino::Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
         let first = MachineId::of("aaa");
         let second = MachineId::of("zzz");
-        std::fs::write(root.join(file_name(&first)), body(&first, &["a", "b"])).unwrap();
-        std::fs::write(root.join(file_name(&second)), body(&second, &["c"])).unwrap();
+        std::fs::write(root.join(file_name(&first)), body(&["a", "b"])).unwrap();
+        std::fs::write(root.join(file_name(&second)), body(&["c"])).unwrap();
 
         let chains = Chains::load(&root).unwrap();
         assert!(chains.issues.is_empty(), "{:?}", chains.issues);
-        let order: Vec<(String, u64)> = chains
-            .records()
+        let order: Vec<(&MachineId, usize)> = chains
+            .placed()
             .iter()
-            .map(|record| (record.machine.to_string(), record.seq))
+            .map(|placed| (&placed.machine, placed.position))
             .collect();
-        let machines: Vec<&String> = order.iter().map(|(machine, _)| machine).collect();
-        assert_eq!(machines.len(), 3);
         // Same instant throughout, so machine breaks the tie and position
         // orders within one.
-        assert_eq!(order.first().map(|(_, seq)| *seq), Some(0));
-        assert!(
-            machines.first() < machines.last(),
-            "a cross-machine tie breaks deterministically"
-        );
+        let mut expected = vec![(&first, 0), (&first, 1), (&second, 0)];
+        expected.sort();
+        assert_eq!(order, expected);
         assert_eq!(chains.machines().count(), 2);
         assert_eq!(chains.len(), 3);
     }
@@ -558,6 +470,6 @@ mod tests {
         let chains = Chains::load(camino::Utf8Path::new("/nowhere/at/all")).unwrap();
         assert!(chains.is_empty());
         assert!(chains.issues.is_empty());
-        assert_eq!(chains.head(&MachineId::of("a")), (Digest::GENESIS, 0));
+        assert_eq!(chains.head(&MachineId::of("a")), Digest::GENESIS);
     }
 }

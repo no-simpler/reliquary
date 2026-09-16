@@ -188,7 +188,6 @@ mod tests {
         Captured, Digest, EngramId, Event, Outcome, Record, SCHEMA, SittingId,
     };
     use crate::ladder::Occasion;
-    use crate::machine::MachineId;
 
     fn sample(
         day: Date,
@@ -203,9 +202,7 @@ mod tests {
             v: SCHEMA,
             at: day.to_zoned(jiff::tz::TimeZone::UTC).unwrap().timestamp(),
             day,
-            machine: MachineId::of("test"),
             host: "Mac".to_owned(),
-            seq: 0,
             prev: Digest::GENESIS,
             event: Event::Capture(Captured {
                 slug: "a".parse().unwrap(),

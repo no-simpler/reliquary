@@ -8,10 +8,13 @@
 //!
 //! Every record carries `prev`, the SHA-256 of the preceding line in its own
 //! chain. That is **tamper evidence and corruption detection, not a control** —
-//! anyone who can edit the file can recompute the chain. It catches edits and
-//! interior deletions. It does **not** catch truncation of the tail, and with
-//! one chain per machine it does not catch a whole chain being deleted either;
-//! `seq` starting at zero is what makes truncation of the *head* visible.
+//! anyone who can edit the file can recompute the chain. It catches edits,
+//! interior deletions and a cut head, because the first line's `prev` is the
+//! genesis digest. It does **not** catch truncation of the tail, and with one
+//! chain per machine it does not catch a whole chain being deleted either.
+//!
+//! The envelope carries no machine and no position: the file a line sits in
+//! names the machine, and the line's index in that file is its position.
 //!
 //! **A record stores what its writer believed.** `scheduled_interval_days` and
 //! `rung_after` are authoritative — they are what the scheduler decided at the
@@ -33,11 +36,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::ladder::Occasion;
-use crate::machine::MachineId;
 use crate::slug::Slug;
 
 /// The schema this binary writes and understands.
-pub const SCHEMA: u32 = 4;
+pub const SCHEMA: u32 = 5;
 
 fn hex_nibble(byte: u8) -> Option<u8> {
     match byte {
@@ -257,28 +259,13 @@ pub struct Record {
     /// The drill day it was credited to, frozen at write time so a later change
     /// of timezone cannot re-date history.
     pub day: Date,
-    /// The machine that wrote it. Also the name of the chain it belongs to.
-    pub machine: MachineId,
-    /// The label that machine wore at the time. Never an identity.
+    /// The label the writing machine wore at the time. Never an identity: the
+    /// machine is named by the file this line sits in.
     pub host: String,
-    /// Position within its own chain, from zero. The tiebreak when two records
-    /// share a second, and what makes a truncated head visible.
-    pub seq: u64,
     /// SHA-256 of the preceding line in this chain.
     pub prev: Digest,
     /// What happened.
     pub event: Event,
-}
-
-impl Record {
-    /// The merge order across chains.
-    ///
-    /// `at` is the physical truth; `machine` breaks a cross-machine tie
-    /// arbitrarily but deterministically; `seq` breaks an intra-machine one,
-    /// which the rounding of `at` to the second makes common inside a sitting.
-    pub fn order(&self) -> (Timestamp, &MachineId, u64) {
-        (self.at, &self.machine, self.seq)
-    }
 }
 
 /// What a record records.
@@ -525,16 +512,13 @@ mod tests {
         render,
     };
     use crate::ladder::Occasion;
-    use crate::machine::MachineId;
 
     fn capture() -> Record {
         Record {
             v: SCHEMA,
             at: "2026-09-10T07:12:03Z".parse().unwrap(),
             day: date(2026, 9, 10),
-            machine: MachineId::of("test"),
             host: "Mac".to_owned(),
-            seq: 0,
             prev: Digest::GENESIS,
             event: Event::Capture(Captured {
                 slug: "escrow-p".parse().unwrap(),

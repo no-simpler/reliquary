@@ -401,7 +401,6 @@ mod tests {
 
     use super::{Corpus, record::*};
     use crate::ladder::{Ladder, Occasion, Rung, Standing};
-    use crate::machine::MachineId;
 
     fn at(day: Date) -> jiff::Timestamp {
         day.to_zoned(jiff::tz::TimeZone::UTC).unwrap().timestamp()
@@ -412,9 +411,7 @@ mod tests {
             v: SCHEMA,
             at: at(day),
             day,
-            machine: MachineId::of("test"),
             host: "Mac".to_owned(),
-            seq: 0,
             prev: Digest::GENESIS,
             event,
         }
