@@ -2,4 +2,4 @@ cask "diffusionbee"
 
 # Audio transcription (halo/alfred tess)
 brew "ffmpeg"
-brew "whisper-cpp"
+brew "whisper.cpp"
