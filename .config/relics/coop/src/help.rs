@@ -1,13 +1,13 @@
 //! Reference: the contracts, the files, the exit codes.
 
 /// Every reference topic, in the order a reader meets them.
-pub const TOPICS: &[(&str, &str)] = &[("wiring", WIRING), ("tiers", TIERS), ("keys", KEYS)];
+pub const TOPICS: &[(&str, &str)] = &[("wiring", WIRING), ("tiers", TIERS)];
 
 const WIRING: &str = "\
 wiring
 
-  Every interactive shell runs coop tick before every prompt, and reads the
-  badge file with a shell builtin so one exec serves both surfaces.
+  Every interactive shell runs coop tick before every prompt, then reads the
+  badge file with a shell builtin, so one exec serves both surfaces.
 
   The hook is registered in shell/interactive.d/050-prompt.zsh, its bash twin,
   and fish/conf.d/050-prompt.fish, beside the ske one and before oh-my-posh is
@@ -19,44 +19,61 @@ wiring
   its own status makes the shell forget what the last command did, which shows
   up as a prompt that is always the colour of success.
 
-  The prompt segment is a text segment over .Env.COOP_BADGE in
-  oh-my-posh/dreamsofautonomy.toml. The command segment type was removed
-  upstream in v29 and renders nothing without erroring, so an environment
-  variable is the supported route.
+  The badge file holds two fields, the count and the digest of the outstanding
+  set, or nothing. The hook exports them as COOP_BADGE and COOP_SEEN. The
+  prompt segment is a text segment over .Env.COOP_BADGE in
+  oh-my-posh/dreamsofautonomy.toml; the next tick draws the card only when
+  COOP_SEEN differs from the digest it computes. A shell keeps that in its own
+  environment, for exactly as long as it lives.
 
 files
 
   ~/.config/coop/config.toml        style and width
   ~/.config/coop/sources.d/*.toml   one declaration per file, tracked
-  ~/.local/state/coop/cache/        what each asked source last said
-  ~/.local/state/coop/seen/         what each shell has been shown
-  ~/.local/state/coop/badge         the prompt segment
+  ~/.local/state/coop/badge         count and digest, for the hook
+  ~/.local/state/coop/first-seen.json  when each notice arrived, for doctor
 
 environment
 
   COOP_ROOT      the state tree
   COOP_CONFIG    the config tree
   COOP_UI        the default output shape
-  COOP_SESSION   this shell's identity, exported once by the hook
+  COOP_SEEN      the digest this shell was last shown, exported by the hook
   COOP_DISABLE   set to anything and the tick draws nothing
 
 exit codes
 
   0  what was asked for
-  1  doctor found something soft, or a refresh failed
+  1  doctor found something soft
   2  doctor found something broken
 ";
 
 const TIERS: &str = "\
 tiers
 
-  A declaration is either a condition coop evaluates itself, or a command coop
-  runs for an answer. Nothing else.
+  coop holds no answer of its own. Every source is evaluated afresh before
+  every prompt, and a declaration picks one of three tiers by how expensive
+  its answer is.
 
-  when — stat and arithmetic, inline, before every prompt. No subprocess, so
-  this is the tier to reach for. A path that has not been touched in a day, a
-  path that exists, an instant that has passed, and all-of, any-of and not over
-  those.
+  when   coop stats a path. The producer writes a stamp when it runs.
+  ask    coop runs the producer, every prompt, killed at 50ms. The producer
+         answers read-only from its own state.
+  read   coop reads a report file. The producer rewrites it on its own
+         cadence: launchd, up, a hook, its own last run.
+
+  A producer that cannot answer within the budget belongs in read or when,
+  never in ask; doctor says so when one is over. Whatever caching a producer
+  needs is the producer's, because only it knows when its truth changes.
+
+  A producer does not keep state for coop's benefit, does not retract
+  anything, and does not colour its output. Something it gets wrong lands in
+  doctor, never on the card.
+
+  when — stat and arithmetic. A path that has not been touched in a span, a
+  path that exists, an instant that has passed, and all-of, any-of and not
+  over those. A when source states its own summary and fix, because a
+  predicate has no other way to say anything; summary-missing is for a path
+  that is not there at all, when that reads differently from stale.
 
     [source]
     id = \"up\"
@@ -69,19 +86,11 @@ tiers
     older-than = \"1d\"
     missing = \"fire\"
 
-  ask — a command, memoized. Its answer is cached and reused while a refresh
-  runs behind the prompt, so a producer is never on the path a prompt waits on.
-  kind is findings for anything answering doctor --format json, and text for
-  anything else, whose non-blank lines become notices verbatim.
-
-  The exit status means different things across the two. A findings producer
-  reports its grade through it, so a non-zero status there is the answer. A
-  text producer has no such channel, so for it a non-zero status is a failure:
-  the card says nothing and doctor reports it.
-
-  Either way a failed answer is cached like a successful one, so a producer
-  that is reliably broken is retried on its own refresh interval rather than
-  from every prompt.
+  ask — a command. kind is findings for anything answering doctor --format
+  json, and text for anything else, whose non-blank lines become notices
+  verbatim. A findings producer reports its grade through its exit status, so
+  a non-zero status is the answer; a text producer has no such channel, so
+  there a non-zero status is a failure.
 
     [source]
     id = \"rote\"
@@ -89,35 +98,21 @@ tiers
     [source.ask]
     run = [\"rote\", \"banner\", \"--format\", \"json\"]
     kind = \"findings\"
-    refresh = \"10m\"
-    keys = [\"~/.local/state/rote/cache.json\", \"day:04:00\"]
 
-  A when source states its own summary and fix, because a predicate has no
-  other way to say anything. summary-missing is for the case where a path that
-  is not there at all reads differently from one that is merely stale. An ask source takes both from its producer.
+  read — a file, in the same two kinds. expect-every is what the producer
+  promises; past it, doctor reports the producer has stopped, and the card
+  keeps showing what is there.
 
-  A source whose program is not on this machine goes dormant. Declarations are
-  tracked and travel; producers do not.
-";
+    [source]
+    id = \"slow\"
 
-const KEYS: &str = "\
-keys
+    [source.read]
+    path = \"~/.local/state/slow/report.json\"
+    kind = \"findings\"
+    expect-every = \"1d\"
 
-  refresh is a guess about how fast the world moves. keys is an answer.
-
-  Each entry is either a path, whose modification time and size are read, or a
-  day, whose calendar date is read under a rollover that need not be midnight.
-  An answer is reused until the clock passes refresh or any key moves,
-  whichever comes first.
-
-    keys = [\"~/.local/state/rote/cache.json\", \"day:04:00\"]
-
-  That pair says: ask again when the file rote derives its count from changes,
-  and ask again when the drill day turns over at four in the morning. Between
-  those, the answer cannot have changed, so nothing runs.
-
-  A path that is absent fingerprints as absent, which is itself a fact that can
-  change. A declaration with no keys falls back to the clock alone.
+  A source whose program or report is not on this machine is dormant.
+  Declarations are tracked and travel; producers do not.
 ";
 
 /// One topic, by name.

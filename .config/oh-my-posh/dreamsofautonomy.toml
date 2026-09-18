@@ -47,8 +47,9 @@ final_space = true
   #
   # $COOP_BADGE is refreshed before each render by _coop_precmd in
   # shell/interactive.d/050-prompt.{zsh,bash} and fish/conf.d/050-prompt.fish,
-  # which reads it from a file coop tick wrote, so the prompt costs no exec of
-  # its own. Same env-var route as ske below, for the same upstream reason.
+  # which reads it (with $COOP_SEEN) from a file coop tick wrote, so the prompt
+  # costs no exec of its own. Same env-var route as ske below, for the same
+  # upstream reason.
   #
   # Ahead of ske so ske keeps the screen edge.
   [[blocks.segments]]

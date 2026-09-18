@@ -121,10 +121,6 @@ impl Rote {
         self.state.join("verifiers.toml")
     }
 
-    pub fn stamp_path(&self) -> Utf8PathBuf {
-        self.state.join("stamp")
-    }
-
     /// Take the flagship marker away.
     pub fn demote(&self) {
         let _ = std::fs::remove_file(&self.marker);

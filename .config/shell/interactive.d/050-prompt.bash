@@ -21,23 +21,21 @@ _ske_window() {
 }
 
 ## coop: draw the card when the outstanding set has moved, and publish the count
-## into $COOP_BADGE for the oh-my-posh `text` segment. Mirrors 050-prompt.{zsh,fish}.
+## into $COOP_BADGE for the oh-my-posh `text` segment; $COOP_SEEN is the digest
+## this shell was last shown. Mirrors 050-prompt.{zsh,fish}.
 _coop_precmd() {
     local last=$?
     command coop tick 2>/dev/null
     local badge="${COOP_ROOT:-$HOME/.local/state/coop}/badge"
     if [ -r "$badge" ] && [ -s "$badge" ]; then
-        COOP_BADGE="$(<"$badge")"
-        export COOP_BADGE
+        local count digest
+        read -r count digest <"$badge"
+        export COOP_BADGE="$count" COOP_SEEN="$digest"
     else
-        unset COOP_BADGE
+        unset COOP_BADGE COOP_SEEN
     fi
     return $last
 }
-
-## One identity per shell, so a second terminal is shown the card too and
-## neither repeats it.
-export COOP_SESSION="$$-$RANDOM"
 
 if command -v oh-my-posh &>/dev/null && [ "$TERM_PROGRAM" != "Apple_Terminal" ]; then
     ## Prepended to PROMPT_COMMAND so it runs before oh-my-posh's own hook, which

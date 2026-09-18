@@ -23,6 +23,10 @@ sources
   up already writes, which means running up is the dismissal. Neither producer
   migrated into coop needed a line of code written for it.
 
+  coop holds no answer of its own. It evaluates every source afresh before
+  every prompt; a producer that needs a cache owns it, because only the
+  producer knows when its truth changes.
+
   Two rules decide whether something belongs here.
 
   It must be actionable. A source states what retires it, and coop refuses a

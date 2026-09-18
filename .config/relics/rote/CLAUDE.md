@@ -80,7 +80,7 @@ sitting/mod.rs    the roster, and the loop that works through it
 sitting/screen.rs the sitting's own layout, as a pure function from frame to card
 slug.rs           a validated lineage name
 stats.rs          retention, latency, lateness, the streak, every fail — pure
-store.rs          the three homes, the clock, locking, appending, the stamp
+store.rs          the three homes, the clock, locking, appending
 tui/mod.rs        the traits, the entry loop, the key intents, render_field
 tui/card.rs       the box and the one entry line; colour is relic_core::style
 tui/term.rs       crossterm: raw mode, the alternate screen, placement, restoration
@@ -394,11 +394,9 @@ Things a future edit must not undo.
 - **`banner` never resolves the machine identity**, which costs a subprocess, and
   it keeps nothing between calls. It rebuilds its answer read-only on every call,
   by the same path `status` and `doctor` take — no flagship gate, no hashing —
-  and anything it cannot read is nothing to say. What keeps that off every shell
-  prompt is `coop`: the stamp at `Paths::stamp()` is touched after
-  every write `rote` makes, and `coop` keys the call on it and on the day
-  rollover, so the answer is recomputed once per change rather than once per
-  prompt. **A reminder must not depend on state destroyed by the event it exists
+  and anything it cannot read is nothing to say. `coop` runs it before every
+  prompt under its budget, so it stays cheap: the corpus replays in ~2 ms.
+  **A reminder must not depend on state destroyed by the event it exists
   to announce**: reading the corpus and the verifier file afresh is what makes the
   state a restore leaves — every lineage dormant — answerable rather than silent.
 - **Every test sets `ROTE_ROOT` and `ROTE_STATE`.** They are seams, along with

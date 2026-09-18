@@ -814,41 +814,17 @@ fn the_reminder_never_resolves_the_machine_identity() {
 fn a_restored_machine_is_told_every_lineage_is_dormant() {
     // The corpus comes back and the verifiers do not, which is the one state
     // the attachment verb exists to serve. Nothing in the machine-local tree
-    // survives a restore either — no verifier, no stamp — and the reminder
-    // depends on none of it: it reads the corpus and the verifier file afresh.
+    // survives a restore either, and the reminder depends on none of it: it
+    // reads the corpus and the verifier file afresh.
     let mut rote = Rote::new();
     rote.enroll(day(2020, 1, 1), "a", false);
     rote.enroll(day(2020, 1, 1), "b", false);
     std::fs::remove_file(rote.verifiers_path()).unwrap();
-    assert!(!rote.stamp_path().exists());
     rote.cmd(&["banner"])
         .assert()
         .success()
         .stdout(predicate::str::contains("2 lineages dormant here"))
         .stdout(predicate::str::contains("due").not());
-}
-
-#[test]
-fn every_write_touches_the_stamp_and_a_reading_does_not() {
-    // The stamp is what the shell reminder keys on, so a write that misses it
-    // is a change the reminder never hears about. Enrolling saves a verifier
-    // and appends a record; retiring does both again; status writes nothing.
-    let rote = Rote::new();
-    assert!(!rote.stamp_path().exists());
-    rote.cmd(&["enroll", "a", "--stdin"])
-        .write_stdin(format!("{}\n", support::SECRET))
-        .assert()
-        .success();
-    assert!(rote.stamp_path().is_file());
-    assert_eq!(std::fs::read_to_string(rote.stamp_path()).unwrap(), "");
-
-    std::fs::remove_file(rote.stamp_path()).unwrap();
-    rote.cmd(&["status"]).assert().success();
-    rote.cmd(&["banner"]).assert().success();
-    assert!(!rote.stamp_path().exists());
-
-    rote.cmd(&["retire", "a"]).assert().success();
-    assert!(rote.stamp_path().is_file());
 }
 
 #[test]

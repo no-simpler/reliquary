@@ -23,8 +23,9 @@ function _ske_window --on-event fish_prompt
 end
 
 ## coop: draw the card when the outstanding set has moved, and publish the count
-## into $COOP_BADGE for the oh-my-posh `text` segment. One exec serves both: the
-## card goes to stdout, the count to a file this reads with a builtin.
+## into $COOP_BADGE for the oh-my-posh `text` segment; $COOP_SEEN is the digest
+## this shell was last shown. One exec serves both: the card goes to stdout, the
+## count and the digest to a file this reads with a builtin.
 ##
 ## No status guard here, unlike the zsh and bash twins: fish restores the last
 ## command's $status for fish_prompt whatever a handler did, which is measured
@@ -34,15 +35,13 @@ function _coop_precmd --on-event fish_prompt
     set -l badge "$HOME/.local/state/coop/badge"
     test -n "$COOP_ROOT"; and set badge "$COOP_ROOT/badge"
     if test -s "$badge"
-        set -gx COOP_BADGE (string collect <"$badge")
+        read -l count digest <"$badge"
+        set -gx COOP_BADGE $count
+        set -gx COOP_SEEN $digest
     else
-        set -e COOP_BADGE
+        set -e COOP_BADGE COOP_SEEN
     end
 end
-
-## One identity per shell, so a second terminal is shown the card too and
-## neither repeats it.
-set -gx COOP_SESSION $fish_pid-(random)
 
 if command -q oh-my-posh; and test "$TERM_PROGRAM" != Apple_Terminal
     oh-my-posh init fish --config ~/.config/oh-my-posh/dreamsofautonomy.toml | source

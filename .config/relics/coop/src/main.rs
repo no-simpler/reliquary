@@ -1,5 +1,4 @@
 mod ask;
-mod cache;
 mod card;
 mod cli;
 mod cmd;
@@ -10,11 +9,10 @@ mod help;
 mod notice;
 mod paths;
 mod predicate;
+mod records;
 mod render;
-mod session;
 mod source;
 mod span;
-mod state;
 
 use clap::{CommandFactory, Parser};
 
@@ -62,7 +60,6 @@ fn run(cli: &Cli) -> anyhow::Result<u8> {
         Some(Command::List) => cmd::list(&ctx)?,
         Some(Command::Show(args)) => return Ok(u8::from(!cmd::show(&ctx, args)?)),
         Some(Command::Sources) => cmd::sources(&ctx)?,
-        Some(Command::Refresh(args)) => return Ok(u8::from(!cmd::refresh(&ctx, args)?)),
         Some(Command::Doctor) => return cmd::run_doctor(&ctx),
         Some(Command::Completions(_) | Command::Help(_) | Command::Guide(_)) => {
             unreachable!("handled above")

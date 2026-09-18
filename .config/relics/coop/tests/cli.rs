@@ -4,6 +4,7 @@
 // is still exactly the tests.
 #![allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -16,7 +17,8 @@ struct Coop {
     base: PathBuf,
     config: PathBuf,
     state: PathBuf,
-    session: String,
+    /// The digest this shell was last shown — what the hook keeps in `COOP_SEEN`.
+    seen: RefCell<Option<String>>,
 }
 
 impl Coop {
@@ -33,7 +35,7 @@ impl Coop {
             base,
             config,
             state,
-            session: "test-session".to_owned(),
+            seen: RefCell::new(None),
         }
     }
 
@@ -43,13 +45,24 @@ impl Coop {
             .args(args)
             .env("COOP_CONFIG", &self.config)
             .env("COOP_ROOT", &self.state)
-            .env("COOP_SESSION", &self.session)
             // HOME is where a tilde in a declaration expands to.
             .env("HOME", &self.base)
             .env("CLAUDECODE", "1")
             .env_remove("COOP_UI")
-            .env_remove("COOP_DISABLE");
+            .env_remove("COOP_DISABLE")
+            .env_remove("COOP_SEEN");
+        if let Some(seen) = self.seen.borrow().as_deref() {
+            command.env("COOP_SEEN", seen);
+        }
         command.assert()
+    }
+
+    /// One prompt: the tick, then what the hook does with the badge file.
+    fn tick(&self) -> String {
+        let card = self.card(&["tick"]);
+        let badge = self.badge_file();
+        *self.seen.borrow_mut() = badge.split_once(' ').map(|(_, digest)| digest.to_owned());
+        card
     }
 
     /// The card is only ever drawn for a person, so a test that wants one says so.
@@ -78,17 +91,25 @@ impl Coop {
         path
     }
 
-    fn badge(&self) -> String {
+    fn badge_file(&self) -> String {
         std::fs::read_to_string(self.state.join("badge")).unwrap_or_default()
     }
 
-    fn with_session(&self, session: &str) -> Self {
+    /// The count, which is the first field of the badge file.
+    fn badge(&self) -> String {
+        self.badge_file()
+            .split_once(' ')
+            .map_or(String::new(), |(count, _)| count.to_owned())
+    }
+
+    /// Another shell over the same machine: nothing shown to it yet.
+    fn another_shell(&self) -> Self {
         Self {
             _dir: TempDir::new().expect("an unused handle"),
             base: self.base.clone(),
             config: self.config.clone(),
             state: self.state.clone(),
-            session: session.to_owned(),
+            seen: RefCell::new(None),
         }
     }
 }
@@ -251,7 +272,6 @@ id = "rote"
 [source.ask]
 run = ["{}"]
 kind = "findings"
-refresh = "10m"
 "#,
             producer.display()
         ),
@@ -274,7 +294,6 @@ fix = "do the thing"
 [source.ask]
 run = ["{}"]
 kind = "text"
-refresh = "10m"
 "#,
             producer.display()
         ),
@@ -283,7 +302,7 @@ refresh = "10m"
 }
 
 #[test]
-fn a_cached_answer_is_reused_rather_than_asked_again() {
+fn a_producer_is_asked_afresh_at_every_prompt() {
     let coop = Coop::new();
     let ledger = coop.base.join("runs");
     let producer = coop.producer(
@@ -301,7 +320,6 @@ fix = "act"
 [source.ask]
 run = ["{}"]
 kind = "text"
-refresh = "1h"
 "#,
             producer.display()
         ),
@@ -310,56 +328,49 @@ refresh = "1h"
         assert!(coop.card(&[]).contains("still outstanding"));
     }
     let runs = std::fs::read_to_string(&ledger).unwrap_or_default();
-    assert_eq!(
-        runs.lines().count(),
-        1,
-        "the producer ran once, not per read"
-    );
+    assert_eq!(runs.lines().count(), 3, "coop holds no answer of its own");
 }
 
 #[test]
-fn a_moved_key_asks_again_even_though_the_clock_has_not_moved() {
+fn a_producer_over_the_budget_is_killed_and_reported_rather_than_waited_on() {
     let coop = Coop::new();
-    let watched = coop.stamp("watched");
-    let ledger = coop.base.join("runs");
-    let producer = coop.producer(
-        "keyed",
-        &format!("echo x >> {}\necho 'still outstanding'", ledger.display()),
-    );
+    stale_stamp(&coop);
+    let producer = coop.producer("slow", "sleep 2\necho 'too late'");
     coop.declare(
-        "keyed.toml",
+        "slow.toml",
         &format!(
             r#"
 [source]
-id = "keyed"
+id = "slow"
 fix = "act"
 
 [source.ask]
 run = ["{}"]
 kind = "text"
-refresh = "1h"
-keys = ["{}"]
 "#,
-            producer.display(),
-            watched.display()
+            producer.display()
         ),
     );
-    coop.card(&[]);
-    std::fs::write(&watched, "a longer body, so size moves").expect("a write");
-    coop.run(&["refresh"]).success();
-    let runs = std::fs::read_to_string(&ledger).unwrap_or_default();
-    assert_eq!(
-        runs.lines().count(),
-        2,
-        "the key moved, so the answer had to"
+    let started = std::time::Instant::now();
+    let card = coop.card(&[]);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(1),
+        "the budget is a cap"
     );
+    assert!(card.contains("since the last system update"), "{card}");
+    assert!(!card.contains("too late"), "{card}");
+    coop.run(&["sources"])
+        .success()
+        .stdout(predicate::str::contains("ask  slow"));
+    coop.run(&["doctor"])
+        .code(1)
+        .stdout(predicate::str::contains("over the prompt budget"));
 }
 
 #[test]
-fn a_producer_that_fails_is_stamped_so_it_does_not_refork_every_prompt() {
+fn a_producer_that_fails_is_doctors_to_report_and_never_the_cards() {
     let coop = Coop::new();
-    let ledger = coop.base.join("attempts");
-    let producer = coop.producer("broken", &format!("echo x >> {}\nexit 7", ledger.display()));
+    let producer = coop.producer("broken", "echo 'half an answer'\nexit 7");
     coop.declare(
         "broken.toml",
         &format!(
@@ -371,23 +382,15 @@ fix = "act"
 [source.ask]
 run = ["{}"]
 kind = "text"
-refresh = "1h"
 "#,
             producer.display()
         ),
     );
-    for _ in 0..3 {
-        coop.card(&["tick"]);
-    }
-    let attempts = std::fs::read_to_string(&ledger).unwrap_or_default();
-    assert_eq!(
-        attempts.lines().count(),
-        1,
-        "a reliably broken producer must not be re-run from every prompt"
-    );
+    assert_eq!(coop.card(&["tick"]), "");
     coop.run(&["doctor"])
         .code(1)
-        .stdout(predicate::str::contains("answered with a failure"));
+        .stdout(predicate::str::contains("answered with a failure"))
+        .stdout(predicate::str::contains("exited 7"));
 }
 
 #[test]
@@ -403,7 +406,6 @@ id = "absent"
 [source.ask]
 run = ["/definitely/not/here"]
 kind = "text"
-refresh = "10m"
 "#,
     );
     // The declaration travels; the producer does not. The other source still works.
@@ -415,6 +417,67 @@ refresh = "10m"
 }
 
 // ---------------------------------------------------------------------------
+// The read tier
+// ---------------------------------------------------------------------------
+
+fn read_source(coop: &Coop, expect_every: Option<&str>) -> PathBuf {
+    let report = coop.base.join("report.json");
+    let promise = expect_every.map_or(String::new(), |span| format!("expect-every = \"{span}\"\n"));
+    coop.declare(
+        "slow.toml",
+        &format!(
+            r#"
+[source]
+id = "slow"
+
+[source.read]
+path = "{}"
+kind = "findings"
+{promise}"#,
+            report.display()
+        ),
+    );
+    report
+}
+
+#[test]
+fn a_read_source_shows_what_its_producer_last_wrote_and_is_dormant_before_it_has() {
+    let coop = Coop::new();
+    let report = read_source(&coop, None);
+    coop.run(&["sources"])
+        .success()
+        .stdout(predicate::str::contains("read  dormant"));
+    std::fs::write(
+        &report,
+        r#"{"station":"slow","outcome":{"ran":[{"station":"slow","severity":"soft","summary":"3 things to review","fix":"slow"}]}}"#,
+    )
+    .expect("a report");
+    assert!(coop.card(&[]).contains("3 things to review"));
+    coop.run(&["sources"])
+        .success()
+        .stdout(predicate::str::contains("read  live"));
+}
+
+#[test]
+fn a_read_report_older_than_promised_is_still_shown_and_doctor_says_the_producer_stopped() {
+    let coop = Coop::new();
+    let report = read_source(&coop, Some("1h"));
+    std::fs::write(
+        &report,
+        r#"{"station":"slow","outcome":{"ran":[{"station":"slow","severity":"soft","summary":"3 things to review","fix":"slow"}]}}"#,
+    )
+    .expect("a report");
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 3600);
+    std::fs::File::open(&report)
+        .and_then(|file| file.set_modified(old))
+        .expect("an old report");
+    assert!(coop.card(&[]).contains("3 things to review"));
+    coop.run(&["doctor"])
+        .code(1)
+        .stdout(predicate::str::contains("older than its producer promised"));
+}
+
+// ---------------------------------------------------------------------------
 // Cadence
 // ---------------------------------------------------------------------------
 
@@ -422,26 +485,49 @@ refresh = "10m"
 fn the_card_is_drawn_once_per_shell_and_not_again() {
     let coop = Coop::new();
     stale_stamp(&coop);
-    assert!(coop.card(&["tick"]).contains("╭"), "the first prompt draws");
-    assert_eq!(coop.card(&["tick"]), "", "every prompt after it does not");
-    assert_eq!(coop.card(&["tick"]), "");
+    assert!(coop.tick().contains("╭"), "the first prompt draws");
+    assert_eq!(coop.tick(), "", "every prompt after it does not");
+    assert_eq!(coop.tick(), "");
 }
 
 #[test]
 fn a_second_shell_is_shown_the_card_too() {
     let coop = Coop::new();
     stale_stamp(&coop);
-    assert!(coop.card(&["tick"]).contains("╭"));
-    let second = coop.with_session("another-shell");
-    assert!(second.card(&["tick"]).contains("╭"));
+    assert!(coop.tick().contains("╭"));
+    let second = coop.another_shell();
+    assert!(second.tick().contains("╭"));
+}
+
+#[test]
+fn a_shell_that_inherits_what_its_parent_was_shown_does_not_repeat_it() {
+    let coop = Coop::new();
+    stale_stamp(&coop);
+    assert!(coop.tick().contains("╭"));
+    let nested = Coop {
+        seen: RefCell::new(coop.seen.borrow().clone()),
+        ..coop.another_shell()
+    };
+    assert_eq!(nested.tick(), "");
+}
+
+#[test]
+fn the_badge_file_carries_the_digest_the_hook_hands_back() {
+    let coop = Coop::new();
+    stale_stamp(&coop);
+    coop.tick();
+    let badge = coop.badge_file();
+    let (count, digest) = badge.split_once(' ').expect("two fields");
+    assert_eq!(count, "1");
+    assert_eq!(digest.len(), 16, "an FNV-1a digest in hex");
 }
 
 #[test]
 fn a_changed_set_draws_again_in_a_shell_that_had_already_been_shown() {
     let coop = Coop::new();
     stale_stamp(&coop);
-    assert!(coop.card(&["tick"]).contains("up"));
-    assert_eq!(coop.card(&["tick"]), "");
+    assert!(coop.tick().contains("up"));
+    assert_eq!(coop.tick(), "");
 
     coop.declare(
         "other.toml",
@@ -456,20 +542,24 @@ path = "/"
 exists = true
 "#,
     );
-    assert!(coop.card(&["tick"]).contains("something else arrived"));
+    assert!(coop.tick().contains("something else arrived"));
 }
 
 #[test]
 fn the_badge_tracks_the_count_and_clears_itself() {
     let coop = Coop::new();
     stale_stamp(&coop);
-    coop.card(&["tick"]);
+    coop.tick();
     assert_eq!(coop.badge(), "1");
     coop.run(&["prompt"]).success().stdout("1");
 
     std::fs::remove_file(coop.config.join("sources.d").join("up.toml")).expect("a removal");
-    coop.card(&["tick"]);
-    assert_eq!(coop.badge(), "", "an empty coop leaves no badge behind");
+    coop.tick();
+    assert_eq!(
+        coop.badge_file(),
+        "",
+        "an empty coop leaves no badge behind"
+    );
 }
 
 #[test]
@@ -490,7 +580,6 @@ fn the_kill_switch_silences_the_tick() {
         .args(["--format", "human", "--color", "never", "tick"])
         .env("COOP_CONFIG", &coop.config)
         .env("COOP_ROOT", &coop.state)
-        .env("COOP_SESSION", &coop.session)
         .env("HOME", &coop.base)
         .env("COOP_DISABLE", "1");
     command.assert().success().stdout("");
@@ -612,7 +701,6 @@ id = "p"
 [source.ask]
 run = ["{}"]
 kind = "findings"
-refresh = "10m"
 "#,
             producer.display()
         ),
@@ -711,7 +799,6 @@ id = "noted"
 [source.ask]
 run = ["{}"]
 kind = "findings"
-refresh = "10m"
 "#,
             producer.display()
         ),
@@ -749,7 +836,6 @@ fn nothing_the_binary_prints_uses_backticks() {
         vec!["guide", "cadence"],
         vec!["help", "wiring"],
         vec!["help", "tiers"],
-        vec!["help", "keys"],
     ] {
         let output = coop.run(&args).get_output().stdout.clone();
         let text = String::from_utf8(output).expect("utf-8");

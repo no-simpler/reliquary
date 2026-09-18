@@ -214,28 +214,6 @@ impl Paths {
     pub fn verifiers(&self) -> Utf8PathBuf {
         self.state_dir.join("verifiers.toml")
     }
-
-    /// The stamp: touched after any write `rote` makes, here or to the
-    /// chain. Its content is nothing; the modification time is the fact, and
-    /// it is what `coop` keys the reminder on.
-    pub fn stamp(&self) -> Utf8PathBuf {
-        self.state_dir.join("stamp")
-    }
-}
-
-/// Touch the stamp.
-///
-/// Called after any write `rote` makes — a record appended, a verifier saved
-/// — so a reader that watches one file sees every change. Nothing reads its
-/// content, only its modification time.
-///
-/// # Errors
-///
-/// When the tree cannot be created or the stamp cannot be written.
-pub fn touch_stamp(paths: &Paths) -> Result<()> {
-    ensure_dir(&paths.state_dir)?;
-    let path = paths.stamp();
-    relic_core::fs::write_atomic_private(&path, "").with_context(|| format!("touching {path}"))
 }
 
 /// Create a directory and its missing parents, private from the start.
@@ -363,7 +341,7 @@ impl Store {
             file.into_parts().0.sync_all()?;
         }
         self.chains.accept(&self.machine.clone(), &raw, &record);
-        touch_stamp(&self.paths)
+        Ok(())
     }
 }
 
@@ -375,7 +353,7 @@ mod tests {
 
     use std::os::unix::fs::PermissionsExt as _;
 
-    use super::{Clock, Env, Paths, Store, ensure_dir, touch_stamp};
+    use super::{Clock, Env, Paths, Store, ensure_dir};
     use crate::config::Config;
     use crate::corpus::record::{Digest, EngramId, Enrolled, Event, SCHEMA};
     use crate::machine::MachineId;
@@ -427,12 +405,7 @@ mod tests {
         assert_eq!(paths.log_dir, "/home/x/Trove/ark/rote");
         assert_eq!(paths.state_dir, "/home/x/.local/state/rote");
         assert_eq!(paths.marker, "/home/x/.local/state/reliquary/flagship");
-        for path in [
-            paths.verifiers(),
-            paths.stamp(),
-            paths.lock(),
-            paths.marker.clone(),
-        ] {
+        for path in [paths.verifiers(), paths.lock(), paths.marker.clone()] {
             assert!(
                 !path.starts_with(&paths.log_dir),
                 "{path} must never sit inside the tree that goes offsite"
@@ -468,32 +441,6 @@ mod tests {
         assert_eq!(records.first().map(|r| r.prev), Some(Digest::GENESIS));
         assert_ne!(records.last().map(|r| r.prev), Some(Digest::GENESIS));
         assert_eq!(records.first().map(|r| r.v), Some(SCHEMA));
-    }
-
-    #[test]
-    fn appending_touches_the_stamp() {
-        let (_dir, paths, machine) = tree();
-        assert!(!paths.stamp().exists());
-        let mut store = Store::open(paths.clone(), machine, "Mac".to_owned()).unwrap();
-        let at = date(2026, 9, 13)
-            .to_zoned(TimeZone::UTC)
-            .unwrap()
-            .timestamp();
-        store.append(at, date(2026, 9, 13), enroll("a")).unwrap();
-        assert!(paths.stamp().is_file());
-        assert_eq!(std::fs::read_to_string(paths.stamp()).unwrap(), "");
-    }
-
-    #[test]
-    fn touching_the_stamp_creates_the_tree_and_carries_nothing() {
-        let (_dir, paths, _machine) = tree();
-        touch_stamp(&paths).unwrap();
-        let mode = std::fs::metadata(paths.stamp())
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
-        assert_eq!(std::fs::metadata(paths.stamp()).unwrap().len(), 0);
     }
 
     #[test]

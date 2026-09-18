@@ -54,9 +54,6 @@ pub enum Predicate {
 }
 
 /// What a firing predicate learned on the way, for the summary to interpolate.
-///
-/// One variable today. It is a struct rather than a bare `Option<String>`
-/// because the second one will not be an age.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Vars {
     /// How stale the path that fired actually is, humanised.

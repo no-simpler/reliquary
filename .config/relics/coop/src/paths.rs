@@ -9,8 +9,8 @@ pub const ROOT_VAR: &str = "COOP_ROOT";
 pub const CONFIG_VAR: &str = "COOP_CONFIG";
 /// The relic's own format variable.
 pub const UI_VAR: &str = "COOP_UI";
-/// The per-shell identity the hook exports.
-pub const SESSION_VAR: &str = "COOP_SESSION";
+/// The digest this shell was last shown, kept by the shell itself.
+pub const SEEN_VAR: &str = "COOP_SEEN";
 /// The kill switch.
 pub const DISABLE_VAR: &str = "COOP_DISABLE";
 
@@ -19,7 +19,7 @@ pub const DISABLE_VAR: &str = "COOP_DISABLE";
 pub struct Paths {
     /// `~/.config/coop` — declarations and rendering preferences.
     pub config_dir: Utf8PathBuf,
-    /// `~/.local/state/coop` — caches, per-session marks, the badge.
+    /// `~/.local/state/coop` — the badge and first-seen.
     pub state_dir: Utf8PathBuf,
 }
 
@@ -54,27 +54,7 @@ impl Paths {
         self.config_dir.join("sources.d")
     }
 
-    /// One asked source's cached report.
-    pub fn cache(&self, id: &str) -> Utf8PathBuf {
-        self.state_dir.join("cache").join(format!("{id}.json"))
-    }
-
-    /// The lock that keeps N shells from refreshing one source at once.
-    pub fn refresh_lock(&self, id: &str) -> Utf8PathBuf {
-        self.state_dir.join("cache").join(format!("{id}.lock"))
-    }
-
-    /// What one shell has already been shown.
-    pub fn seen(&self, session: &str) -> Utf8PathBuf {
-        self.state_dir.join("seen").join(session)
-    }
-
-    /// The directory behind [`Paths::seen`].
-    pub fn seen_dir(&self) -> Utf8PathBuf {
-        self.state_dir.join("seen")
-    }
-
-    /// The prompt segment, written by `tick` and read by the shell with a
+    /// The count and the digest, written by `tick` and read by the shell with a
     /// builtin. A file rather than stdout because the card owns stdout, and one
     /// exec has to carry both.
     pub fn badge(&self) -> Utf8PathBuf {
@@ -85,11 +65,6 @@ impl Paths {
     /// from furniture.
     pub fn first_seen(&self) -> Utf8PathBuf {
         self.state_dir.join("first-seen.json")
-    }
-
-    /// The last measured tick, for the budget finding.
-    pub fn timing(&self) -> Utf8PathBuf {
-        self.state_dir.join("timing.json")
     }
 }
 

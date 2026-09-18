@@ -6,7 +6,6 @@ FILES
 
   ~/Trove/ark/rote/chains/           one append-only chain per machine
   ~/.local/state/rote/verifiers.toml the verifiers this machine holds
-  ~/.local/state/rote/stamp          touched after any write; what the shell reminder keys on
   ~/.local/state/rote/chain.lock     guards this machine's chain
   ~/.local/state/reliquary/flagship  the marker rote reads and never writes
   ~/.config/rote/config.toml         optional

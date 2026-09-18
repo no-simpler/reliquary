@@ -27,22 +27,22 @@ _ske_window() {
 
 ## coop: draw the card when the outstanding set has moved, and publish the count
 ## into $COOP_BADGE for the oh-my-posh `text` segment. One exec serves both: the
-## card goes to stdout, the count to a file this reads with a builtin.
+## card goes to stdout; the count and the digest go to a file this reads with a
+## builtin. $COOP_SEEN is the digest this shell was last shown — kept here, in
+## the shell's own environment, for exactly as long as the shell lives.
 _coop_precmd() {
     local last=$?
     command coop tick 2>/dev/null
     local badge="${COOP_ROOT:-$HOME/.local/state/coop}/badge"
     if [[ -r $badge ]] && [[ -s $badge ]]; then
-        export COOP_BADGE="$(<$badge)"
+        local count digest
+        read -r count digest <"$badge"
+        export COOP_BADGE="$count" COOP_SEEN="$digest"
     else
-        unset COOP_BADGE
+        unset COOP_BADGE COOP_SEEN
     fi
     return $last
 }
-
-## One identity per shell, so a second terminal is shown the card too and
-## neither repeats it.
-export COOP_SESSION="$$-$RANDOM"
 
 if false; then
     :

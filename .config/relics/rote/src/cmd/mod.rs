@@ -244,17 +244,13 @@ pub(super) fn reminder(
     counted
 }
 
-/// Write the verifier file, then the stamp.
-///
-/// The one path a verifier reaches disk by, so a change to what this machine
-/// holds is a change the stamp has seen.
+/// Write the verifier file: the one path a verifier reaches disk by.
 ///
 /// # Errors
 ///
-/// When either file cannot be written.
+/// When the file cannot be written.
 pub(super) fn save_verifiers(ctx: &Context, held: &Verifiers) -> Result<()> {
-    held.save(&ctx.paths.verifiers())?;
-    crate::store::touch_stamp(&ctx.paths)
+    held.save(&ctx.paths.verifiers())
 }
 
 /// Whether this machine may write, without taking the lock.

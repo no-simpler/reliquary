@@ -1,17 +1,16 @@
 //! What coop knows about its own health, in the vocabulary `assay` collects.
 //!
-//! `assay`'s registry station puts `doctor --format json` to every registered
-//! binary on a two-second budget, so nothing here runs a producer: it reads the
-//! declarations, the caches already on disk, and the last measured tick.
+//! Every producer is asked live, the same way the tick asks it, so a standing
+//! here is a measurement rather than a record.
 
 use relic_core::finding::{
     Detail, Finding, FixHint, Grade, Outcome, Report, Severity, StationId, Summary,
 };
 
-use crate::ask::State;
+use crate::ask::{self, ASK_BUDGET, Standing};
 use crate::cmd::{Ctx, Gathered};
+use crate::records::{FirstSeen, HORIZON_DAYS};
 use crate::source::{Broken, Tier};
-use crate::state::{FirstSeen, HORIZON_DAYS, TICK_BUDGET_MICROS, Timing};
 
 fn station() -> StationId {
     StationId::from_static("coop")
@@ -31,8 +30,9 @@ pub fn report(ctx: &Ctx, gathered: &Gathered) -> Report {
     findings.extend(declaration_findings(&gathered.broken));
     findings.extend(fixless(gathered));
     findings.extend(dormant(gathered));
-    findings.extend(failing(ctx, gathered));
-    findings.extend(budget(ctx));
+    findings.extend(failing(gathered));
+    findings.extend(slow(gathered));
+    findings.extend(overdue(ctx, gathered));
     findings.extend(furniture(ctx, gathered));
     Report::ran(station(), findings)
 }
@@ -68,38 +68,45 @@ fn fixless(gathered: &Gathered) -> Vec<Finding> {
         .collect();
     named.sort_unstable();
     named.dedup();
-    let asked: Vec<String> = named
+    let produced: Vec<String> = named
         .into_iter()
         .filter(|id| {
             gathered
                 .sources
                 .iter()
-                .any(|source| source.id.as_str() == id && matches!(source.tier, Tier::Ask(_)))
+                .any(|source| source.id.as_str() == id && !matches!(source.tier, Tier::When(_)))
         })
         .collect();
-    if asked.is_empty() {
+    if produced.is_empty() {
         return Vec::new();
     }
     vec![
         sources_station()
             .soft(summary("a source is producing notices nobody can act on"))
-            .detailed_with(Detail::new(asked.join("\n")))
+            .detailed_with(Detail::new(produced.join("\n")))
             .fixed_by(FixHint::lossy(
                 "give the producer a fix hint, or drop the source",
             )),
     ]
 }
 
-/// A declaration whose program is not here. Reported, never graded: a tracked
+fn standing(gathered: &Gathered, wanted: Standing) -> Vec<String> {
+    gathered
+        .standings
+        .iter()
+        .filter(|(_, standing, _)| *standing == wanted)
+        .map(|(id, _, why)| match why {
+            Some(why) => format!("{id}: {why}"),
+            None => id.clone(),
+        })
+        .collect()
+}
+
+/// A declaration whose producer is not here. Reported, never graded: a tracked
 /// declaration arriving on a machine that does not run that producer is the
 /// system working.
 fn dormant(gathered: &Gathered) -> Vec<Finding> {
-    let sleeping: Vec<String> = gathered
-        .states
-        .iter()
-        .filter(|(_, state)| *state == State::Dormant)
-        .map(|(id, _)| id.clone())
-        .collect();
+    let sleeping = standing(gathered, Standing::Dormant);
     if sleeping.is_empty() {
         return Vec::new();
     }
@@ -110,15 +117,10 @@ fn dormant(gathered: &Gathered) -> Vec<Finding> {
     ]
 }
 
-/// A producer that will not run. Not on the card: a broken producer is not a
-/// nag, and the person at the prompt cannot tell from a card what went wrong.
-fn failing(ctx: &Ctx, gathered: &Gathered) -> Vec<Finding> {
-    let mut detail: Vec<String> = Vec::new();
-    for (id, _) in &gathered.states {
-        if let Some(why) = crate::ask::failure(&ctx.paths, id) {
-            detail.push(format!("{id}: {why}"));
-        }
-    }
+/// A producer that will not answer. Not on the card: a broken producer is not
+/// a nag, and the person at the prompt cannot tell from a card what went wrong.
+fn failing(gathered: &Gathered) -> Vec<Finding> {
+    let detail = standing(gathered, Standing::Failing);
     if detail.is_empty() {
         return Vec::new();
     }
@@ -132,24 +134,45 @@ fn failing(ctx: &Ctx, gathered: &Gathered) -> Vec<Finding> {
     ]
 }
 
-/// The tick runs before every prompt, so its cost is the one number that can
-/// quietly make the whole machine feel slow.
-fn budget(ctx: &Ctx) -> Vec<Finding> {
-    let Some(timing) = Timing::load(&ctx.paths.timing()) else {
-        return Vec::new();
-    };
-    if timing.micros <= TICK_BUDGET_MICROS {
+/// The tick runs before every prompt, so a producer over its budget is the
+/// one thing that can quietly make the whole machine feel slow.
+fn slow(gathered: &Gathered) -> Vec<Finding> {
+    let detail = standing(gathered, Standing::Slow);
+    if detail.is_empty() {
         return Vec::new();
     }
     vec![
-        station()
-            .soft(summary("the prompt hook is over its budget"))
-            .detailed_with(Detail::new(format!(
-                "{} us, against a budget of {TICK_BUDGET_MICROS} us",
-                timing.micros
-            )))
+        sources_station()
+            .soft(summary("a producer is over the prompt budget"))
+            .detailed_with(Detail::new(detail.join("\n")))
+            .fixed_by(FixHint::lossy(&format!(
+                "make it answer within {}ms, or move it to the read tier",
+                ASK_BUDGET.as_millis()
+            ))),
+    ]
+}
+
+/// A read report older than its producer promised means the producer has
+/// stopped running, and the card is showing whatever it last said.
+fn overdue(ctx: &Ctx, gathered: &Gathered) -> Vec<Finding> {
+    let detail: Vec<String> = gathered
+        .sources
+        .iter()
+        .filter_map(|source| match &source.tier {
+            Tier::Read(read) => ask::overdue(read, ctx.now)
+                .map(|age| format!("{}: last written {age} ago", source.id)),
+            Tier::When(_) | Tier::Ask(_) => None,
+        })
+        .collect();
+    if detail.is_empty() {
+        return Vec::new();
+    }
+    vec![
+        sources_station()
+            .soft(summary("a read report is older than its producer promised"))
+            .detailed_with(Detail::new(detail.join("\n")))
             .fixed_by(FixHint::lossy(
-                "coop sources, and widen the refresh of whatever is cold",
+                "run the producer, or fix whatever schedules it",
             )),
     ]
 }

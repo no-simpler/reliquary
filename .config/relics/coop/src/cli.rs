@@ -6,7 +6,7 @@ use relic_core::ui::{ColorChoice, Format};
 
 pub const ROOT_AFTER_LONG_HELP: &str = "\
 coop guide sources|cadence = doctrine
-coop help wiring|tiers|keys = reference topics";
+coop help wiring|tiers = reference topics";
 
 #[derive(Parser)]
 #[command(
@@ -52,12 +52,10 @@ pub struct Global {
 pub enum Command {
     /// The prompt hook: draw the card only if the outstanding set has moved.
     #[command(after_long_help = "\
-Not for hands. Every interactive shell runs this before every prompt, so it
-draws only on an edge — the first prompt of a shell, and any prompt after the
-outstanding set changes. Run bare coop to see the card on demand.
-
-It also writes the badge file the prompt segment reads, which is why one exec
-serves both.")]
+Not for hands. Every interactive shell runs this before every prompt. It draws
+only on an edge: when the digest of the outstanding set differs from the one
+in COOP_SEEN, which the hook exports from the badge file after every tick. Run
+bare coop to see the card on demand.")]
     Tick,
 
     /// The prompt segment: how many are outstanding, or nothing at all.
@@ -72,17 +70,6 @@ serves both.")]
 
     /// Every declared source, and what it is doing.
     Sources,
-
-    /// Run asked sources now, rather than when their cache next lapses.
-    #[command(after_long_help = "\
-Examples:
-
-  coop refresh              every asked source
-  coop refresh --source rote  one of them
-
-The tick path spawns this for itself in the background. Running it by hand is
-for when you would rather not wait for a cache to lapse.")]
-    Refresh(RefreshArgs),
 
     /// What coop knows about its own health.
     Doctor,
@@ -101,13 +88,6 @@ for when you would rather not wait for a cache to lapse.")]
 pub struct ShowArgs {
     /// The source id.
     pub id: String,
-}
-
-#[derive(Args)]
-pub struct RefreshArgs {
-    /// Just this one.
-    #[arg(long, value_name = "ID")]
-    pub source: Option<String>,
 }
 
 #[derive(Args)]

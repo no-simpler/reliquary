@@ -69,8 +69,8 @@ fn emit(ctx: &Context, report: &Report) -> Result<u8> {
 ///
 /// It rebuilds its answer from disk on every call, by the same read-only path
 /// `status` and `doctor` take — no flagship gate, no subprocess, no hashing.
-/// Nothing is cached, so nothing can go stale: `coop` keys the call on the
-/// stamp, which every write touches, and on the day rollover.
+/// `coop` runs it before every prompt under its budget, so it stays cheap and
+/// nothing is cached.
 ///
 /// # Errors
 ///

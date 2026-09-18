@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use relic_core::ui::Format;
 use serde::Serialize;
 
-use crate::ask::State;
+use crate::ask::Standing;
 use crate::cmd::{Ctx, Gathered};
 use crate::notice::Notice;
 use crate::source::Tier;
@@ -95,8 +95,10 @@ pub fn show(ctx: &Ctx, notices: &[&Notice]) -> Result<()> {
 struct SourceRow<'a> {
     id: &'a str,
     tier: &'static str,
-    state: &'static str,
+    standing: &'static str,
     outstanding: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    why: Option<&'a str>,
 }
 
 /// Every declared source, and what it is doing.
@@ -110,22 +112,21 @@ pub fn sources(ctx: &Ctx, gathered: &Gathered) -> Result<()> {
         .iter()
         .map(|source| {
             let id = source.id.as_str();
+            let measured = gathered.standings.iter().find(|(named, _, _)| named == id);
             SourceRow {
                 id,
                 tier: match source.tier {
                     Tier::When(_) => "when",
                     Tier::Ask(_) => "ask",
+                    Tier::Read(_) => "read",
                 },
-                state: gathered
-                    .states
-                    .iter()
-                    .find(|(named, _)| named == id)
-                    .map_or("-", |(_, state)| name(*state)),
+                standing: measured.map_or("-", |(_, standing, _)| name(*standing)),
                 outstanding: gathered
                     .notices
                     .iter()
                     .filter(|notice| notice.source == id)
                     .count(),
+                why: measured.and_then(|(_, _, why)| why.as_deref()),
             }
         })
         .collect();
@@ -138,9 +139,10 @@ pub fn sources(ctx: &Ctx, gathered: &Gathered) -> Result<()> {
         return Ok(());
     }
     for row in &rows {
+        let why = row.why.map(|why| format!("  ({why})")).unwrap_or_default();
         println!(
-            "{}  {}  {}  {}",
-            row.tier, row.state, row.outstanding, row.id
+            "{}  {}  {}  {}{why}",
+            row.tier, row.standing, row.outstanding, row.id
         );
     }
     for entry in &gathered.broken {
@@ -149,11 +151,11 @@ pub fn sources(ctx: &Ctx, gathered: &Gathered) -> Result<()> {
     Ok(())
 }
 
-fn name(state: State) -> &'static str {
-    match state {
-        State::Fresh => "fresh",
-        State::Stale => "stale",
-        State::Cold => "cold",
-        State::Dormant => "dormant",
+fn name(standing: Standing) -> &'static str {
+    match standing {
+        Standing::Live => "live",
+        Standing::Slow => "slow",
+        Standing::Failing => "failing",
+        Standing::Dormant => "dormant",
     }
 }

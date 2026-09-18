@@ -20,8 +20,7 @@ relic evolves; a second copy would be wrong within a week.
 ## Layout
 
 ```
-ask.rs        the asked tier: running a producer, and never on the prompt path
-cache.rs      what a producer last said, and the terms on which it is reused
+ask.rs        the asked and read tiers: a producer's answer, taken fresh every prompt
 card.rs       the card, as a pure function from notices to lines
 cli.rs        clap derive; doc comments are the help text
 cmd.rs        dispatch, and what each command does
@@ -32,31 +31,36 @@ help.rs       reference
 notice.rs     the outstanding set, its identity, and its digest
 paths.rs      the two trees, and tilde expansion
 predicate.rs  the stat tier — pure, clock injected
+records.rs    first-seen, for doctor
 render.rs     one row model, three readers
-session.rs    what one shell has already been shown
 source.rs     the declaration: parse, validate, compile
 span.rs       durations as a declaration writes them
-state.rs      first-seen and the tick measurement, for doctor
 ```
 
 ## Constraints
 
 Things a future edit must not undo.
 
-- **The prompt path never waits on a producer.** A cached answer is rendered
-  while its replacement is fetched in a detached child. The one exception is a
-  genuinely cold cache, capped by `ask::COLD_BUDGET`, which happens once per
-  source per machine and is the difference between a first shell that says
-  something and one that says nothing.
+- **coop holds no answer of its own.** Every source is evaluated afresh before
+  every prompt. A producer that needs a cache owns it, because only the
+  producer knows when its truth changes; the `read` tier is how a slow one
+  hands its cache over. Nothing under `~/.local/state/coop` is a producer's
+  answer.
+- **An asked producer is killed at `ask::ASK_BUDGET`.** Past it the source says
+  nothing this prompt and `doctor` reports it `slow`. Slow means `read` or
+  `when`, never a longer budget.
 - **`tick` cannot fail a shell.** It returns zero whatever happened, and `main`
-  discards its result deliberately. A broken declaration, an unreadable cache
-  and a producer that will not run all resolve to an empty prompt, because a
-  diagnostic printed into the middle of a prompt is worse than the thing it
-  reports.
-- **The card is edge-triggered.** Not a preference, and not in `config.toml`:
-  a repeated card stops being read, and fish's `fish_prompt` is a
-  multi-subscriber event that promises nothing about repaints, so a
-  level-triggered card would redraw on a window resize.
+  discards its result deliberately. A broken declaration and a producer that
+  will not run both resolve to an empty prompt, because a diagnostic printed
+  into the middle of a prompt is worse than the thing it reports.
+- **The card is edge-triggered, and the shell keeps the edge.** The badge file
+  carries the count and the digest; the hook exports them as `COOP_BADGE` and
+  `COOP_SEEN`, and the next tick draws only when the digest has moved. Per-shell
+  state lives in the shell's environment for exactly as long as the shell does,
+  so nothing per shell is written or swept. A nested shell inherits it and does
+  not redraw, which is accepted. Not a preference, and not in `config.toml`: a
+  repeated card stops being read, and fish's `fish_prompt` is a multi-subscriber
+  event that promises nothing about repaints.
 - **Every shell hook saves and restores the exit status.** oh-my-posh reads
   `$?` and `$PIPESTATUS` at the top of its own hook, which runs last. This was
   measured, not assumed — and fish, also measured, restores `$status` for
@@ -68,27 +72,22 @@ Things a future edit must not undo.
 - **A stat declaration without a fix is refused at compile time.** The whole
   admission test for this inbox is that a notice can be got rid of today.
 - **The digest is FNV-1a, hand-rolled.** `DefaultHasher` is not promised stable
-  across std releases, and this value is written to disk: a silent change would
-  re-announce every notice on the machine after a toolchain bump.
+  across std releases, and this value is written to disk and into a shell's
+  environment: a silent change would re-announce every notice on the machine
+  after a toolchain bump.
 - **A producer's escape sequences are stripped.** A text producer was written
   for a person and colours itself; the card owns its own colour, and a smuggled
   sequence would also let a producer move the cursor out of the box.
-- **A failed ask is cached like a successful one.** Otherwise the cache stays
-  stale and a reliably broken producer forks a background refresh from every
-  prompt on the machine, forever. It is stored as `Outcome::Skipped`, so it
-  carries no findings to the card and `doctor` reports it instead — a producer
-  that will not run is not the person's nag.
+- **A failure is `doctor`'s, never the card's.** A producer that will not run
+  or answers with something that is not an answer is `failing` in `coop
+  sources` and a soft finding in `doctor`; the card shows nothing for it,
+  because a broken producer is not the person's nag.
 - **The exit status means different things across the two kinds.** A findings
   producer reports its grade through it; a text producer has no such channel,
   so there it means what it usually means.
 - **A producer never reports under another source's name.** `ask::relabel`
   keeps a producer's own namespace and moves anything else onto the declared
   id, which is the rule `assay` enforces on the binaries it collects.
-- **The budget measures the silent path only.** A tick that warmed a cold
-  producer or drew a card is not the steady state, and timing either would
-  report a hook that is slow when it is not.
-- **A session id from the environment is untrusted.** It chooses a filename, so
-  `session::sanitize` reduces it to characters that cannot leave the directory.
 - Publishing and testing carry no per-relic scripts. Do not reintroduce
   `scripts/publish.sh` or `scripts/test.sh`.
 
@@ -102,13 +101,13 @@ threshold, which is drift worth fixing in one edit rather than four.
 
 ## Measured, so it is not re-derived
 
-Flagship, 2026-09-10, release build, two declared sources:
+Flagship, 2026-09-18, release build, two declared sources (`up` stat, `rote` asked):
 
 | path | cost |
 |---|---|
-| warm tick, whole process | 2.9 ms |
-| warm tick, in-process work | 0.18 ms |
+| warm tick, whole process, rote asked inside it | 3.3 ms |
+| `rote banner --format json`, alone | 2.3 ms |
 | `ske prompt`, for comparison | 10.8 ms |
 
-The budget in `state::TICK_BUDGET_MICROS` is set against the in-process figure,
-which is the only part this relic controls; process spawn is the shell's.
+`ask::ASK_BUDGET` is 50 ms per producer: an order of magnitude over the one
+producer that exists, and under what a prompt can carry unnoticed.

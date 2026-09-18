@@ -16,12 +16,12 @@ use crate::paths::expand;
 use crate::predicate::{Missing, Predicate, non_empty};
 use crate::span;
 
-/// How an asked source's stdout is read.
+/// How a producer's answer is read.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Kind {
-    /// A relic-core `Report` on stdout. Every binary answering
-    /// `doctor --format json` already speaks this.
+    /// A relic-core `Report`. Every binary answering `doctor --format json`
+    /// already speaks this.
     Findings,
     /// Non-blank lines, verbatim. The escape hatch that makes an arbitrary
     /// script a producer without teaching it anything.
@@ -47,26 +47,26 @@ pub struct Source {
     pub tier: Tier,
 }
 
-/// Which of the two evaluation tiers a source lives in.
+/// Which of the three tiers a source lives in — picked by how expensive the
+/// answer is.
 #[derive(Clone, Debug)]
 pub enum Tier {
     /// Stat and arithmetic, inline, every prompt.
     When(Predicate),
-    /// A command, memoized, refreshed off the prompt path.
+    /// A command, run every prompt under a hard budget.
     Ask(Ask),
+    /// A report file the producer rewrites on its own cadence, read every
+    /// prompt. The file is the producer's cache, and the producer owns it.
+    Read(Read),
 }
 
-/// An asked source, and the terms on which its answer may be reused.
+/// An asked source.
 #[derive(Clone, Debug)]
 pub struct Ask {
     /// argv, program first.
     pub run: Vec<String>,
     /// How its stdout is read.
     pub kind: Kind,
-    /// How long an answer stays good on the clock alone.
-    pub refresh: Duration,
-    /// What else invalidates it before the clock does.
-    pub keys: Vec<Key>,
 }
 
 impl Ask {
@@ -81,22 +81,16 @@ impl Ask {
     }
 }
 
-/// One component of a cache key.
-///
-/// A TTL alone is a guess about how fast the world moves. A fingerprint is an
-/// answer: `rote`'s cache file changing is exactly when its count can have
-/// changed, so the command runs then and not on a timer.
+/// A read source.
 #[derive(Clone, Debug)]
-pub enum Key {
-    /// A path's mtime and size.
-    Path(Utf8PathBuf),
-    /// The local calendar day, with a rollover hour that need not be midnight.
-    Day {
-        /// Hour the day is considered to turn over.
-        hour: i8,
-        /// Minute within that hour.
-        minute: i8,
-    },
+pub struct Read {
+    /// The report the producer writes.
+    pub path: Utf8PathBuf,
+    /// How it is read.
+    pub kind: Kind,
+    /// How often the producer promises to rewrite it. Past this, doctor says
+    /// the producer has stopped; the card still shows what is there.
+    pub expect_every: Option<Duration>,
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +117,7 @@ struct Spec {
     severity: SeverityName,
     when: Option<WhenSpec>,
     ask: Option<AskSpec>,
+    read: Option<ReadSpec>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
@@ -152,9 +147,14 @@ struct WhenSpec {
 struct AskSpec {
     run: Vec<String>,
     kind: Kind,
-    refresh: String,
-    #[serde(default)]
-    keys: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct ReadSpec {
+    path: Utf8PathBuf,
+    kind: Kind,
+    expect_every: Option<String>,
 }
 
 /// Read and compile one declaration.
@@ -220,11 +220,12 @@ fn compile(spec: Spec) -> Result<Source> {
         .id
         .parse()
         .with_context(|| format!("the id {:?} is not a station id", spec.id))?;
-    let tier = match (spec.when, spec.ask) {
-        (Some(when), None) => Tier::When(compile_when(when)?),
-        (None, Some(ask)) => Tier::Ask(compile_ask(ask)?),
-        (Some(_), Some(_)) => bail!("a source declares either when or ask, never both"),
-        (None, None) => bail!("a source declares either when or ask"),
+    let tier = match (spec.when, spec.ask, spec.read) {
+        (Some(when), None, None) => Tier::When(compile_when(when)?),
+        (None, Some(ask), None) => Tier::Ask(compile_ask(ask)?),
+        (None, None, Some(read)) => Tier::Read(compile_read(read)?),
+        (None, None, None) => bail!("a source declares one of when, ask or read"),
+        _ => bail!("a source declares one of when, ask or read, never more"),
     };
     if matches!(tier, Tier::When(_)) {
         if spec.summary.trim().is_empty() {
@@ -300,40 +301,24 @@ fn compile_ask(spec: AskSpec) -> Result<Ask> {
     if spec.run.is_empty() {
         bail!("run needs a program");
     }
-    let refresh = span::parse(&spec.refresh)
-        .with_context(|| format!("refresh {:?} is not a duration like 10m", spec.refresh))?;
-    let keys = spec
-        .keys
-        .iter()
-        .map(|key| compile_key(key))
-        .collect::<Result<Vec<_>>>()?;
     Ok(Ask {
         run: spec.run,
         kind: spec.kind,
-        refresh,
-        keys,
     })
 }
 
-fn compile_key(text: &str) -> Result<Key> {
-    let Some(rest) = text.strip_prefix("day") else {
-        return Ok(Key::Path(expand(Utf8Path::new(text))?));
-    };
-    let clock = match rest.strip_prefix(':') {
-        None if rest.is_empty() => "00:00",
-        None => bail!("a day key is day or day:HH:MM, not {text:?}"),
-        Some(clock) => clock,
-    };
-    let (hour, minute) = clock
-        .split_once(':')
-        .with_context(|| format!("a day key is day:HH:MM, not {text:?}"))?;
-    Ok(Key::Day {
-        hour: hour
-            .parse()
-            .with_context(|| format!("bad hour in {text:?}"))?,
-        minute: minute
-            .parse()
-            .with_context(|| format!("bad minute in {text:?}"))?,
+fn compile_read(spec: ReadSpec) -> Result<Read> {
+    let expect_every = spec
+        .expect_every
+        .map(|text| {
+            span::parse(&text)
+                .with_context(|| format!("expect-every {text:?} is not a duration like 1d"))
+        })
+        .transpose()?;
+    Ok(Read {
+        path: expand(&spec.path)?,
+        kind: spec.kind,
+        expect_every,
     })
 }
 
@@ -344,7 +329,7 @@ fn instant(text: &str) -> Result<Timestamp> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Kind, Source, Tier, compile_key, read};
+    use super::{Kind, Source, Tier, read};
     use crate::predicate::Missing;
     use camino::Utf8PathBuf;
 
@@ -382,7 +367,7 @@ missing = "fire"
                 assert_eq!(missing, Missing::Fire);
                 assert_eq!(age.as_secs(), 86_400);
             }
-            Tier::When(_) | Tier::Ask(_) => panic!("expected a stat predicate"),
+            Tier::When(_) | Tier::Ask(_) | Tier::Read(_) => panic!("expected a stat predicate"),
         }
     }
 
@@ -396,8 +381,6 @@ id = "rote"
 [source.ask]
 run = ["rote", "banner", "--format", "json"]
 kind = "findings"
-refresh = "10m"
-keys = ["~/.local/state/rote/cache.json", "day:04:00"]
 "#,
         )
         .unwrap();
@@ -405,10 +388,32 @@ keys = ["~/.local/state/rote/cache.json", "day:04:00"]
             Tier::Ask(ask) => {
                 assert_eq!(ask.program(), "rote");
                 assert_eq!(ask.kind, Kind::Findings);
-                assert_eq!(ask.keys.len(), 2);
                 assert_eq!(ask.args(), ["banner", "--format", "json"]);
             }
-            Tier::When(_) => panic!("expected an asked source"),
+            Tier::When(_) | Tier::Read(_) => panic!("expected an asked source"),
+        }
+    }
+
+    #[test]
+    fn a_read_declaration_expands_its_path_and_keeps_its_promise() {
+        let source = parse(
+            r#"
+[source]
+id = "slow"
+
+[source.read]
+path = "~/.local/state/slow/report.json"
+kind = "findings"
+expect-every = "1d"
+"#,
+        )
+        .unwrap();
+        match source.tier {
+            Tier::Read(read) => {
+                assert!(!read.path.as_str().contains('~'));
+                assert_eq!(read.expect_every.unwrap().as_secs(), 86_400);
+            }
+            Tier::When(_) | Tier::Ask(_) => panic!("expected a read source"),
         }
     }
 
@@ -452,13 +457,13 @@ exists = true
     }
 
     #[test]
-    fn a_source_declaring_neither_tier_is_refused() {
+    fn a_source_declaring_no_tier_is_refused() {
         let error = parse("[source]\nid = \"x\"\n").unwrap_err();
-        assert!(format!("{error:#}").contains("either when or ask"));
+        assert!(format!("{error:#}").contains("one of when, ask or read"));
     }
 
     #[test]
-    fn a_source_declaring_both_tiers_is_refused() {
+    fn a_source_declaring_two_tiers_is_refused() {
         let error = parse(
             r#"
 [source]
@@ -470,20 +475,28 @@ fix = "f"
 path = "/tmp/x"
 exists = true
 
-[source.ask]
-run = ["true"]
+[source.read]
+path = "/tmp/y"
 kind = "text"
-refresh = "1h"
 "#,
         )
         .unwrap_err();
-        assert!(format!("{error:#}").contains("never both"));
+        assert!(format!("{error:#}").contains("never more"));
     }
 
     #[test]
     fn an_unknown_key_is_refused_rather_than_ignored() {
         let error = parse("[source]\nid = \"x\"\ntypo = 1\n").unwrap_err();
         assert!(format!("{error:#}").contains("typo"));
+    }
+
+    #[test]
+    fn a_retired_field_is_refused_rather_than_ignored() {
+        let error = parse(
+            "[source]\nid = \"x\"\n\n[source.ask]\nrun = [\"true\"]\nkind = \"text\"\nrefresh = \"1h\"\n",
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("refresh"));
     }
 
     #[test]
@@ -502,26 +515,5 @@ exists = true
         )
         .unwrap_err();
         assert!(format!("{error:#}").contains("station id"));
-    }
-
-    #[test]
-    fn day_keys_parse_with_and_without_a_rollover() {
-        assert!(matches!(
-            compile_key("day").unwrap(),
-            super::Key::Day { hour: 0, minute: 0 }
-        ));
-        assert!(matches!(
-            compile_key("day:04:00").unwrap(),
-            super::Key::Day { hour: 4, minute: 0 }
-        ));
-        assert!(compile_key("day:4").is_err());
-    }
-
-    #[test]
-    fn a_path_key_expands_its_tilde() {
-        match compile_key("~/x").unwrap() {
-            super::Key::Path(path) => assert!(!path.as_str().contains('~')),
-            super::Key::Day { .. } => panic!("expected a path key"),
-        }
     }
 }

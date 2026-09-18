@@ -312,9 +312,8 @@ offline-attackable confirmation oracle, and it is regenerable by re-enrolment, s
 POSTURE spec's later lanes make a repository of it.
 
 Wired to two things beyond `$PATH`. `rote banner` is the drill nag, declared as a `coop` source;
-it rebuilds its answer read-only from the record on every call and fails silent, and `coop` keys
-the call on the stamp `rote` touches after every write. Its `--format json` shape is what `coop`
-reads.
+it rebuilds its answer read-only from the record on every call, fails silent, and stays cheap
+because `coop` runs it before every prompt. Its `--format json` shape is what `coop` reads.
 And `rote doctor --format json` is the **first public-lane speaker** of `relic-core`'s finding
 protocol, so `assay`'s registry station collects drill staleness into `yadm doctor` with no new
 station. The two thresholds differ on purpose: the banner fires the day a drill comes due, `doctor`
@@ -340,11 +339,17 @@ producer that is absent on a machine goes dormant rather than failing. A notice 
 `relic_core::finding::Finding`, so every binary already answering `doctor --format json` is already
 a well-formed producer, and there is no second protocol to learn.
 
+**coop holds no answer of its own.** Three tiers, picked by how expensive the answer is: `when`
+stats a path the producer stamps; `ask` runs the producer before every prompt under a hard budget;
+`read` reads a report the producer rewrites on its own cadence. Whatever caching a producer needs
+is the producer's, because only it knows when its truth changes. The contract is `coop help tiers`.
+
 **Two surfaces, deliberately different in kind.** The **card** is edge-triggered — drawn on a
 shell's first prompt and thereafter only when the outstanding set moves. The **badge** is an
 oh-my-posh segment over `$COOP_BADGE`, level-triggered and therefore absent almost always. Both come
-from one `coop tick` per prompt: the card on stdout, the count in a file the hook reads with a shell
-builtin. Measured at 2.9 ms, against `ske prompt`'s 10.8 ms.
+from one `coop tick` per prompt: the card on stdout, the count and the digest in a file the hook
+reads with a shell builtin. The shell keeps the digest it was shown in `$COOP_SEEN`, its own
+environment, for exactly as long as it lives; nothing per shell touches disk.
 
 Wired in `shell/interactive.d/050-prompt.{zsh,bash}` and `fish/conf.d/050-prompt.fish`, beside
 `_ske_window` and **before** the oh-my-posh init — that order is load-bearing in zsh and bash.

@@ -1,100 +1,78 @@
-//! The asked tier: producers that have to be run, and never on the prompt path.
+//! The asked and read tiers: a producer's answer, taken fresh at every prompt.
 //!
-//! Two things keep a subprocess out from under the prompt. A cached answer is
-//! rendered while its replacement is fetched, and the fetch happens in a
-//! detached child holding a per-source lock, so twenty shells waking at once
-//! produce one run rather than twenty.
-//!
-//! The one exception is a genuinely cold cache, which blocks under a hard cap.
-//! It happens once per source per machine, and the alternative is a first shell
-//! that shows nothing at all.
+//! coop holds no answer of its own. An asked producer runs under a hard budget
+//! and is killed past it; a read producer wrote its report on its own cadence
+//! and coop only reads the file. Whatever caching either needs is theirs,
+//! because only the producer knows when its truth changes.
 
-use std::process::Stdio;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result};
 use jiff::Timestamp;
 use relic_core::finding::{Finding, Outcome, Report, StationId, Summary};
-use relic_core::tool::Tool;
+use relic_core::tool::{self, Tool};
 
-use crate::cache::{self, Cached, Freshness};
-use crate::paths::Paths;
-use crate::source::{Ask, Kind, Source, Tier};
+use crate::source::{Ask, Kind, Read, Source};
 
-/// The hard cap on a cold, blocking fetch.
-pub const COLD_BUDGET: Duration = Duration::from_millis(300);
-/// The cap on a background fetch, which nobody is waiting for but which must
-/// still not sit on the lock forever.
-pub const BACKGROUND_BUDGET: Duration = Duration::from_secs(20);
+/// The hard cap on an asked producer, per prompt.
+pub const ASK_BUDGET: Duration = Duration::from_millis(50);
 
-/// What an asked source is doing right now, for `sources` to report.
+/// What a producer is doing right now, measured at the moment of asking.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum State {
-    /// Answered, and the answer is good.
-    Fresh,
-    /// Answered, and a replacement is on its way.
-    Stale,
-    /// Never answered on this machine.
-    Cold,
-    /// Its program is not on this machine.
+pub enum Standing {
+    /// Answered.
+    Live,
+    /// Did not answer within the budget and was killed.
+    Slow,
+    /// Could not be run, or answered with something that is not an answer.
+    Failing,
+    /// Its program, or its report, is not on this machine.
     Dormant,
 }
 
-/// Read an asked source without running it, and say whether it needs running.
-pub fn peek(paths: &Paths, source: &Source, ask: &Ask, now: Timestamp) -> (Vec<Finding>, State) {
-    if Tool::find(ask.program()).is_none() {
-        return (Vec::new(), State::Dormant);
+/// One producer's answer this prompt.
+#[derive(Clone, Debug)]
+pub struct Answer {
+    /// What it said. Empty unless [`Standing::Live`].
+    pub findings: Vec<Finding>,
+    /// How it went.
+    pub standing: Standing,
+    /// What went wrong, when something did.
+    pub why: Option<String>,
+}
+
+impl Answer {
+    fn live(findings: Vec<Finding>) -> Self {
+        Self {
+            findings,
+            standing: Standing::Live,
+            why: None,
+        }
     }
-    let cached = Cached::load(&paths.cache(source.id.as_str()));
-    let keys = cache::fingerprint(&ask.keys, now);
-    let state = match cache::freshness(cached.as_ref(), ask, now, &keys) {
-        Freshness::Fresh => State::Fresh,
-        Freshness::Stale => State::Stale,
-        Freshness::Cold => State::Cold,
+
+    fn silent(standing: Standing, why: Option<String>) -> Self {
+        Self {
+            findings: Vec::new(),
+            standing,
+            why,
+        }
+    }
+}
+
+/// Run an asked producer under the budget.
+pub fn run(source: &Source, ask: &Ask) -> Answer {
+    let Some(tool) = Tool::find(ask.program()) else {
+        return Answer::silent(Standing::Dormant, None);
     };
-    let findings = cached.map(|record| record.report.findings().to_vec());
-    (findings.unwrap_or_default(), state)
-}
-
-/// Run one asked source and store what it said.
-///
-/// # Errors
-///
-/// When the program is absent, could not be run, or answered with something
-/// that is not a report.
-pub fn refresh(
-    paths: &Paths,
-    source: &Source,
-    ask: &Ask,
-    now: Timestamp,
-    budget: Duration,
-) -> Result<Report> {
-    match attempt(source, ask, budget) {
-        Ok(report) => {
-            store(paths, source, ask, report.clone(), now)?;
-            Ok(report)
-        }
-        Err(error) => {
-            // A failure is stamped too, so it ages out on the same clock a
-            // success does. Without this the cache stays stale, and a producer
-            // that is reliably broken forks a background refresh from every
-            // prompt on the machine, forever.
-            let why = format!("{error:#}");
-            let skipped = Report::skipped(source.id.clone(), Summary::lossy(&why));
-            store(paths, source, ask, skipped, now)?;
-            Err(error)
-        }
-    }
-}
-
-fn attempt(source: &Source, ask: &Ask, budget: Duration) -> Result<Report> {
-    let tool =
-        Tool::find(ask.program()).ok_or_else(|| anyhow!("{} is not on PATH", ask.program()))?;
     let mut command = tool.command();
     command.args(ask.args());
-    let exit = tool
-        .run_within(&mut command, budget)
-        .with_context(|| format!("running {}", ask.program()))?;
+    let exit = match tool.run_within(&mut command, ASK_BUDGET) {
+        Ok(exit) => exit,
+        Err(error @ tool::Error::TimedOut { .. }) => {
+            return Answer::silent(Standing::Slow, Some(format!("{error:#}")));
+        }
+        Err(error) => return Answer::silent(Standing::Failing, Some(format!("{error:#}"))),
+    };
     // A findings producer reports its grade through its exit status, so a
     // non-zero one there is the answer rather than a failure. A text producer
     // has no such channel, so for it the status means what it usually means.
@@ -103,41 +81,59 @@ fn attempt(source: &Source, ask: &Ask, budget: Duration) -> Result<Report> {
             .code
             .map_or_else(|| "a signal".to_owned(), |code| code.to_string());
         let stderr = exit.stderr.trim();
-        bail!(
-            "{} exited {code}{}",
-            ask.program(),
-            if stderr.is_empty() {
-                String::new()
-            } else {
-                format!(": {stderr}")
+        let why = if stderr.is_empty() {
+            format!("{} exited {code}", ask.program())
+        } else {
+            format!("{} exited {code}: {stderr}", ask.program())
+        };
+        return Answer::silent(Standing::Failing, Some(why));
+    }
+    answer(source, ask.kind, &exit.stdout)
+}
+
+/// Read a producer's report.
+pub fn read(source: &Source, read: &Read) -> Answer {
+    match fs_err::read_to_string(&read.path) {
+        Ok(text) => answer(source, read.kind, &text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Answer::silent(Standing::Dormant, None)
+        }
+        Err(error) => Answer::silent(Standing::Failing, Some(format!("{error:#}"))),
+    }
+}
+
+/// How long past its promise a read report is, when it is.
+pub fn overdue(read: &Read, now: Timestamp) -> Option<String> {
+    let promised = read.expect_every?;
+    let modified = fs_err::metadata(&read.path).ok()?.modified().ok()?;
+    let since = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
+    let at = Timestamp::from_second(i64::try_from(since.as_secs()).ok()?).ok()?;
+    let elapsed = now.as_second().saturating_sub(at.as_second());
+    (u64::try_from(elapsed).unwrap_or(0) > promised.as_secs())
+        .then(|| relic_core::fmt::age(at, now))
+}
+
+fn answer(source: &Source, kind: Kind, text: &str) -> Answer {
+    match parse(source, kind, text) {
+        Ok(report) => match report.outcome {
+            Outcome::Ran(findings) => Answer::live(findings),
+            Outcome::Skipped(reason) => {
+                Answer::silent(Standing::Failing, Some(reason.as_str().to_owned()))
             }
-        );
-    }
-    parse(source, ask.kind, &exit.stdout)
-}
-
-fn store(paths: &Paths, source: &Source, ask: &Ask, report: Report, now: Timestamp) -> Result<()> {
-    let keys = cache::fingerprint(&ask.keys, now);
-    cache::Cached::store(&paths.cache(source.id.as_str()), report, keys, now)
-}
-
-/// Why a source last answered with nothing, when that was a failure.
-pub fn failure(paths: &Paths, id: &str) -> Option<String> {
-    match Cached::load(&paths.cache(id))?.report.outcome {
-        Outcome::Skipped(reason) => Some(reason.as_str().to_owned()),
-        Outcome::Ran(_) => None,
+        },
+        Err(error) => Answer::silent(Standing::Failing, Some(format!("{error:#}"))),
     }
 }
 
-/// Turn a producer's stdout into a report.
+/// Turn a producer's text into a report.
 ///
 /// # Errors
 ///
 /// When a findings source did not answer with a report.
-pub fn parse(source: &Source, kind: Kind, stdout: &str) -> Result<Report> {
+pub fn parse(source: &Source, kind: Kind, text: &str) -> Result<Report> {
     match kind {
         Kind::Findings => {
-            let trimmed = stdout.trim();
+            let trimmed = text.trim();
             if trimmed.is_empty() {
                 return Ok(Report::ran(source.id.clone(), Vec::new()));
             }
@@ -145,10 +141,7 @@ pub fn parse(source: &Source, kind: Kind, stdout: &str) -> Result<Report> {
                 .with_context(|| format!("{} did not answer with a report", source.id))?;
             Ok(relabel(source, report))
         }
-        Kind::Text => Ok(Report::ran(
-            source.id.clone(),
-            text_findings(source, stdout),
-        )),
+        Kind::Text => Ok(Report::ran(source.id.clone(), text_findings(source, text))),
     }
 }
 
@@ -185,9 +178,8 @@ fn relabel(source: &Source, report: Report) -> Report {
     }
 }
 
-fn text_findings(source: &Source, stdout: &str) -> Vec<Finding> {
-    stdout
-        .lines()
+fn text_findings(source: &Source, text: &str) -> Vec<Finding> {
+    text.lines()
         .map(strip_ansi)
         .map(|line| line.trim().to_owned())
         .filter(|line| !line.is_empty())
@@ -239,57 +231,11 @@ pub fn strip_ansi(line: &str) -> String {
     out
 }
 
-/// Ask for a refresh that this process will not wait for.
-///
-/// The child is put in its own process group so it survives the shell that
-/// spawned it moving on, and its streams go nowhere so nothing it prints can
-/// land in the middle of a prompt.
-pub fn spawn_detached(id: &str) -> Result<()> {
-    use std::os::unix::process::CommandExt;
-
-    let exe = std::env::current_exe().context("locating coop")?;
-    std::process::Command::new(exe)
-        .arg("refresh")
-        .arg("--source")
-        .arg(id)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .process_group(0)
-        .spawn()
-        .context("spawning a background refresh")?;
-    Ok(())
-}
-
-/// Hold the refresh lock for one source, or discover somebody else has it.
-///
-/// # Errors
-///
-/// When the lock file cannot be created.
-pub fn claim(paths: &Paths, id: &str) -> Result<Option<relic_core::lock::Lock>> {
-    let path = paths.refresh_lock(id);
-    if let Some(parent) = path.parent() {
-        fs_err::create_dir_all(parent)?;
-    }
-    Ok(relic_core::lock::Lock::try_acquire(&path)?)
-}
-
-/// Every asked source in a set, for the commands that walk them.
-pub fn asked(sources: &[Source]) -> Vec<(&Source, &Ask)> {
-    sources
-        .iter()
-        .filter_map(|source| match &source.tier {
-            Tier::Ask(ask) => Some((source, ask)),
-            Tier::When(_) => None,
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{parse, strip_ansi};
+    use super::{Standing, parse, run, strip_ansi};
     use crate::predicate::Predicate;
-    use crate::source::{Kind, Source, Tier};
+    use crate::source::{Ask, Kind, Source, Tier};
     use relic_core::finding::{FixHint, Severity, StationId};
 
     fn source(id: &'static str) -> Source {
@@ -368,5 +314,25 @@ mod tests {
     #[test]
     fn ordinary_text_is_left_exactly_alone() {
         assert_eq!(strip_ansi("2 drills due — rote"), "2 drills due — rote");
+    }
+
+    #[test]
+    fn a_program_that_is_not_here_is_dormant() {
+        let ask = Ask {
+            run: vec!["/definitely/not/here".to_owned()],
+            kind: Kind::Text,
+        };
+        assert_eq!(run(&source("x"), &ask).standing, Standing::Dormant);
+    }
+
+    #[test]
+    fn a_producer_past_the_budget_is_slow_and_says_nothing() {
+        let ask = Ask {
+            run: vec!["sleep".to_owned(), "2".to_owned()],
+            kind: Kind::Text,
+        };
+        let answer = run(&source("x"), &ask);
+        assert_eq!(answer.standing, Standing::Slow);
+        assert!(answer.findings.is_empty());
     }
 }
