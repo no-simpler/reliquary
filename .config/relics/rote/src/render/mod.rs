@@ -9,6 +9,8 @@ pub mod agent;
 pub mod human;
 pub mod json;
 
+use crate::tui::Measured;
+
 /// A table, before anyone has decided how it looks.
 #[derive(Clone, Debug, Default)]
 pub struct Table {
@@ -72,6 +74,23 @@ pub fn seconds(ms: Option<u64>) -> String {
     }
 }
 
+/// Both spans of a capture, or nothing at all when neither stands.
+///
+/// The retrieval and the typing, summed by the glyph between them — the two
+/// measured spans, which is not wall time: an away-span and a field erased back
+/// to empty are both excluded from either side.
+#[must_use]
+pub fn spans(measured: Measured) -> String {
+    let Measured {
+        ttfk_ms,
+        capture_ms,
+    } = measured;
+    if ttfk_ms.is_none() && capture_ms.is_none() {
+        return String::new();
+    }
+    format!("{} + {}", seconds(ttfk_ms), seconds(capture_ms))
+}
+
 /// Aligned plain text, headings included, with the last column unpadded.
 pub fn aligned(table: &Table) -> Vec<String> {
     let widths = table.widths();
@@ -108,7 +127,7 @@ fn row(cells: &[String], widths: &[usize]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Table, aligned};
+    use super::{Measured, Table, aligned};
 
     fn table() -> Table {
         let mut table = Table::new(&["slug", "state"]);
@@ -133,6 +152,35 @@ mod tests {
         assert_eq!(super::seconds(Some(1_400)), "1.4s");
         assert_eq!(super::seconds(Some(0)), "0.0s");
         assert_eq!(super::seconds(None), "—");
+    }
+
+    #[test]
+    fn a_pair_of_spans_sums_the_two_that_were_measured() {
+        let both = Measured {
+            ttfk_ms: Some(2_100),
+            capture_ms: Some(11_400),
+        };
+        assert_eq!(super::spans(both), "2.1s + 11.4s");
+    }
+
+    #[test]
+    fn a_void_span_is_a_dash_and_two_of_them_are_nothing_at_all() {
+        let recovered = Measured {
+            ttfk_ms: None,
+            capture_ms: Some(11_400),
+        };
+        let void = super::seconds(None);
+        assert_eq!(super::spans(recovered), format!("{void} + 11.4s"));
+        let interrupted = Measured {
+            ttfk_ms: Some(2_100),
+            capture_ms: None,
+        };
+        assert_eq!(super::spans(interrupted), format!("2.1s + {void}"));
+        assert_eq!(
+            super::spans(Measured::default()),
+            "",
+            "a row with nothing measured says nothing, rather than saying it twice"
+        );
     }
 
     #[test]

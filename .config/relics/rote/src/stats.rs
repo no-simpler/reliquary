@@ -280,8 +280,9 @@ fn streak(mine: &[&Drill], ladder: &Ladder) -> u32 {
     count
 }
 
-/// The lower median. Chosen over a mean so that walking away mid-prompt needs no
-/// special case: one enormous reading moves a mean and does not move this.
+/// The lower median. Chosen over a mean so that one enormous reading moves
+/// nothing: the prompt voids what it saw nobody in front of, and this is what
+/// covers the walk-away it could not see.
 pub fn median(values: &mut [u64]) -> Option<u64> {
     if values.is_empty() {
         return None;

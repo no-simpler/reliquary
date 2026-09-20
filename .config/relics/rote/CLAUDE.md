@@ -145,6 +145,26 @@ Things a future edit must not undo.
   but the transients above are not reachable. Under masking the caret also goes
   onto the wire as an absolute `MoveTo` on every paint, which is a per-keystroke
   length oracle in any recording of the stream.
+- **An interval measured across a person is a reading only while the person was
+  in front of it.** `Measuring` in the entry loop holds two spans — the prompt to
+  the first character, and that to the submission — and voids whichever one a
+  lost focus or `AWAY` of silence crossed, never both on one signal. The other
+  stands, which is what makes a recovery worth anything: a lookup before the
+  first character costs the retrieval and leaves the typing. A field erased back
+  to empty restarts the retrieval and discards what crossed the one given up on;
+  a partial removal is a correction inside one retrieval and restarts nothing.
+  The wait therefore always carries a ceiling — a silence is the fallback where a
+  terminal reports no focus — and the ceiling is counted over `elapsed_ms`
+  rather than off the wait, because a revealed field's conceal wakes the loop at
+  half of it and would otherwise push it out. `FocusGained` stays swallowed: a
+  terminal that reports a loss and no gain must not be able to un-poison a
+  reading. `stats`'s lower median covers only what the prompt could not see.
+- **The capture duration is published and never written.** How long a secret
+  takes to type bounds how long it is, and no field records a length. The
+  retrieval is the record's — it rises before the first fail — and the pair is
+  the card's, where it lives for as long as the sitting does. `render::spans` is
+  the one spelling of the pair, and its `+` sums the two measured spans and not
+  wall time.
 - **A full buffer refuses the character and says so.** The dialog and the pipe hold
   one rule: a secret longer than the field is refused, never truncated into a
   verifier for something nobody typed.

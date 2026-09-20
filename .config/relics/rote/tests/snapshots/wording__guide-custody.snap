@@ -22,6 +22,23 @@ CUSTODY
   nothing is a fail: that is a failure of recall and is recorded as one, which
   is more honest than typing something to get past the prompt.
 
+  What it measures is two spans and not one. The retrieval runs from the prompt
+  to the first character and the typing from there to the submission: the outer
+  loop that finds the word and the inner one that runs the keys (Logan and
+  Crump 2011). A seven-word phrase is seven retrievals, so the first span reads
+  the first word and the second reads everything after it. The card publishes
+  both and the record keeps only the retrieval, because how long a secret takes
+  to type bounds how long it is.
+
+  An interval measured across a person is a reading only while the person was
+  in front of it. Losing the window voids whichever span it crossed, and a
+  minute of silence is taken for the same where a terminal reports no focus at
+  all. The other span stands, so a lookup before the first character costs the
+  retrieval and leaves the typing. A field erased back to empty is a retrieval
+  given up on and the one after it is measured as a second, which a partial
+  correction is not. The drill is recorded throughout either way: what goes is
+  the reading, never the outcome.
+
   After a cold fail the drill goes on as follow-ups, masked and unbounded, and
   they measure nothing: the fail is already on the record. They exist for
   peace of mind — did I forget it, or did I mistype it — and because the

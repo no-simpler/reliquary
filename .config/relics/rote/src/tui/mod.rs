@@ -105,6 +105,17 @@ pub enum Wake {
 /// their own secret back is doing the thing the reveal is for.
 pub const CONCEAL: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How long a prompt stands in silence before it stops believing anybody is
+/// there, in the units the stopwatch counts in.
+const AWAY_MS: u64 = 60_000;
+
+/// [`AWAY_MS`] as the wait itself wants it.
+///
+/// The fallback for a terminal that does not report focus, and Anki's ceiling
+/// for the reason Anki has it: past a minute an empty desk is likelier than a
+/// slow retrieval.
+pub const AWAY: std::time::Duration = std::time::Duration::from_millis(AWAY_MS);
+
 /// Where keys come from, and the stopwatch that runs beside them.
 pub trait Input {
     /// Start the stopwatch for a fresh prompt.
@@ -238,16 +249,117 @@ impl Entry {
 /// What one entry cost, none of which is the secret.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Timings {
-    /// Milliseconds to the first keystroke.
+    /// Milliseconds to the first keystroke. The retrieval, which is the figure
+    /// a record keeps. Absent when nothing was typed, or when nobody was
+    /// certainly in front of the prompt while it ran.
     pub ttfk_ms: Option<u64>,
-    /// Milliseconds from the first keystroke to submission.
-    pub total_ms: Option<u64>,
+    /// Milliseconds from the first keystroke to submission. The typing, which
+    /// is a length correlate and so is published and never written. Absent on
+    /// the same terms, judged over its own span.
+    pub capture_ms: Option<u64>,
     /// Keystrokes that removed something, one apiece and whatever each removed.
     pub corrections: u32,
     /// Pastes that reached the field.
     pub paste_accepted: u32,
     /// Pastes that did not.
     pub paste_refused: u32,
+}
+
+impl Timings {
+    /// The two spans on their own, for the places that carry a reading and
+    /// have no business with the rest of what an entry cost.
+    #[must_use]
+    pub fn measured(&self) -> Measured {
+        Measured {
+            ttfk_ms: self.ttfk_ms,
+            capture_ms: self.capture_ms,
+        }
+    }
+}
+
+/// What one capture measured: the retrieval, then the typing.
+///
+/// A pair rather than two arguments, because two adjacent millisecond counts
+/// passed by position are two that can be passed the wrong way round.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Measured {
+    /// Milliseconds to the first keystroke.
+    pub ttfk_ms: Option<u64>,
+    /// Milliseconds from the first keystroke to submission.
+    pub capture_ms: Option<u64>,
+}
+
+/// The two spans of one entry, and what may have crossed them.
+///
+/// An interval measured across a person is a reading only while the person was
+/// in front of it. Each span is judged on its own, which is what makes a
+/// recovery worth something: a lookup before the first character costs the
+/// retrieval and leaves the typing standing.
+#[derive(Default)]
+struct Measuring {
+    /// When the first character of the retrieval under way arrived.
+    onset_ms: Option<u64>,
+    /// The last moment somebody was certainly there.
+    seen_ms: u64,
+    /// Something crossed the wait for the first character.
+    onset_lost: bool,
+    /// Something crossed the typing.
+    capture_lost: bool,
+}
+
+impl Measuring {
+    /// A key arrived, so somebody is here — and was, unless they were away.
+    fn seen(&mut self, now: u64) {
+        self.silent(now);
+        self.seen_ms = now;
+    }
+
+    /// A wait ended with nothing typed. Long enough is away.
+    ///
+    /// The moment is deliberately not taken as presence: a revealed field's
+    /// conceal wakes the loop at half this span, and counting that as
+    /// attendance would push the ceiling past every wake that precedes it.
+    fn silent(&mut self, now: u64) {
+        if now.saturating_sub(self.seen_ms) >= AWAY_MS {
+            self.away();
+        }
+    }
+
+    /// Nobody is certainly in front of the prompt. Void whichever span is
+    /// under way; the other one already closed or has not opened.
+    fn away(&mut self) {
+        if self.onset_ms.is_none() {
+            self.onset_lost = true;
+        } else {
+            self.capture_lost = true;
+        }
+    }
+
+    /// The first character of a retrieval.
+    fn began(&mut self, now: u64) {
+        if self.onset_ms.is_none() {
+            self.onset_ms = Some(now);
+        }
+    }
+
+    /// The field is empty again, so the retrieval is abandoned and begun
+    /// afresh. Everything before it goes, contamination included.
+    fn restart(&mut self) {
+        *self = Self {
+            seen_ms: self.seen_ms,
+            ..Self::default()
+        };
+    }
+
+    /// The retrieval and the typing, each absent if nothing stands behind it.
+    fn read(&self, now: u64) -> (Option<u64>, Option<u64>) {
+        (
+            self.onset_ms.filter(|_| !self.onset_lost),
+            self.onset_ms
+                .filter(|_| !self.capture_lost)
+                .map(|began| now.saturating_sub(began)),
+        )
+    }
 }
 
 /// Why the card is being redrawn mid-entry.
@@ -646,14 +758,25 @@ pub fn read_secret(
     // Never sticky: every prompt, every follow-up and each half of a double entry
     // starts concealed, because this is a local and not a setting.
     let mut revealed = false;
-    let mut ttfk: Option<u64> = None;
+    let mut measuring = Measuring::default();
     let mut corrections = 0u32;
     let mut accepted = 0u32;
     let mut refused = 0u32;
     let mut standing = Refusal::None;
     console.arm();
     loop {
-        let did = match console.wait(revealed.then_some(CONCEAL))? {
+        // Focus is the precise signal that nobody is there and a silence is the
+        // fallback, so the wait always carries a ceiling — the conceal's, while
+        // one is owed, because it is the nearer of the two.
+        let deadline = if revealed { CONCEAL.min(AWAY) } else { AWAY };
+        let wake = console.wait(Some(deadline))?;
+        let now = console.elapsed_ms();
+        match &wake {
+            Wake::Blur => measuring.away(),
+            Wake::Idle => measuring.silent(now),
+            Wake::Key(_) | Wake::Ended => measuring.seen(now),
+        }
+        let did = match wake {
             // A revealed field goes back the moment nobody is certainly in
             // front of it, and the moment nobody is certainly still typing.
             Wake::Blur | Wake::Idle if revealed => {
@@ -662,13 +785,12 @@ pub fn read_secret(
             }
             Wake::Blur | Wake::Idle => Did::Nothing,
             Wake::Key(Key::Enter) => {
-                let elapsed = console.elapsed_ms();
-                let total = ttfk.map(|start| elapsed.saturating_sub(start));
+                let (ttfk_ms, capture_ms) = measuring.read(now);
                 return Ok(Typed::Submitted(Entry {
                     secret,
                     timings: Timings {
-                        ttfk_ms: ttfk,
-                        total_ms: total,
+                        ttfk_ms,
+                        capture_ms,
                         corrections,
                         paste_accepted: accepted,
                         paste_refused: refused,
@@ -683,10 +805,10 @@ pub fn read_secret(
             // password prompt in the world does with it.
             Wake::Key(Key::EndOfInput) if cold || secret.is_empty() => return Ok(Typed::Aborted),
             Wake::Key(key) => {
-                if matches!(key, Key::Char(_)) && ttfk.is_none() {
-                    ttfk = Some(console.elapsed_ms());
+                if matches!(key, Key::Char(_)) {
+                    measuring.began(now);
                 }
-                Editing {
+                let did = Editing {
                     secret: &mut secret,
                     caret: &mut caret,
                     corrections: &mut corrections,
@@ -695,7 +817,14 @@ pub fn read_secret(
                     revealed: &mut revealed,
                     cold,
                 }
-                .apply(key)
+                .apply(key);
+                // A field erased back to empty is a retrieval given up on. The
+                // one that follows is a second retrieval and is measured as
+                // one; a partial removal is a correction inside the first.
+                if did == Did::Typed && secret.is_empty() {
+                    measuring.restart();
+                }
+                did
             }
         };
 
@@ -959,19 +1088,24 @@ mod tests {
     use relic_core::style::Style;
 
     use super::{
-        Ask, Card, Field, Input, Key, Refusal, Reveal, Screen, Typed, Wake, ask, read_secret,
-        render_field, scratch,
+        AWAY_MS, Ask, Card, Field, Input, Key, Refusal, Reveal, Screen, Timings, Typed, Wake, ask,
+        read_secret, render_field, scratch,
     };
     use crate::secret::{CAPACITY, Pasted, Secret};
+
+    /// How far a scripted wake moves the clock when the script says nothing.
+    const TICK: u64 = 100;
 
     /// A scripted terminal that records every card it is handed.
     ///
     /// The wakes are consumed rather than copied, because one of them carries a
     /// secret and [`Key`] is deliberately neither `Copy` nor `Clone`. An idle
-    /// and a lost focus are scripted the same way a keystroke is, so nothing
-    /// here needs a clock.
+    /// and a lost focus are scripted the same way a keystroke is. Each carries
+    /// the moment it arrives at, because the rules about who was in front of
+    /// the prompt are rules about when.
     struct Fake {
-        wakes: std::vec::IntoIter<Wake>,
+        wakes: std::vec::IntoIter<(Wake, u64)>,
+        now: u64,
         frames: Vec<Vec<String>>,
         flashes: usize,
         drains: usize,
@@ -980,8 +1114,22 @@ mod tests {
 
     impl Fake {
         fn new(wakes: Vec<Wake>) -> Self {
+            Self::timed(
+                wakes
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, wake)| {
+                        let step = u64::try_from(index).unwrap_or(0).saturating_add(1);
+                        (wake, TICK.saturating_mul(step))
+                    })
+                    .collect(),
+            )
+        }
+
+        fn timed(wakes: Vec<(Wake, u64)>) -> Self {
             Self {
                 wakes: wakes.into_iter(),
+                now: 0,
                 frames: Vec::new(),
                 flashes: 0,
                 drains: 0,
@@ -991,14 +1139,22 @@ mod tests {
     }
 
     impl Input for Fake {
-        fn arm(&mut self) {}
+        fn arm(&mut self) {
+            self.now = 0;
+        }
 
         fn wait(&mut self, _within: Option<Duration>) -> anyhow::Result<Wake> {
-            Ok(self.wakes.next().unwrap_or(Wake::Ended))
+            match self.wakes.next() {
+                Some((wake, at)) => {
+                    self.now = at;
+                    Ok(wake)
+                }
+                None => Ok(Wake::Ended),
+            }
         }
 
         fn elapsed_ms(&self) -> u64 {
-            0
+            self.now
         }
     }
 
@@ -1058,7 +1214,15 @@ mod tests {
 
     /// Read one secret from a scripted terminal under one policy.
     fn read(wakes: Vec<Wake>, cold: bool) -> (Typed, Vec<Seen>, usize) {
-        let mut console = Fake::new(wakes);
+        drive(Fake::new(wakes), cold)
+    }
+
+    /// The same, over a script that says when each wake arrives.
+    fn read_at(wakes: Vec<(Wake, u64)>, cold: bool) -> Timings {
+        submitted(drive(Fake::timed(wakes), cold).0).forget()
+    }
+
+    fn drive(mut console: Fake, cold: bool) -> (Typed, Vec<Seen>, usize) {
         let mut seen = Vec::new();
         let typed = read_secret(
             &mut console,
@@ -1481,6 +1645,156 @@ mod tests {
         assert_eq!(timings.corrections, 4);
     }
 
+    /// One character typed at `at`, submitted at `then`.
+    fn one_word(at: u64, then: u64) -> Vec<(Wake, u64)> {
+        vec![
+            (Wake::Key(Key::Char('a')), at),
+            (Wake::Key(Key::Enter), then),
+        ]
+    }
+
+    #[test]
+    fn a_capture_measures_the_retrieval_and_then_the_typing() {
+        let timings = read_at(one_word(2_100, 13_500), true);
+        assert_eq!(timings.ttfk_ms, Some(2_100), "the prompt to the first key");
+        assert_eq!(
+            timings.capture_ms,
+            Some(11_400),
+            "the first key to the submission"
+        );
+    }
+
+    #[test]
+    fn a_blur_before_the_first_key_costs_the_retrieval_and_leaves_the_typing() {
+        let mut script = vec![(Wake::Blur, 500)];
+        script.extend(one_word(9_000, 20_400));
+        let timings = read_at(script, true);
+        assert_eq!(
+            timings.ttfk_ms, None,
+            "nobody was certainly there to be recalling"
+        );
+        assert_eq!(
+            timings.capture_ms,
+            Some(11_400),
+            "and the typing that followed is still a reading"
+        );
+    }
+
+    #[test]
+    fn a_blur_after_the_first_key_costs_the_typing_and_leaves_the_retrieval() {
+        let script = vec![
+            (Wake::Key(Key::Char('a')), 2_100),
+            (Wake::Blur, 4_000),
+            (Wake::Key(Key::Enter), 60_000),
+        ];
+        let timings = read_at(script, true);
+        assert_eq!(timings.ttfk_ms, Some(2_100), "that span was watched");
+        assert_eq!(timings.capture_ms, None);
+    }
+
+    #[test]
+    fn a_silence_long_enough_reads_as_a_blur_in_either_span() {
+        // The fallback for a terminal that reports no focus at all, and it has
+        // to land on the same span the blur would have.
+        let before = read_at(one_word(AWAY_MS, AWAY_MS + 11_400), true);
+        assert_eq!(before.ttfk_ms, None);
+        assert_eq!(before.capture_ms, Some(11_400));
+
+        let after = read_at(
+            vec![
+                (Wake::Key(Key::Char('a')), 2_100),
+                (Wake::Key(Key::Enter), 2_100 + AWAY_MS),
+            ],
+            true,
+        );
+        assert_eq!(after.ttfk_ms, Some(2_100));
+        assert_eq!(after.capture_ms, None);
+    }
+
+    #[test]
+    fn an_idle_short_of_the_ceiling_leaves_both_spans_standing() {
+        let script = vec![
+            (Wake::Idle, AWAY_MS - 1),
+            (Wake::Key(Key::Char('a')), AWAY_MS - 1),
+            (Wake::Key(Key::Enter), AWAY_MS + 10_000),
+        ];
+        let timings = read_at(script, true);
+        assert_eq!(timings.ttfk_ms, Some(AWAY_MS - 1));
+        assert_eq!(timings.capture_ms, Some(10_001));
+    }
+
+    #[test]
+    fn a_conceal_wake_does_not_count_as_somebody_being_there() {
+        // A revealed field wakes the loop at half the ceiling. Taking that for
+        // attendance would push the ceiling out past every wake before it.
+        let script = vec![
+            (Wake::Key(Key::Reveal), 100),
+            (Wake::Idle, 30_000),
+            (Wake::Idle, 59_000),
+            (Wake::Idle, 61_000),
+            (Wake::Key(Key::Char('a')), 61_500),
+            (Wake::Key(Key::Enter), 70_000),
+        ];
+        let timings = read_at(script, false);
+        assert_eq!(timings.ttfk_ms, None, "the silence ran past the ceiling");
+        assert_eq!(timings.capture_ms, Some(8_500));
+    }
+
+    #[test]
+    fn a_field_erased_back_to_empty_begins_the_retrieval_again() {
+        let script = vec![
+            (Wake::Key(Key::Char('a')), 1_000),
+            (Wake::Key(Key::Char('b')), 1_200),
+            (Wake::Key(Key::DeleteLeft), 4_000),
+            (Wake::Key(Key::DeleteLeft), 4_200),
+            (Wake::Key(Key::Char('c')), 9_000),
+            (Wake::Key(Key::Enter), 20_400),
+        ];
+        let timings = read_at(script, true);
+        assert_eq!(
+            timings.ttfk_ms,
+            Some(9_000),
+            "the retrieval that was submitted is the one that counts"
+        );
+        assert_eq!(timings.capture_ms, Some(11_400));
+    }
+
+    #[test]
+    fn a_partial_removal_is_a_correction_inside_one_retrieval() {
+        let script = vec![
+            (Wake::Key(Key::Char('a')), 2_100),
+            (Wake::Key(Key::Char('b')), 2_300),
+            (Wake::Key(Key::DeleteLeft), 4_000),
+            (Wake::Key(Key::Char('c')), 4_500),
+            (Wake::Key(Key::Enter), 13_500),
+        ];
+        let timings = read_at(script, true);
+        assert_eq!(
+            timings.ttfk_ms,
+            Some(2_100),
+            "the retrieval never restarted"
+        );
+        assert_eq!(timings.capture_ms, Some(11_400));
+    }
+
+    #[test]
+    fn a_restart_discards_what_crossed_the_retrieval_it_gave_up_on() {
+        let script = vec![
+            (Wake::Key(Key::Char('a')), 1_000),
+            (Wake::Blur, 2_000),
+            (Wake::Key(Key::KillToStart), 30_000),
+            (Wake::Key(Key::Char('c')), 30_500),
+            (Wake::Key(Key::Enter), 41_900),
+        ];
+        let timings = read_at(script, true);
+        assert_eq!(timings.ttfk_ms, Some(30_500));
+        assert_eq!(
+            timings.capture_ms,
+            Some(11_400),
+            "the away-span belonged to a retrieval nobody submitted"
+        );
+    }
+
     #[test]
     fn navigation_and_a_reveal_start_no_stopwatch() {
         let script = keys(vec![
@@ -1496,7 +1810,7 @@ mod tests {
             timings.ttfk_ms, None,
             "looking at a field is not typing into one"
         );
-        assert_eq!(timings.total_ms, None);
+        assert_eq!(timings.capture_ms, None);
         assert_eq!(timings.corrections, 0);
     }
 
@@ -1553,7 +1867,7 @@ mod tests {
             timings.ttfk_ms, None,
             "an entry with no keystroke in it claims no latency"
         );
-        assert_eq!(timings.total_ms, None);
+        assert_eq!(timings.capture_ms, None);
         assert_eq!(timings.corrections, 0);
     }
 

@@ -14,7 +14,7 @@ use rote::sitting::Outturn;
 use rote::sitting::screen::{Frame, Kind, Note, Row, RowState, card};
 use rote::slug::Slug;
 use rote::tui::card::{Field, Reveal, Tone};
-use rote::tui::{Ask, Refusal, ask_card};
+use rote::tui::{Ask, Measured, Refusal, ask_card};
 
 fn drill(slug: Slug, occasion: Occasion, aided: bool, state: RowState) -> Row {
     Row {
@@ -166,6 +166,14 @@ fn a_revealed_field_shows_the_characters_and_says_how_to_put_them_back() {
 }
 
 /// One drill, as the closing card saw it.
+/// A pair of spans, the way one capture hands them over.
+fn reading(ttfk_ms: Option<u64>, capture_ms: Option<u64>) -> Measured {
+    Measured {
+        ttfk_ms,
+        capture_ms,
+    }
+}
+
 fn drilled(outcome: Outcome, recovered: bool, aided: bool) -> Drilled {
     Drilled {
         engram: EngramId::mint().unwrap_or_else(|_| unreachable!("randomness")),
@@ -212,7 +220,7 @@ fn a_drill_recovered_in_a_follow_up_says_what_was_recorded() {
         Occasion::Review,
         true,
         RowState::Passed {
-            ttfk_ms: Some(900),
+            measured: reading(Some(900), Some(11_400)),
             recovered: true,
         },
     )];
@@ -228,7 +236,7 @@ fn a_dormant_row_is_named_on_the_way_out_with_the_verb_that_puts_it_back() {
             Occasion::Review,
             false,
             RowState::Passed {
-                ttfk_ms: Some(900),
+                measured: reading(Some(900), Some(11_400)),
                 recovered: false,
             },
         ),
@@ -247,11 +255,11 @@ fn the_widest_sitting_the_binary_can_produce_still_fits_the_box() {
     let long = "a".repeat(rote::slug::MAX);
     let states = [
         RowState::Passed {
-            ttfk_ms: Some(3_000),
+            measured: reading(Some(3_000), Some(600_000)),
             recovered: false,
         },
         RowState::Passed {
-            ttfk_ms: Some(3_000),
+            measured: reading(Some(3_000), Some(600_000)),
             recovered: true,
         },
         RowState::Failed { follow_ups: 300 },

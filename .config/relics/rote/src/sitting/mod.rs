@@ -28,7 +28,7 @@ use crate::ladder::{Ladder, Occasion, Standing};
 use crate::secret::Secret;
 use crate::slug::Slug;
 use crate::tui::{
-    Card, Console, Typed,
+    Card, Console, Measured, Typed,
     card::{Field, Tone},
     read_secret,
 };
@@ -375,12 +375,12 @@ impl Session<'_> {
             }
         };
         let outcome = self.judge(index, drilling, &entry.secret, None, false)?;
-        let ttfk_ms = entry.forget().ttfk_ms;
+        let measured = entry.forget().measured();
         if outcome == Outcome::Pass {
             self.set(
                 index,
                 screen::RowState::Passed {
-                    ttfk_ms,
+                    measured,
                     recovered: false,
                 },
             );
@@ -389,7 +389,7 @@ impl Session<'_> {
                 Drilled {
                     engram,
                     outcome,
-                    ttfk_ms,
+                    ttfk_ms: measured.ttfk_ms,
                     follow_ups: 0,
                     recovered: false,
                     aided: false,
@@ -397,7 +397,7 @@ impl Session<'_> {
             )?;
             return Ok(false);
         }
-        self.tail(index, engram, drilling, ttfk_ms)
+        self.tail(index, engram, drilling, measured)
     }
 
     /// Follow-ups after a cold fail, until one passes or the person leaves.
@@ -406,7 +406,7 @@ impl Session<'_> {
         index: usize,
         engram: EngramId,
         drilling: &Drilling,
-        ttfk_ms: Option<u64>,
+        measured: Measured,
     ) -> Result<bool> {
         let mut tail = Tail::default();
         // The cold fail is the first refusal; a later one is a follow-up's.
@@ -439,11 +439,11 @@ impl Session<'_> {
                         self.set(
                             index,
                             screen::RowState::Passed {
-                                ttfk_ms,
+                                measured,
                                 recovered: true,
                             },
                         );
-                        self.keep(index, tail.drilled(engram, ttfk_ms, true))?;
+                        self.keep(index, tail.drilled(engram, measured.ttfk_ms, true))?;
                         return Ok(false);
                     }
                     self.set(
@@ -461,7 +461,7 @@ impl Session<'_> {
                             follow_ups: tail.follow_ups,
                         },
                     );
-                    self.keep(index, tail.drilled(engram, ttfk_ms, false))?;
+                    self.keep(index, tail.drilled(engram, measured.ttfk_ms, false))?;
                     return Ok(false);
                 }
                 Typed::Aborted => {
@@ -471,7 +471,7 @@ impl Session<'_> {
                             follow_ups: tail.follow_ups,
                         },
                     );
-                    self.keep(index, tail.drilled(engram, ttfk_ms, false))?;
+                    self.keep(index, tail.drilled(engram, measured.ttfk_ms, false))?;
                     self.outturn.aborted = true;
                     return Ok(true);
                 }
@@ -606,7 +606,7 @@ mod tests {
     use crate::corpus::record::{Drilled, EngramId, Outcome};
     use crate::ladder::Occasion;
     use crate::secret::Secret;
-    use crate::tui::{Card, Input, Key, Screen};
+    use crate::tui::{Card, Input, Key, Measured, Screen};
     use crate::verifier::Verifier;
 
     const PHC: &str = "$argon2id$v=19$m=64,t=1,p=1$CQkJCQkJCQkJCQkJCQkJCQ$\
@@ -780,7 +780,10 @@ mod tests {
         assert_eq!(
             ran.outturn.rows.first().map(|row| row.state),
             Some(screen::RowState::Passed {
-                ttfk_ms: Some(400),
+                measured: Measured {
+                    ttfk_ms: Some(400),
+                    capture_ms: Some(500),
+                },
                 recovered: false,
             })
         );
@@ -814,7 +817,10 @@ mod tests {
         assert_eq!(
             ran.outturn.rows.first().map(|row| row.state),
             Some(screen::RowState::Passed {
-                ttfk_ms: Some(300),
+                measured: Measured {
+                    ttfk_ms: Some(300),
+                    capture_ms: Some(500),
+                },
                 recovered: true,
             })
         );

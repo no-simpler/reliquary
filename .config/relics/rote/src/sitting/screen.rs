@@ -16,6 +16,7 @@ use relic_core::style::{Style, Tint};
 use super::{Landing, Outturn, Task, Turn};
 use crate::ladder::Occasion;
 use crate::slug::Slug;
+use crate::tui::Measured;
 use crate::tui::card::{CONTENT, Card, Field, Piece, Tone, fit_to, join};
 
 /// What points at the engram being asked about.
@@ -52,9 +53,8 @@ pub enum RowState {
     Checking,
     /// Accepted.
     Passed {
-        /// Milliseconds from the prompt appearing to the cold capture's first
-        /// keystroke.
-        ttfk_ms: Option<u64>,
+        /// What the cold capture measured.
+        measured: Measured,
         /// Whether it was a follow-up that passed.
         recovered: bool,
     },
@@ -388,16 +388,16 @@ fn aided(row: &Row) -> bool {
 
 /// What the glyph cannot say on its own.
 ///
-/// A latency is a claim about recall, so only a cold pass publishes one. A
-/// drill recovered in a follow-up carries the latency of the capture that
+/// A reading is a claim about recall, so only a cold pass publishes one. A
+/// drill recovered in a follow-up carries the reading of the capture that
 /// failed, and a figure beside a yellow tick would read as the time it took to
 /// get there.
 fn detail(row: &Row, style: Style) -> Piece {
     match row.state {
         RowState::Passed {
-            ttfk_ms: Some(ms),
+            measured,
             recovered: false,
-        } => Piece::painted(crate::render::seconds(Some(ms)), Tint::Dim, style),
+        } => Piece::painted(crate::render::spans(measured), Tint::Dim, style),
         RowState::Pending
         | RowState::Cold
         | RowState::FollowUp { .. }
@@ -527,7 +527,7 @@ mod tests {
     use jiff::civil::date;
     use relic_core::style::{Style, Tint};
 
-    use super::{Frame, Kind, Note, Row, RowState, SLOTS, card};
+    use super::{Frame, Kind, Measured, Note, Row, RowState, SLOTS, card};
     use crate::corpus::record::{Drilled, EngramId, Outcome};
     use crate::ladder::Occasion;
     use crate::sitting::Outturn;
@@ -562,6 +562,14 @@ mod tests {
 
     /// Every state a row can reach, so the layout is checked against the content
     /// it actually has to hold rather than against a happy one.
+    /// A pair of spans, the way one capture hands them over.
+    fn reading(ttfk_ms: u64, capture_ms: u64) -> Measured {
+        Measured {
+            ttfk_ms: Some(ttfk_ms),
+            capture_ms: Some(capture_ms),
+        }
+    }
+
     fn every_state() -> Vec<RowState> {
         vec![
             RowState::Pending,
@@ -569,11 +577,11 @@ mod tests {
             RowState::FollowUp { count: 12 },
             RowState::Checking,
             RowState::Passed {
-                ttfk_ms: Some(12_345),
+                measured: reading(12_345, 45_678),
                 recovered: false,
             },
             RowState::Passed {
-                ttfk_ms: Some(12_345),
+                measured: reading(12_345, 45_678),
                 recovered: true,
             },
             RowState::Failed { follow_ups: 12 },
@@ -868,7 +876,7 @@ mod tests {
                 Occasion::Review,
                 false,
                 RowState::Passed {
-                    ttfk_ms: Some(1_000),
+                    measured: reading(1_000, 11_400),
                     recovered: false,
                 },
             ),
@@ -946,11 +954,11 @@ mod tests {
     #[test]
     fn a_green_tick_is_only_ever_a_cold_pass() {
         let cold = RowState::Passed {
-            ttfk_ms: Some(1_000),
+            measured: reading(1_000, 11_400),
             recovered: false,
         };
         let recovered = RowState::Passed {
-            ttfk_ms: Some(1_000),
+            measured: reading(1_000, 11_400),
             recovered: true,
         };
         assert_eq!(

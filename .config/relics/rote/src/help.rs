@@ -146,6 +146,11 @@ RECORDS
   follow-ups were typed after a fail, whether one of them passed, and whether
   the drill was aided.
 
+  The card publishes a second figure beside that one, the time from the first
+  keystroke to the submission, and the record keeps none of it. How long a
+  secret takes to type bounds how long it is, and nothing here discloses a
+  length.
+
   Two outcomes: pass and fail. Submitting nothing is a fail. What a follow-up
   did is recorded beside the outcome and changes it in no figure.
 
