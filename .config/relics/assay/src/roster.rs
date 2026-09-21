@@ -29,6 +29,7 @@ pub fn roster() -> Vec<Box<dyn Station>> {
         Box::new(crate::stations::manifest_drift::ManifestDrift::default()),
         Box::new(crate::stations::path::SearchPath::default()),
         Box::new(crate::stations::perf_budgets::PerfBudgets::default()),
+        Box::new(crate::stations::domain::DomainPosture::default()),
         Box::new(crate::stations::registry::RegistryAdapter::default()),
     ]
 }

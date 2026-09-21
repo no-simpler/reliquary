@@ -1,0 +1,22 @@
+# What this machine's domains should still be saying.
+#
+# The station compares these strings to what DNS and the registry return, and
+# reports drift either way. So a deliberate change is made here in the same
+# commit that makes it in the world — the ratchet discipline `shell-lint` and
+# `perf-budgets` already use.
+#
+# Every field but `name` is optional. A domain that sends no mail still has a
+# registration worth watching.
+
+[[domain]]
+name = "deftsly.com"
+mx = ["mail.protonmail.ch.", "mailsec.protonmail.ch."]
+# `-all` rather than `~all`: Proton is the only sender, and the `mx` mechanism
+# that used to sit here authorised inbound servers that never send.
+spf = "v=spf1 include:_spf.protonmail.ch -all"
+# Enforcement moves to `p=reject; sp=reject` once the reports have run 30 days
+# from 2026-09-21. Change it there and here together.
+dmarc = "v=DMARC1; p=quarantine; rua=mailto:dmarc@deftsly.com; fo=1"
+dkim = ["protonmail", "protonmail2", "protonmail3"]
+dnssec = true
+registry_lock = true

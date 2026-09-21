@@ -91,6 +91,7 @@ dependencies = [
  "fs-err",
  "globset",
  "ignore",
+ "jiff",
  "predicates",
  "regex",
  "relic-core",

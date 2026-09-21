@@ -327,6 +327,7 @@ live machine the day it lands. **All seven are built.**
 | `hook-wiring` | **built** |
 | `claude-plugins` | **built** |
 | `permission-rules` | **built** — and it brought the runner's staleness facility |
+| `domain` | **built** — the one check whose subject is entirely off this machine |
 
 ## The `path` station
 
@@ -509,6 +510,58 @@ and only one of them is this machine's fault.
 `attic/` is private under one encrypt pattern; a file in the wrong lane is
 `yadm-coverage`'s R1 and R4, which already run that test in both directions. One fact,
 one owner — the same rule that gave the missing lane to `path`'s lane check.
+
+## The `domain` station
+
+The only station whose subject is not on this machine at all. Every other check
+reads a file, a process or a binary; this one reads DNS and a registry, and that
+difference is the whole reason it exists. **Nothing here rots into a broken build
+or a failed command.** SPF loosens, a selector stops resolving, DNSSEC lapses at
+the registrar, a renewal date passes — and the first symptom is mail that quietly
+stops authenticating, or a domain in an auction. There is no error anyone sees.
+
+One station over registration *and* mail authentication, because both answer one
+question — *is this domain still the one the repo describes* — and splitting them
+would be two stations reading the same two sources about the same subject.
+
+**The expiry alarm must not travel through the domain.** `design/recovery-graph.md`
+in the POSTURE spec states the rule it enforces: on expiry the nameservers move to
+parking, so the notices ICANN requires never arrive, and every account signing in
+with an address on the domain inherits the date. Reading the registry over RDAP is
+what keeps the alarm out of the channel that fails.
+
+| checked | grade |
+| --- | --- |
+| MX is the declared set, order and root dot ignored | `Broken` |
+| Exactly one SPF record, and it is the declared string | `Broken` |
+| The `_dmarc` record is the declared string | `Broken` |
+| Every declared DKIM selector still resolves | `Broken` |
+| A DS record exists where the declaration says the zone is signed | `Broken` |
+| The registry still refuses a transfer | `Broken` |
+| Expiry under 60 days · under 180 days | `Broken` · `Soft` |
+| The registry could not be read, or reported no expiry | `Note` |
+
+Everything is `Broken` on the station contract's own test: each is a guard
+silently disarmed rather than a machine merely degraded. A DKIM selector that
+stops resolving is the sharpest — once DMARC enforces, the domain's own outgoing
+mail starts being refused, and the bounce arrives at the domain that is broken.
+
+| decision | why |
+| --- | --- |
+| `--deep` only | it costs the network, and a `yadm doctor` dream pre-pass must not wait on a registry on another continent |
+| **The repo asserts; the station reports drift** | a station that knew one provider's hostnames would be wrong the day the provider changed them, and would need editing rather than re-measuring. `assay/domains.toml` carries the strings, so a deliberate change is made there in the same commit — the ratchet discipline `shell-lint` and `perf-budgets` already use |
+| Records are compared **verbatim** | a loosened qualifier and an added sender then read the same, and no SPF parser has to be written to notice either. Hostnames are the exception: order and the root dot carry nothing |
+| `dig` is the oracle | `+short` is the machine-readable interface DNS offers — one record per line, no prose, no locale. A resolver written here would be a second implementation of the thing being checked, which is `git-identity`'s argument for `ssh -G` |
+| No declaration, or no `dig` → `Skipped` | a fact, not a fault. `curl` is different: it is bedrock, so its absence is a `Note` about the machine |
+| A registry that cannot be read is a `Note` | what cannot be judged is never a verdict — `brew-health`'s rule. The DNS half still has answers |
+| Only two RDAP fields are read | a station that transcribed the whole object would need editing whenever a registry added a field |
+| Expiry is `div_euclid` on two epoch seconds | no span arithmetic, and no question about what a calendar day means across a zone |
+
+**What it deliberately does not check.** MTA-STS, because it is absent by
+decision rather than by drift: the mail provider publishes DANE TLSA and the zone
+is signed, so a validating sender already refuses a downgraded delivery, and
+MTA-STS would add a web host to maintain for the senders DANE misses. A station
+that reported its absence would be reporting a decision as a defect.
 
 ## The `permission-rules` station
 

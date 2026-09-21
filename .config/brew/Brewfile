@@ -56,6 +56,7 @@ brew "mas"
 # Essential casks, in order of configuration
 cask "1password"
 cask "1password-cli"
+cask "proton-mail"
 cask "ghostty"
 cask "raycast"
 cask "bartender"
