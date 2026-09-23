@@ -99,7 +99,7 @@ struct Expected {
     dnssec: bool,
     /// Whether the registry should still refuse a transfer.
     #[serde(default)]
-    registry_lock: bool,
+    transfer_lock: bool,
 }
 
 /// What the world actually returned.
@@ -377,7 +377,7 @@ impl DomainPosture {
             )))),
         }
 
-        if want.registry_lock && !registration.transfer_locked {
+        if want.transfer_lock && !registration.transfer_locked {
             findings.push(
                 self.id
                     .broken(Summary::lossy(&format!(
@@ -567,7 +567,7 @@ mod tests {
             dmarc: Some("v=DMARC1; p=reject".to_owned()),
             dkim: vec!["one".to_owned(), "two".to_owned()],
             dnssec: true,
-            registry_lock: true,
+            transfer_lock: true,
         }
     }
 
@@ -656,7 +656,7 @@ mod tests {
     fn a_domain_that_declares_no_mail_policy_is_only_a_registration() {
         let want = Expected {
             name: "example.test".to_owned(),
-            registry_lock: true,
+            transfer_lock: true,
             ..Expected::default()
         };
         let got = Observed {

@@ -19,4 +19,4 @@ spf = "v=spf1 include:_spf.protonmail.ch -all"
 dmarc = "v=DMARC1; p=quarantine; rua=mailto:dmarc@deftsly.com; fo=1"
 dkim = ["protonmail", "protonmail2", "protonmail3"]
 dnssec = true
-registry_lock = true
+transfer_lock = true
