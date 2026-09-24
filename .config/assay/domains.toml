@@ -20,3 +20,13 @@ dmarc = "v=DMARC1; p=quarantine; rua=mailto:dmarc@deftsly.com; fo=1"
 dkim = ["protonmail", "protonmail2", "protonmail3"]
 dnssec = true
 transfer_lock = true
+
+[[domain]]
+name = "serpnet.org"
+mx = ["mail.protonmail.ch.", "mailsec.protonmail.ch."]
+spf = "v=spf1 include:_spf.protonmail.ch mx ~all"
+dmarc = "v=DMARC1; p=quarantine"
+dkim = ["protonmail", "protonmail2", "protonmail3"]
+dnssec = true
+transfer_lock = true
+
