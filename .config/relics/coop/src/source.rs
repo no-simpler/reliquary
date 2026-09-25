@@ -231,10 +231,10 @@ fn compile(spec: Spec) -> Result<Source> {
         if spec.summary.trim().is_empty() {
             bail!("a stat source has no other way to say anything, so summary is required");
         }
-        // Every notice is a nag built to be dismissed, and a nag that cannot say
-        // how is furniture the moment it is read.
+        // The empty-inbox habit wants each notice to say how it goes away; one
+        // that cannot tends to sit.
         if spec.fix.trim().is_empty() {
-            bail!("fix is required: a notice nobody can act on does not belong in the coop");
+            bail!("fix is required: coop expects every notice to say what retires it");
         }
     }
     Ok(Source {

@@ -61,8 +61,8 @@ impl Paths {
         self.state_dir.join("badge")
     }
 
-    /// When each outstanding notice was first seen, so `doctor` can tell a nag
-    /// from furniture.
+    /// When each outstanding notice was first seen, so `doctor` can point out
+    /// a likely piece of furniture.
     pub fn first_seen(&self) -> Utf8PathBuf {
         self.state_dir.join("first-seen.json")
     }

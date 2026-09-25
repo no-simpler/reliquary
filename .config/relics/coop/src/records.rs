@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::notice::Notice;
 
-/// How long a notice may stand before it stops being a nag and starts being
-/// furniture.
+/// How long a notice may stand before `doctor` suggests it may be furniture.
 pub const HORIZON_DAYS: i64 = 14;
 
 /// When each outstanding notice was first seen.

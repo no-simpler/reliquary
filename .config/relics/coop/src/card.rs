@@ -51,8 +51,8 @@ impl Glyphs {
 
 /// Draw the card, or nothing at all when there is nothing to say.
 ///
-/// An empty coop draws no box. The intended state of this inbox is empty, and a
-/// box announcing that would be the first piece of furniture in it.
+/// An empty coop draws no box. Empty is the usual state, and a box announcing
+/// it would be noise.
 pub fn draw(notices: &[Notice], width: usize, style: Style, paint: Paint) -> Option<String> {
     if notices.is_empty() {
         return None;

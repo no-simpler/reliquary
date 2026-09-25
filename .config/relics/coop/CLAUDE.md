@@ -39,7 +39,9 @@ span.rs       durations as a declaration writes them
 
 ## Constraints
 
-Things a future edit must not undo.
+Decisions a future edit should keep while their reasons hold. Several serve
+the author's preference for an inbox that is empty most of the time: a
+preference that guides the UX, not a law of the tool.
 
 - **coop holds no answer of its own.** Every source is evaluated afresh before
   every prompt. A producer that needs a cache owns it, because only the
@@ -58,19 +60,19 @@ Things a future edit must not undo.
   `COOP_SEEN`, and the next tick draws only when the digest has moved. Per-shell
   state lives in the shell's environment for exactly as long as the shell does,
   so nothing per shell is written or swept. A nested shell inherits it and does
-  not redraw, which is accepted. Not a preference, and not in `config.toml`: a
-  repeated card stops being read, and fish's `fish_prompt` is a multi-subscriber
+  not redraw, which is accepted. Kept out of `config.toml`: a repeated card
+  tends to stop being read, and fish's `fish_prompt` is a multi-subscriber
   event that promises nothing about repaints.
 - **Every shell hook saves and restores the exit status.** oh-my-posh reads
   `$?` and `$PIPESTATUS` at the top of its own hook, which runs last. This was
   measured, not assumed — and fish, also measured, restores `$status` for
   `fish_prompt` by itself, which is why its twin carries no guard.
-- **A `Note` never reaches the card.** relic-core defines it as read but not
-  graded, which is the opposite of dismissible. It is dropped in
-  `notice::actionable`, not filtered by a configurable floor, because a floor is
-  something somebody eventually lowers.
-- **A stat declaration without a fix is refused at compile time.** The whole
-  admission test for this inbox is that a notice can be got rid of today.
+- **A `Note` stays off the card.** relic-core defines it as read but not
+  graded, which is not something to act on and clear. It is dropped in
+  `notice::actionable` rather than filtered by a configurable floor, because a
+  floor tends to drift downward.
+- **A stat declaration without a fix is refused at compile time.** The
+  empty-inbox preference wants each notice to say how it goes away.
 - **The digest is FNV-1a, hand-rolled.** `DefaultHasher` is not promised stable
   across std releases, and this value is written to disk and into a shell's
   environment: a silent change would re-announce every notice on the machine

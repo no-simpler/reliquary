@@ -57,8 +57,8 @@ fn declaration_findings(broken: &[Broken]) -> Vec<Finding> {
     ]
 }
 
-/// Every notice is a nag built to be dismissed, and one that cannot say how is
-/// furniture the moment it is read.
+/// A notice that cannot say how it goes away tends to sit, which works against
+/// the empty-inbox habit coop is built around.
 fn fixless(gathered: &Gathered) -> Vec<Finding> {
     let mut named: Vec<String> = gathered
         .notices
@@ -177,7 +177,7 @@ fn overdue(ctx: &Ctx, gathered: &Gathered) -> Vec<Finding> {
     ]
 }
 
-/// A notice that will not go away stopped being a nag some time ago.
+/// A notice that has stood past the horizon may have stopped being a nag.
 fn furniture(ctx: &Ctx, gathered: &Gathered) -> Vec<Finding> {
     let record = FirstSeen::load(&ctx.paths.first_seen());
     let overstayed = record.overstayed(&gathered.notices, ctx.now);
@@ -191,7 +191,7 @@ fn furniture(ctx: &Ctx, gathered: &Gathered) -> Vec<Finding> {
     vec![
         station()
             .soft(summary(
-                "a notice has outstayed the horizon and reads as furniture",
+                "a notice has stood past the horizon and may be furniture",
             ))
             .detailed_with(Detail::new(detail.join("\n")))
             .fixed_by(FixHint::lossy(&format!(

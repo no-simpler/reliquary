@@ -56,9 +56,9 @@ pub fn digest(notices: &[Notice]) -> String {
 /// Notices worth drawing, in a stable order.
 ///
 /// [`Severity::Note`] is dropped rather than filtered by a configurable floor.
-/// relic-core defines a note as "read it, do not grade on it", which is the
-/// opposite of a thing you can act on and be rid of — and an inbox that accepts
-/// what cannot be dismissed fills up with furniture.
+/// relic-core defines a note as "read it, do not grade on it", which is not a
+/// thing you can act on and be rid of, and an inbox kept empty by habit is the
+/// wrong home for it.
 pub fn actionable(mut notices: Vec<Notice>) -> Vec<Notice> {
     notices.retain(|notice| notice.finding.severity != Severity::Note);
     notices.sort_by(|left, right| {

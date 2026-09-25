@@ -4,41 +4,40 @@
 pub const TOPICS: &[(&str, &str)] = &[("sources", SOURCES), ("cadence", CADENCE)];
 
 const INTRO: &str = "\
-coop is an inbox for nags, and its intended state is empty.
-
-Every notice in it is something you can be rid of today, by doing one thing.
-That is the whole admission test, and it is what keeps a card worth reading
-after the first week.
+coop is an inbox for nags. Its author keeps inboxes empty: a nag is read,
+acted on, and gone. The design leans on that habit, so most of the time
+there is nothing here.
 ";
 
 const SOURCES: &str = "\
 sources
 
-  A producer declares a condition. It does not send a notification, and it
-  never retracts one — which is the point. A thing that has to remember to
-  retract eventually forgets, and then the coop holds a notice about a problem
-  that was fixed a month ago.
+  A producer declares a condition rather than sending a notification, so a
+  notice retires itself when the condition stops holding. That spares the
+  producer the step most easily forgotten: retracting, which otherwise
+  leaves a notice about something fixed a month ago.
 
-  So a notice retires itself. The one for up is a predicate over the timestamp
-  up already writes, which means running up is the dismissal. Neither producer
-  migrated into coop needed a line of code written for it.
+  The notice for up is a predicate over the timestamp up already writes,
+  which means running up is the dismissal. Neither producer migrated into coop
+  needed a line of code written for it.
 
   coop holds no answer of its own. It evaluates every source afresh before
   every prompt; a producer that needs a cache owns it, because only the
   producer knows when its truth changes.
 
-  Two rules decide whether something belongs here.
+  Two defaults follow from the empty-inbox habit.
 
-  It must be actionable. A source states what retires it, and coop refuses a
-  stat declaration without one. A notice nobody can act on is furniture, and
-  furniture is what stops a card being read.
+  Actionable. A source says what retires it, and coop asks every stat
+  declaration for a fix. A notice nobody can act on tends to sit, and a card
+  of sitting notices tends to stop being read.
 
-  It must be transient. A note in relic-core's vocabulary is read but not
-  graded, which is the opposite of actionable, so notes never reach the card at
-  all. Standing status belongs in the prompt, or in assay, or nowhere.
+  Transient. A note in relic-core's vocabulary is read but not graded, so
+  the card leaves notes out. Standing status usually fits the prompt or
+  assay better.
 
-  doctor enforces both after the fact: a notice still standing after a
-  fortnight is reported as furniture, whoever declared it.
+  doctor nudges after the fact: a notice standing past a fortnight is
+  reported as likely furniture, a prompt to act on it or reconsider the
+  source.
 ";
 
 const CADENCE: &str = "\
@@ -47,15 +46,14 @@ cadence
   The card is edge-triggered. It is drawn on the first prompt of a shell, and
   after that only when the outstanding set actually changes.
 
-  Drawing it before every prompt was the obvious design and the wrong one. A
-  card that repeats stops being read within a day, which costs exactly the
-  thing it was for. It is also unsound in fish, where the prompt event is
-  multi-subscriber and promises nothing about repaints: a window resize would
-  redraw the card.
+  A card drawn before every prompt tends to stop being read within a day,
+  which costs exactly the thing it is for. It is also unsound in fish, where
+  the prompt event is multi-subscriber and promises nothing about repaints:
+  a window resize would redraw the card.
 
   What is level-triggered instead is the badge, a count in the prompt itself.
   It is there for as long as anything is outstanding and gone the moment
-  nothing is, which is the 99% case.
+  nothing is, which is the usual case.
 
   Per-shell rather than per-machine, so a second terminal shows the card too.
   Neither repeats it.

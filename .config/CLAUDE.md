@@ -329,9 +329,9 @@ One inbox for every "something wants your attention" a shell used to print on it
 (`~/.config/relics/coop/`, Rust). It replaced three independent startup banners whose staleness
 policy lived in three different places, one of them copy-pasted into both shell languages.
 
-**Producers declare a condition; coop evaluates it.** Nothing sends a notification and nothing
-retracts one — a thing that has to remember to retract eventually forgets. So a notice retires
-itself: `up`'s is a predicate over the timestamp `up` already writes, which makes running `up` the
+**Producers declare a condition; coop evaluates it.** A producer declares rather than sends and
+retracts, so retirement cannot be forgotten: a notice retires itself when its condition stops
+holding — `up`'s is a predicate over the timestamp `up` already writes, which makes running `up` the
 dismissal. Neither migrated producer needed code written for it, and `up` still has none.
 
 Declarations are drop-in files at `~/.config/coop/sources.d/*.toml`, tracked, so they travel; a
@@ -357,11 +357,10 @@ Those hooks now save and restore the exit status, which `_ske_window` did not: o
 `$?` at the top of its own hook, so an unguarded predecessor made every prompt render as a success.
 fish needs no guard, which is measured rather than assumed.
 
-**Empty is the intended state.** Every notice is a nag built to be dismissed today, so a `Note`
-severity never reaches the card and a stat declaration without a fix is refused outright. `coop
-doctor` reports a notice still standing after a fortnight as furniture, whoever declared it — the
-inbox polices its own emptiness. There is no explicit dismissal; identity, content digest and
-first-seen are plumbed for one.
+**Empty is the author's preferred state**, and the UX is built around that habit rather than
+enforcing it as a law. Defaults serve it: a `Note` stays off the card, a stat declaration must
+name a fix, and `coop doctor` nudges about a notice standing past a fortnight as likely furniture.
+There is no explicit dismissal; identity, content digest and first-seen are plumbed for one.
 
 **The binary is the single source of truth for its own surface** — reference in `coop --help` and
 `coop help`, doctrine in `coop guide`. Do not restate either here; the relic's `CLAUDE.md` carries
