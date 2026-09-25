@@ -220,7 +220,7 @@ update_rust() {
     net_timeout 600 rustup update
 }
 
-# Run `cargo install-update -a`, capturing a transcript (for network-vs-real
+# Run `cargo install-update -a --locked`, capturing a transcript (for network-vs-real
 # classification) and cargo's true exit code in <rc_file>.
 #
 # When attached to a real terminal we run it under a pseudo-tty via script(1)
@@ -230,10 +230,13 @@ update_rust() {
 # safety net, if script(1) leaves an empty transcript (it failed to set up the
 # pty and thus never ran cargo) we fall back to the pipe so the update still
 # happens.
+#
+# --locked builds each crate against the Cargo.lock it shipped, as upstream
+# tested it. Some crates (cargo-nextest) refuse to build without it.
 #   run_cargo_update <transcript_file> <rc_file>
 run_cargo_update() {
     local log="$1" rcf="$2"
-    local inner='cargo install-update -a; echo $? > "'"$rcf"'"'
+    local inner='cargo install-update -a --locked; echo $? > "'"$rcf"'"'
     if [ -t 1 ] && [ -t 0 ] && command -v script &>/dev/null; then
         case "$OSTYPE" in
             darwin* | *bsd*) net_timeout 2400 script -q "$log" /bin/bash -c "$inner" ;;
@@ -241,7 +244,7 @@ run_cargo_update() {
         esac
         [ -s "$log" ] && return 0 # pty worked; rc already stashed by $inner
     fi
-    net_timeout 2400 cargo install-update -a 2>&1 | tee "$log"
+    net_timeout 2400 cargo install-update -a --locked 2>&1 | tee "$log"
     echo "${PIPESTATUS[0]}" >"$rcf"
 }
 

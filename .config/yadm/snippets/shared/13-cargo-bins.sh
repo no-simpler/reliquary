@@ -29,7 +29,7 @@ else
             print_info -ad "$crate already installed"
         else
             print_bold -ad "Installing $crate..."
-            cargo binstall --no-confirm "$crate" 2>/dev/null || cargo install "$crate"
+            cargo binstall --no-confirm --locked "$crate" 2>/dev/null || cargo install --locked "$crate"
         fi
     done <"$CRATES_FILE"
 fi

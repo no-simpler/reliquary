@@ -1,6 +1,7 @@
 # Cargo-installed binaries.
 # Restored at bootstrap by ~/.config/yadm/snippets/shared/13-cargo-bins.sh
-# (via cargo-binstall) and kept current by `up` (cargo install-update -a).
+# (via cargo-binstall) and kept current by `up` (cargo install-update -a --locked).
+# Source builds always pass --locked: some crates (cargo-nextest) refuse otherwise.
 # One crate per line; `#` comments and blank lines ignored.
 #
 # Every entry carries the caller that invokes it. An installed tool nobody
@@ -21,7 +22,7 @@ cargo-machete         # unused dependencies — the one hygiene gate cargo-deny 
 
 # Machinery.
 cargo-binstall        # how 13-cargo-bins.sh installs this list without compiling it
-cargo-update          # `up`'s `cargo install-update -a`
+cargo-update          # `up`'s `cargo install-update -a --locked`
 cargo-sweep           # `up`'s build-cache step, and what holds target/ under its ceiling
 
 # Occasional, by hand.

@@ -58,7 +58,7 @@ struct Lane {
 const CARGO: Lane = Lane {
     name: "cargo",
     manifest: ".config/cargo/crates.txt",
-    install: "cargo binstall <name>, or cargo install <name>",
+    install: "cargo binstall --locked <name>, or cargo install --locked <name>",
 };
 
 /// The npm lane.
